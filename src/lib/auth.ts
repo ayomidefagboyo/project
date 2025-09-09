@@ -56,7 +56,10 @@ class AuthService {
   // Company owner signup - creates outlet and owner account
   async signUpOwner(credentials: OwnerSignupCredentials): Promise<AuthResponse> {
     try {
-      console.log('Starting owner signup with credentials:', { ...credentials, password: '[HIDDEN]' });
+      // Safe logging - no sensitive data
+      if (import.meta.env.VITE_DEBUG === 'true') {
+        console.log('Starting owner signup process');
+      }
       
       // Create auth user
       const { data, error } = await supabase.auth.signUp({
