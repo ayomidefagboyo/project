@@ -166,7 +166,7 @@ const Dashboard: React.FC = () => {
               Dashboard
             </h1>
             <p className="text-sm sm:text-base text-gray-600 dark:text-gray-300">
-              {isBusinessOwner ? 'Business overview across outlets' : 'Welcome back to Compass'}
+              {isBusinessOwner ? 'Business overview across outlets' : 'Welcome back to Compazz'}
             </p>
           </div>
           <div className="flex-shrink-0">

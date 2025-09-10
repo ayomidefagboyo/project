@@ -61,7 +61,7 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, onSwitchToSignup }) =>
             <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">C</span>
           </div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900 dark:text-white">
-            Sign in to Compass
+            Sign in to Compazz
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">
             Access your business management platform

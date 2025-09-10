@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: compass-backend
+    name: compazz-backend
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt

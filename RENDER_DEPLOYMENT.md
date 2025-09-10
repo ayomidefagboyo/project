@@ -1,4 +1,4 @@
-# 🚀 Render Deployment Guide - Compass Backend
+# 🚀 Render Deployment Guide - Compazz Backend
 
 ## 📋 **Pre-Deployment Checklist**
 
@@ -23,7 +23,7 @@
    - Select your repository: `ayomidefagboyo/project`
 
 2. **Configure Service:**
-   - **Name:** `compass-backend`
+   - **Name:** `compazz-backend`
    - **Root Directory:** `backend`
    - **Runtime:** `Python 3`
    - **Build Command:** `pip install -r requirements.txt`
@@ -48,12 +48,12 @@ PYTHON_VERSION=3.11
 ### **Step 5: Get Your Backend URL**
 After deployment, you'll get a URL like:
 ```
-https://compass-backend-xxxx.onrender.com
+https://compazz-backend-xxxx.onrender.com
 ```
 
 Your API endpoints will be at:
 ```
-https://compass-backend-xxxx.onrender.com/api/v1
+https://compazz-backend-xxxx.onrender.com/api/v1
 ```
 
 ## 🔧 **Update Frontend with Backend URL**
@@ -64,7 +64,7 @@ https://compass-backend-xxxx.onrender.com/api/v1
 3. Go to Settings → Environment Variables
 4. Update `VITE_API_BASE_URL` to your Render URL:
    ```
-   VITE_API_BASE_URL=https://compass-backend-xxxx.onrender.com/api/v1
+   VITE_API_BASE_URL=https://compazz-backend-xxxx.onrender.com/api/v1
    ```
 
 ### **Step 2: Redeploy Frontend**
@@ -151,7 +151,7 @@ https://compass-backend-xxxx.onrender.com/api/v1
 
 ## 🎉 **You're All Set!**
 
-Your Compass Finance Management system is now fully deployed:
+Your Compazz Finance Management system is now fully deployed:
 - **Frontend:** Vercel
 - **Backend:** Render
 - **Database:** Supabase

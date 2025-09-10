@@ -88,7 +88,7 @@ class EmailService {
     expiresIn?: string;
   }): Promise<{ success: boolean; error?: string }> {
     const template: EmailTemplate = {
-      subject: `You're invited to join ${outletName} on Compass`,
+      subject: `You're invited to join ${outletName} on Compazz`,
       htmlContent: `
         <!DOCTYPE html>
         <html>
@@ -111,13 +111,13 @@ class EmailService {
           <div class="container">
             <div class="header">
               <h1>🎉 You're Invited!</h1>
-              <p>Join your team on Compass</p>
+              <p>Join your team on Compazz</p>
             </div>
             <div class="content">
               <h2>Hello {{name}}!</h2>
               <p><strong>{{inviterName}}</strong> has invited you to join <strong>{{outletName}}</strong> as a <span class="role-badge">{{role}}</span>.</p>
               
-              <p>Compass is a powerful business management platform that helps teams:</p>
+              <p>Compazz is a powerful business management platform that helps teams:</p>
               <ul>
                 <li>📊 Track sales and revenue</li>
                 <li>📈 Generate reports and analytics</li>
@@ -150,7 +150,7 @@ class EmailService {
         
         {{inviterName}} has invited you to join {{outletName}} as a {{role}}.
         
-        Compass is a powerful business management platform that helps teams track sales, generate reports, manage team members, handle expenses and invoices, and manage multiple outlets.
+        Compazz is a powerful business management platform that helps teams track sales, generate reports, manage team members, handle expenses and invoices, and manage multiple outlets.
         
         To accept this invitation, click the link below:
         {{invitationLink}}
@@ -193,7 +193,7 @@ class EmailService {
     expiresIn?: string;
   }): Promise<{ success: boolean; error?: string }> {
     const template: EmailTemplate = {
-      subject: 'Reset your Compass password',
+      subject: 'Reset your Compazz password',
       htmlContent: `
         <!DOCTYPE html>
         <html>
@@ -217,7 +217,7 @@ class EmailService {
             </div>
             <div class="content">
               <h2>Hello {{name}}!</h2>
-              <p>We received a request to reset your password for your Compass account.</p>
+              <p>We received a request to reset your password for your Compazz account.</p>
               
               <div style="text-align: center;">
                 <a href="{{resetLink}}" class="button">Reset Password</a>
@@ -240,7 +240,7 @@ class EmailService {
       textContent: `
         Hello {{name}}!
         
-        We received a request to reset your password for your Compass account.
+        We received a request to reset your password for your Compazz account.
         
         To reset your password, click the link below:
         {{resetLink}}

@@ -104,7 +104,7 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
             Create Your Business
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">
-            Set up your company on Compass and start managing your finances
+            Set up your company on Compazz and start managing your finances
           </p>
         </div>
         

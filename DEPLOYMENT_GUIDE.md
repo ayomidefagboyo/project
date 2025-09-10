@@ -1,4 +1,4 @@
-# 🚀 Compass Finance Management - Deployment Guide
+# 🚀 Compazz Finance Management - Deployment Guide
 
 ## 📋 Pre-Deployment Checklist
 
@@ -24,7 +24,7 @@
 1. **Connect GitHub Repository:**
    ```bash
    git add .
-   git commit -m "Initial commit - Compass Finance Management"
+   git commit -m "Initial commit - Compazz Finance Management"
    git branch -M main
    git remote add origin https://github.com/yourusername/compass-finance.git
    git push -u origin main
@@ -41,7 +41,7 @@
    ```
    VITE_SUPABASE_URL=https://swxxvbmjccbzqvywgapo.supabase.co
    VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN3eHh2Ym1qY2NienF2eXdnYXBvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY2NzUxNzcsImV4cCI6MjA3MjI1MTE3N30.LKJM6aaPBY7ltKRcAeIVa8g28t_AgErHdL9kIZRW728
-   VITE_APP_NAME=Compass
+   VITE_APP_NAME=Compazz
    VITE_APP_VERSION=1.0.0
    VITE_APP_ENV=production
    VITE_DEBUG=false
