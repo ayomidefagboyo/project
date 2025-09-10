@@ -246,12 +246,12 @@ const DailyReports: React.FC = () => {
               className="border border-gray-300 dark:border-gray-600 rounded px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             />
           )}
-          <Button asChild>
+        <Button asChild>
             <Link to="/eod" className="flex items-center">
-              <PlusCircle size={16} className="mr-2" />
-              New Report
-            </Link>
-          </Button>
+            <PlusCircle size={16} className="mr-2" />
+            New Report
+          </Link>
+        </Button>
         </div>
       </div>
 
@@ -410,8 +410,8 @@ const DailyReports: React.FC = () => {
                       <span className="font-semibold text-gray-900 dark:text-white">
                         {formatCurrency(outlet.today_sales)}
                       </span>
-                    </div>
-                    
+      </div>
+
                     <div className="flex justify-between">
                       <span className="text-sm text-gray-600 dark:text-gray-400">Today's Profit:</span>
                       <span className="font-semibold text-green-600">
@@ -464,118 +464,118 @@ const DailyReports: React.FC = () => {
       {/* Individual Reports Tab - Only show if user has permission for multi-outlet OR if they don't have permission */}
       {(!canViewMultiOutlet || activeTab === 'reports') && (
         <>
-          {/* Filters */}
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="relative flex-grow">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Search size={18} className="text-gray-400" />
-              </div>
-              <input
-                type="text"
-                placeholder="Search reports..."
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="icon">
-                <Download size={18} />
-              </Button>
-            </div>
+      {/* Filters */}
+      <div className="flex flex-col sm:flex-row gap-4">
+        <div className="relative flex-grow">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <Search size={18} className="text-gray-400" />
           </div>
+          <input
+            type="text"
+            placeholder="Search reports..."
+            className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="icon">
+            <Download size={18} />
+          </Button>
+        </div>
+      </div>
 
-          {/* Reports Table */}
-          <div className="overflow-hidden shadow ring-1 ring-black ring-opacity-5 rounded-lg">
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead className="bg-gray-50 dark:bg-gray-800">
-                <tr>
-                  <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-200 sm:pl-6">
-                    Date
-                  </th>
-                  <th scope="col" className="hidden px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-gray-200 sm:table-cell">
-                    Created By
-                  </th>
-                  <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-gray-200">
-                    Sales
-                  </th>
-                  <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-gray-200">
-                    Expenses
-                  </th>
-                  <th scope="col" className="px-3 py-3.5 text-right text-sm font-semibold text-gray-900 dark:text-gray-200">
-                    Closing Balance
-                  </th>
-                  <th scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-6">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-900">
-                {filteredReports.map((report) => (
-                  <tr key={report.id}>
-                    <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 dark:text-white sm:pl-6">
-                      {formatDate(report.date)}
-                    </td>
-                    <td className="hidden whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-400 sm:table-cell">
+      {/* Reports Table */}
+      <div className="overflow-hidden shadow ring-1 ring-black ring-opacity-5 rounded-lg">
+        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+          <thead className="bg-gray-50 dark:bg-gray-800">
+            <tr>
+              <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 dark:text-gray-200 sm:pl-6">
+                Date
+              </th>
+              <th scope="col" className="hidden px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-gray-200 sm:table-cell">
+                Created By
+              </th>
+              <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-gray-200">
+                Sales
+              </th>
+              <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-gray-200">
+                Expenses
+              </th>
+              <th scope="col" className="px-3 py-3.5 text-right text-sm font-semibold text-gray-900 dark:text-gray-200">
+                Closing Balance
+              </th>
+              <th scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-6">
+                <span className="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-900">
+            {filteredReports.map((report) => (
+              <tr key={report.id}>
+                <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 dark:text-white sm:pl-6">
+                  {formatDate(report.date)}
+                </td>
+                <td className="hidden whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-400 sm:table-cell">
                       {report.created_by || 'System'}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-400">
+                </td>
+                <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-400">
                       {formatCurrency(report.total_sales || 0)}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-400">
+                </td>
+                <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-400">
                       {formatCurrency(report.expenses || 0)}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-400 text-right">
+                </td>
+                <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 dark:text-gray-400 text-right">
                       {formatCurrency((report.total_sales || 0) - (report.expenses || 0))}
-                    </td>
-                    <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-300"
-                      >
-                        <Eye size={16} className="mr-1" />
-                        View
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {filteredReports.length === 0 && (
-              <div className="text-center py-16 px-4">
-                <p className="text-gray-500 dark:text-gray-400">No reports found</p>
-              </div>
-            )}
+                </td>
+                <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-300"
+                  >
+                    <Eye size={16} className="mr-1" />
+                    View
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {filteredReports.length === 0 && (
+          <div className="text-center py-16 px-4">
+            <p className="text-gray-500 dark:text-gray-400">No reports found</p>
           </div>
+        )}
+      </div>
 
-          {/* Summary */}
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6">
-            <h2 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">Report Summary</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <p className="text-sm text-gray-500 dark:text-gray-400">Total Sales (Period)</p>
-                <p className="mt-1 text-xl font-semibold text-gray-900 dark:text-white">
+      {/* Summary */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6">
+        <h2 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">Report Summary</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+            <p className="text-sm text-gray-500 dark:text-gray-400">Total Sales (Period)</p>
+            <p className="mt-1 text-xl font-semibold text-gray-900 dark:text-white">
                   {formatCurrency(filteredReports.reduce((sum, report) => sum + (report.total_sales || 0), 0))}
-                </p>
-              </div>
-              <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <p className="text-sm text-gray-500 dark:text-gray-400">Total Expenses (Period)</p>
-                <p className="mt-1 text-xl font-semibold text-gray-900 dark:text-white">
+            </p>
+          </div>
+          <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+            <p className="text-sm text-gray-500 dark:text-gray-400">Total Expenses (Period)</p>
+            <p className="mt-1 text-xl font-semibold text-gray-900 dark:text-white">
                   {formatCurrency(filteredReports.reduce((sum, report) => sum + (report.expenses || 0), 0))}
-                </p>
-              </div>
-              <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <p className="text-sm text-gray-500 dark:text-gray-400">Net Profit (Period)</p>
-                <p className="mt-1 text-xl font-semibold text-gray-900 dark:text-white">
-                  {formatCurrency(
+            </p>
+          </div>
+          <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+            <p className="text-sm text-gray-500 dark:text-gray-400">Net Profit (Period)</p>
+            <p className="mt-1 text-xl font-semibold text-gray-900 dark:text-white">
+              {formatCurrency(
                     filteredReports.reduce((sum, report) => sum + (report.total_sales || 0), 0) -
                     filteredReports.reduce((sum, report) => sum + (report.expenses || 0), 0)
-                  )}
-                </p>
-              </div>
-            </div>
+              )}
+            </p>
           </div>
+        </div>
+      </div>
         </>
       )}
     </div>
