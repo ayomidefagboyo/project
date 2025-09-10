@@ -326,7 +326,7 @@ export class EODService {
       return { error: null };
     } catch (error) {
       console.error('EOD report deletion error:', error);
-      return { 
+      return {
         error: error instanceof Error ? error.message : 'Failed to delete EOD report' 
       };
     }
@@ -484,7 +484,7 @@ export class EODService {
     } catch (error) {
       console.error('EOD summary fetch error:', error);
       // Return default values on error
-      return {
+      return { 
         today_sales: 0,
         today_profit: 0,
         week_sales: 0,

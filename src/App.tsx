@@ -3,6 +3,10 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { OutletProvider, useOutlet } from '@/contexts/OutletContext';
 import Layout from '@/components/layout/Layout';
 import LandingPage from '@/pages/LandingPage';
+import Features from '@/pages/Features';
+import Pricing from '@/pages/Pricing';
+import About from '@/pages/About';
+import Blog from '@/pages/Blog';
 import Dashboard from '@/pages/Dashboard';
 import Invoices from '@/pages/invoices/Invoices';
 import CreateInvoice from '@/pages/invoices/CreateInvoice';
@@ -48,6 +52,10 @@ const AppRoutes = () => {
     <Routes>
       {/* Public routes */}
       <Route path="/" element={<LandingPage />} />
+      <Route path="/features" element={<Features />} />
+      <Route path="/pricing" element={<Pricing />} />
+      <Route path="/about" element={<About />} />
+      <Route path="/blog" element={<Blog />} />
       <Route path="/auth" element={<AuthWrapper onAuthSuccess={() => {}} />} />
       
       {/* Protected routes */}
