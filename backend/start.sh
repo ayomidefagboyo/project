@@ -1,7 +1,7 @@
 #!/bin/bash
-# Render startup script for Compass Backend
+# Render startup script for Compazz Backend
 
-echo "🚀 Starting Compass Backend on Render..."
+echo "🚀 Starting Compazz Backend on Render..."
 
 # Install dependencies
 pip install -r requirements.txt

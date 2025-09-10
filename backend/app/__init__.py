@@ -1,1 +1,1 @@
-# Compass Financial Management Backend
+# Compazz Financial Management Backend

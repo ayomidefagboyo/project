@@ -1,5 +1,5 @@
 """
-Main FastAPI application for Compass Financial Management Platform
+Main FastAPI application for Compazz Financial Management Platform
 """
 
 from fastapi import FastAPI, HTTPException
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     # Startup
-    logger.info("🚀 Starting Compass FastAPI Backend...")
+    logger.info("🚀 Starting Compazz FastAPI Backend...")
     try:
         await init_db()
         logger.info("✅ Database initialized successfully")
@@ -32,12 +32,12 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
-    logger.info("👋 Shutting down Compass Backend...")
+    logger.info("👋 Shutting down Compazz Backend...")
 
 
 # Create FastAPI application
 app = FastAPI(
-    title="Compass Financial Management API",
+    title="Compazz Financial Management API",
     description="Comprehensive financial management platform for small to medium businesses",
     version="1.0.0",
     docs_url="/docs",
@@ -63,7 +63,7 @@ app.include_router(api_router, prefix="/api/v1")
 async def root():
     """Root endpoint"""
     return {
-        "message": "Compass Financial Management API",
+        "message": "Compazz Financial Management API",
         "version": "1.0.0",
         "status": "running",
         "docs": "/docs",
@@ -76,7 +76,7 @@ async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "service": "compass-api",
+        "service": "compazz-api",
         "version": "1.0.0"
     }
 

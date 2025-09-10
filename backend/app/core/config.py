@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     
     # API Settings
     API_V1_STR: str = "/api/v1"
-    PROJECT_NAME: str = "Compass Financial Management"
+    PROJECT_NAME: str = "Compazz Financial Management"
     VERSION: str = "1.0.0"
     
     # CORS Settings

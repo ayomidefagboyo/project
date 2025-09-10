@@ -1,4 +1,4 @@
-# Compass - Financial Management
+# Compazz - Financial Management
 
 A modern financial management application built with React, TypeScript, and Tailwind CSS.
 
