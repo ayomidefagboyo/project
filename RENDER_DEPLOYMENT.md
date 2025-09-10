@@ -25,9 +25,9 @@
 2. **Configure Service:**
    - **Name:** `compazz-backend`
    - **Root Directory:** `backend`
-   - **Runtime:** `Python 3`
-   - **Build Command:** `pip install -r requirements.txt`
-   - **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`
+   - **Runtime:** `Python 3.11`
+   - **Build Command:** `pip install --upgrade pip && pip install -r requirements.txt`
+   - **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1`
 
 ### **Step 3: Set Environment Variables**
 Click "Advanced" → "Environment Variables" and add:
@@ -90,19 +90,25 @@ https://compazz-backend-xxxx.onrender.com/api/v1
 
 ### **Common Issues:**
 
-1. **Build Fails:**
-   - Check Python version (should be 3.11)
-   - Verify all dependencies in requirements.txt
+1. **Build Fails (Python Version Error):**
+   - ✅ **FIXED:** Use Python 3.11.0 (not 3.13)
+   - ✅ **FIXED:** Updated requirements.txt with compatible versions
+   - ✅ **FIXED:** Added runtime.txt for explicit Python version
 
-2. **Environment Variables Not Working:**
+2. **Package Installation Errors:**
+   - ✅ **FIXED:** Removed problematic packages (pandas, numpy, redis, celery)
+   - ✅ **FIXED:** Simplified requirements.txt for production
+   - ✅ **FIXED:** Added pip upgrade in build command
+
+3. **Environment Variables Not Working:**
    - Double-check variable names
    - Ensure no extra spaces
 
-3. **CORS Errors:**
+4. **CORS Errors:**
    - Update `BACKEND_CORS_ORIGINS` to include your frontend URL
    - Example: `https://your-frontend.vercel.app,http://localhost:5173`
 
-4. **Database Connection Issues:**
+5. **Database Connection Issues:**
    - Verify Supabase credentials
    - Check if RLS policies are enabled
 
