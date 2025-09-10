@@ -85,7 +85,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
         <div className="fixed inset-y-0 left-0 w-64 bg-white dark:bg-gray-800 shadow-xl transform transition-transform duration-300 ease-in-out z-60">
           {/* Mobile header */}
           <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-600">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Compazz</h2>
+            <img src="/logo.svg" alt="Compazz" className="h-6" />
             <Button
               variant="ghost"
               size="sm"
@@ -187,13 +187,11 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
           <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
             {!isCollapsed && (
               <>
-                <h1 className="text-lg font-bold text-gray-900 dark:text-white">Compazz</h1>
+                <img src="/logo.svg" alt="Compazz" className="h-6" />
               </>
             )}
             {isCollapsed && (
-              <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center shadow-lg ring-2 ring-blue-200 dark:ring-blue-800">
-                <span className="text-white font-bold text-sm">C</span>
-              </div>
+              <img src="/logo-icon.svg" alt="Compazz" className="h-8 w-8" />
             )}
             <Button
               variant="ghost"
