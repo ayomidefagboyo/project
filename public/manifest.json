@@ -1,0 +1,19 @@
+{
+  "name": "Compazz - Financial Management Platform",
+  "short_name": "Compazz",
+  "description": "The complete financial management platform for modern businesses",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "categories": ["finance", "business", "productivity"],
+  "lang": "en",
+  "dir": "ltr"
+}
