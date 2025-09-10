@@ -118,26 +118,27 @@ const About: React.FC = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-white">
-      {/* Header */}
-      <header className="fixed top-0 left-0 right-0 bg-white/95 backdrop-blur-md border-b border-gray-200 z-50">
-        <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-background text-foreground">
+      {/* Navbar */}
+      <header className="fixed top-0 left-0 right-0 bg-background/95 backdrop-blur-md border-b border-border z-50">
+        <nav className="container-width px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
               <Link to="/" className="flex items-center">
-                <span className="text-2xl font-bold text-blue-600">Compazz</span>
+                <img src="/logo.svg" alt="Compazz" className="h-8" />
               </Link>
             </div>
             <div className="hidden md:flex items-center space-x-8">
-              <Link to="/features" className="text-gray-600 hover:text-gray-900 font-medium">Features</Link>
-              <Link to="/pricing" className="text-gray-600 hover:text-gray-900 font-medium">Pricing</Link>
-              <Link to="/about" className="text-blue-600 font-medium">About</Link>
-              <Link to="/blog" className="text-gray-600 hover:text-gray-900 font-medium">Blog</Link>
-              <Link to="/docs" className="text-gray-600 hover:text-gray-900 font-medium">Docs</Link>
+              <Link to="/features" className="text-muted-foreground hover:text-foreground font-medium transition-colors">Features</Link>
+              <Link to="/pricing" className="text-muted-foreground hover:text-foreground font-medium transition-colors">Pricing</Link>
+              <Link to="/about" className="text-foreground font-medium transition-colors">About</Link>
+              <Link to="/blog" className="text-muted-foreground hover:text-foreground font-medium transition-colors">Blog</Link>
             </div>
             <div className="flex items-center space-x-4">
-              <Link to="/auth" className="text-gray-600 hover:text-gray-900 font-medium">Sign In</Link>
-              <Link to="/dashboard" className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors">
+              <Link to="/auth" className="text-muted-foreground hover:text-foreground font-medium transition-colors">
+                Sign In
+              </Link>
+              <Link to="/dashboard" className="btn-primary px-6 py-2.5">
                 Get Started
               </Link>
             </div>
@@ -146,30 +147,30 @@ const About: React.FC = () => {
       </header>
 
       {/* Hero Section */}
-      <section className="pt-32 pb-20 bg-gradient-to-br from-blue-50 to-indigo-100">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <div className="inline-flex items-center px-4 py-2 bg-blue-100 text-blue-800 rounded-full text-sm font-medium mb-6">
-            <Heart className="w-4 h-4 mr-2" />
+      <section className="pt-24 section-padding bg-gradient-to-br from-accent/30 to-secondary/50">
+        <div className="max-w-4xl mx-auto text-center">
+          <div className="inline-flex items-center px-4 py-2 bg-accent border border-border rounded-full text-sm font-medium mb-8">
+            <Heart className="w-4 h-4 mr-2 text-accent-foreground" />
             Built by finance professionals, for finance professionals
           </div>
-          <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6">
+          <h1 className="text-4xl md:text-5xl lg:text-6xl font-semibold text-foreground mb-6 leading-[1.1] text-balance">
             Simplifying finance for
-            <span className="text-blue-600 block">modern businesses</span>
+            <span className="block">modern businesses</span>
           </h1>
-          <p className="text-xl text-gray-600 mb-8">
+          <p className="text-lg text-muted-foreground mb-8 max-w-2xl mx-auto leading-relaxed text-balance">
             We're a team of finance and technology experts on a mission to make financial management effortless, accurate, and accessible for businesses of all sizes.
           </p>
         </div>
       </section>
 
       {/* Stats */}
-      <section className="py-16 bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section className="py-16 bg-background">
+        <div className="container-width px-6 lg:px-8">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
             {stats.map((stat, index) => (
               <div key={index}>
-                <div className="text-4xl font-bold text-blue-600 mb-2">{stat.number}</div>
-                <div className="text-gray-600">{stat.label}</div>
+                <div className="text-4xl font-semibold text-primary mb-2">{stat.number}</div>
+                <div className="text-muted-foreground">{stat.label}</div>
               </div>
             ))}
           </div>
@@ -177,12 +178,12 @@ const About: React.FC = () => {
       </section>
 
       {/* Our Story */}
-      <section className="py-24 bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section className="section-padding bg-muted/30">
+        <div className="container-width">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
             <div>
-              <h2 className="text-4xl font-bold text-gray-900 mb-6">Our Story</h2>
-              <div className="prose prose-lg text-gray-600 space-y-4">
+              <h2 className="text-3xl md:text-4xl font-semibold text-foreground mb-6 text-balance">Our Story</h2>
+              <div className="space-y-4 text-muted-foreground leading-relaxed">
                 <p>
                   Compazz was born from frustration. As finance professionals, we watched businesses struggle with outdated tools, manual processes, and scattered data across multiple locations.
                 </p>
@@ -201,12 +202,12 @@ const About: React.FC = () => {
             <div className="space-y-6">
               {milestones.map((milestone, index) => (
                 <div key={index} className="flex items-start space-x-4">
-                  <div className="flex-shrink-0 w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
-                    <span className="text-blue-600 font-bold">{milestone.year}</span>
+                  <div className="flex-shrink-0 w-16 h-16 bg-accent rounded-xl flex items-center justify-center border border-border">
+                    <span className="text-accent-foreground font-semibold">{milestone.year}</span>
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">{milestone.title}</h3>
-                    <p className="text-gray-600">{milestone.description}</p>
+                    <h3 className="text-lg font-semibold text-foreground mb-2">{milestone.title}</h3>
+                    <p className="text-muted-foreground leading-relaxed">{milestone.description}</p>
                   </div>
                 </div>
               ))}
@@ -216,11 +217,11 @@ const About: React.FC = () => {
       </section>
 
       {/* Values */}
-      <section className="py-24 bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section className="section-padding bg-background">
+        <div className="container-width">
           <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold text-gray-900 mb-4">Our Values</h2>
-            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+            <h2 className="text-3xl md:text-4xl font-semibold text-foreground mb-6 text-balance">Our Values</h2>
+            <p className="text-lg text-muted-foreground max-w-2xl mx-auto text-balance">
               The principles that guide everything we do
             </p>
           </div>
@@ -228,11 +229,13 @@ const About: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
             {values.map((value, index) => (
               <div key={index} className="text-center">
-                <div className="text-blue-600 flex justify-center mb-4">
-                  {value.icon}
+                <div className="w-16 h-16 bg-accent rounded-xl flex items-center justify-center mx-auto mb-6">
+                  <div className="text-accent-foreground">
+                    {value.icon}
+                  </div>
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-3">{value.title}</h3>
-                <p className="text-gray-600">{value.description}</p>
+                <h3 className="text-xl font-semibold text-foreground mb-4">{value.title}</h3>
+                <p className="text-muted-foreground leading-relaxed">{value.description}</p>
               </div>
             ))}
           </div>
@@ -240,29 +243,29 @@ const About: React.FC = () => {
       </section>
 
       {/* Team */}
-      <section className="py-24 bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section className="section-padding bg-muted/30">
+        <div className="container-width">
           <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold text-gray-900 mb-4">Meet the Team</h2>
-            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+            <h2 className="text-3xl md:text-4xl font-semibold text-foreground mb-6 text-balance">Meet the Team</h2>
+            <p className="text-lg text-muted-foreground max-w-2xl mx-auto text-balance">
               We're a diverse team of finance and technology experts united by a passion for solving complex problems.
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
             {team.map((member, index) => (
-              <div key={index} className="bg-white rounded-xl p-6 shadow-sm text-center">
-                <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-xl mx-auto mb-4">
+              <div key={index} className="card p-6 text-center">
+                <div className="w-20 h-20 bg-accent rounded-full flex items-center justify-center text-accent-foreground font-semibold text-xl mx-auto mb-4">
                   {member.avatar}
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-1">{member.name}</h3>
-                <p className="text-blue-600 font-medium mb-3">{member.role}</p>
-                <p className="text-gray-600 text-sm mb-4">{member.bio}</p>
+                <h3 className="text-xl font-semibold text-foreground mb-1">{member.name}</h3>
+                <p className="text-primary font-medium mb-3">{member.role}</p>
+                <p className="text-muted-foreground text-sm mb-4 leading-relaxed">{member.bio}</p>
                 <div className="flex justify-center space-x-3">
-                  <a href={member.linkedin} className="text-gray-400 hover:text-blue-600">
+                  <a href={member.linkedin} className="text-muted-foreground hover:text-primary transition-colors">
                     <Linkedin className="w-5 h-5" />
                   </a>
-                  <a href={member.twitter} className="text-gray-400 hover:text-blue-600">
+                  <a href={member.twitter} className="text-muted-foreground hover:text-primary transition-colors">
                     <Twitter className="w-5 h-5" />
                   </a>
                 </div>
@@ -273,35 +276,35 @@ const About: React.FC = () => {
       </section>
 
       {/* Investors */}
-      <section className="py-16 bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <h3 className="text-2xl font-semibold text-gray-900 mb-8">Backed by world-class investors</h3>
-          <div className="flex justify-center items-center space-x-12 opacity-60">
-            <div className="text-2xl font-bold">Sequoia Capital</div>
-            <div className="text-2xl font-bold">Andreessen Horowitz</div>
-            <div className="text-2xl font-bold">Index Ventures</div>
-            <div className="text-2xl font-bold">Y Combinator</div>
+      <section className="py-16 bg-background">
+        <div className="container-width px-6 lg:px-8 text-center">
+          <h3 className="text-2xl font-semibold text-foreground mb-8">Backed by world-class investors</h3>
+          <div className="flex flex-wrap justify-center items-center gap-8 opacity-60">
+            <div className="text-xl font-semibold text-muted-foreground">Sequoia Capital</div>
+            <div className="text-xl font-semibold text-muted-foreground">Andreessen Horowitz</div>
+            <div className="text-xl font-semibold text-muted-foreground">Index Ventures</div>
+            <div className="text-xl font-semibold text-muted-foreground">Y Combinator</div>
           </div>
         </div>
       </section>
 
       {/* Join Us */}
-      <section className="py-24 bg-blue-600">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <h2 className="text-4xl font-bold text-white mb-6">
+      <section className="section-padding bg-primary text-primary-foreground">
+        <div className="max-w-4xl mx-auto text-center">
+          <h2 className="text-4xl md:text-5xl font-semibold mb-8 text-balance">
             Join us on our mission
           </h2>
-          <p className="text-xl text-blue-100 mb-8">
+          <p className="text-lg text-primary-foreground/80 mb-12 max-w-2xl mx-auto text-balance">
             We're always looking for talented individuals who share our passion for building the future of business finance.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link to="/careers" className="bg-white text-blue-600 px-8 py-4 rounded-lg text-lg font-medium hover:bg-gray-100 transition-colors flex items-center justify-center">
+            <Link to="/careers" className="bg-primary-foreground text-primary px-8 py-3.5 rounded-lg font-semibold text-lg hover:bg-primary-foreground/90 transition-all group inline-flex items-center justify-center">
               View Open Positions
-              <ArrowRight className="w-5 h-5 ml-2" />
+              <ArrowRight className="w-5 h-5 ml-2 transition-transform group-hover:translate-x-1" />
             </Link>
             <a 
               href="mailto:hello@compazz.com" 
-              className="border-2 border-white text-white px-8 py-4 rounded-lg text-lg font-medium hover:bg-white hover:text-blue-600 transition-colors flex items-center justify-center"
+              className="border-2 border-primary-foreground/20 text-primary-foreground px-8 py-3.5 rounded-lg font-medium text-lg hover:bg-primary-foreground/10 transition-all inline-flex items-center justify-center"
             >
               Get in Touch
               <Mail className="w-5 h-5 ml-2" />
@@ -311,46 +314,48 @@ const About: React.FC = () => {
       </section>
 
       {/* Footer */}
-      <footer className="bg-gray-900 text-white py-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <footer className="bg-primary text-primary-foreground py-16">
+        <div className="container-width px-6 lg:px-8">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
             <div>
-              <div className="text-2xl font-bold text-blue-400 mb-4">Compazz</div>
-              <p className="text-gray-400 mb-4">
+              <div className="flex items-center mb-6">
+                <img src="/logo-white.svg" alt="Compazz" className="h-8" />
+              </div>
+              <p className="text-primary-foreground/70 mb-6 leading-relaxed">
                 AI-powered financial management for modern businesses.
               </p>
-              <div className="flex items-center text-gray-400">
+              <div className="flex items-center text-primary-foreground/70">
                 <MapPin className="w-4 h-4 mr-2" />
                 San Francisco, CA
               </div>
             </div>
             <div>
-              <h4 className="font-semibold mb-4">Product</h4>
-              <ul className="space-y-2 text-gray-400">
-                <li><Link to="/features" className="hover:text-white">Features</Link></li>
-                <li><Link to="/pricing" className="hover:text-white">Pricing</Link></li>
-                <li><Link to="/docs" className="hover:text-white">Documentation</Link></li>
+              <h4 className="text-primary-foreground font-semibold mb-6 text-lg">Product</h4>
+              <ul className="space-y-3">
+                <li><Link to="/features" className="text-primary-foreground/70 hover:text-primary-foreground transition-colors">Features</Link></li>
+                <li><Link to="/pricing" className="text-primary-foreground/70 hover:text-primary-foreground transition-colors">Pricing</Link></li>
+                <li><Link to="/docs" className="text-primary-foreground/70 hover:text-primary-foreground transition-colors">Documentation</Link></li>
               </ul>
             </div>
             <div>
-              <h4 className="font-semibold mb-4">Company</h4>
-              <ul className="space-y-2 text-gray-400">
-                <li><Link to="/about" className="hover:text-white">About</Link></li>
-                <li><Link to="/blog" className="hover:text-white">Blog</Link></li>
-                <li><Link to="/careers" className="hover:text-white">Careers</Link></li>
+              <h4 className="text-primary-foreground font-semibold mb-6 text-lg">Company</h4>
+              <ul className="space-y-3">
+                <li><Link to="/about" className="text-primary-foreground/70 hover:text-primary-foreground transition-colors">About</Link></li>
+                <li><Link to="/blog" className="text-primary-foreground/70 hover:text-primary-foreground transition-colors">Blog</Link></li>
+                <li><Link to="/careers" className="text-primary-foreground/70 hover:text-primary-foreground transition-colors">Careers</Link></li>
               </ul>
             </div>
             <div>
-              <h4 className="font-semibold mb-4">Support</h4>
-              <ul className="space-y-2 text-gray-400">
-                <li><a href="mailto:support@compazz.com" className="hover:text-white">Contact</a></li>
-                <li><Link to="/help" className="hover:text-white">Help Center</Link></li>
-                <li><Link to="/status" className="hover:text-white">Status</Link></li>
+              <h4 className="text-primary-foreground font-semibold mb-6 text-lg">Support</h4>
+              <ul className="space-y-3">
+                <li><a href="mailto:support@compazz.com" className="text-primary-foreground/70 hover:text-primary-foreground transition-colors">Contact</a></li>
+                <li><Link to="/help" className="text-primary-foreground/70 hover:text-primary-foreground transition-colors">Help Center</Link></li>
+                <li><Link to="/status" className="text-primary-foreground/70 hover:text-primary-foreground transition-colors">Status</Link></li>
               </ul>
             </div>
           </div>
-          <div className="border-t border-gray-800 mt-8 pt-8 text-center text-gray-400">
-            <p>&copy; 2024 Compazz. All rights reserved.</p>
+          <div className="border-t border-primary-foreground/20 mt-12 pt-8 text-center">
+            <p className="text-primary-foreground/50">&copy; 2024 Compazz. All rights reserved. Built with care for modern businesses.</p>
           </div>
         </div>
       </footer>
