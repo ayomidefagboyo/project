@@ -2,6 +2,7 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { OutletProvider, useOutlet } from '@/contexts/OutletContext';
 import Layout from '@/components/layout/Layout';
+import LandingPage from '@/pages/LandingPage';
 import Dashboard from '@/pages/Dashboard';
 import Invoices from '@/pages/invoices/Invoices';
 import CreateInvoice from '@/pages/invoices/CreateInvoice';
@@ -43,20 +44,19 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 const AppRoutes = () => {
   const { currentUser } = useOutlet();
 
-  if (!currentUser) {
-    return (
-      <Routes>
-        <Route path="/auth" element={<AuthWrapper onAuthSuccess={() => {}} />} />
-        <Route path="*" element={<Navigate to="/auth" replace />} />
-      </Routes>
-    );
-  }
-
   return (
     <Routes>
-      <Route path="/" element={<Layout />}>
-        <Route index element={<Navigate to="/dashboard" replace />} />
-        <Route path="dashboard" element={<Dashboard />} />
+      {/* Public routes */}
+      <Route path="/" element={<LandingPage />} />
+      <Route path="/auth" element={<AuthWrapper onAuthSuccess={() => {}} />} />
+      
+      {/* Protected routes */}
+      <Route path="/dashboard" element={
+        <ProtectedRoute>
+          <Layout />
+        </ProtectedRoute>
+      }>
+        <Route index element={<Dashboard />} />
         <Route path="invoices" element={<Invoices />} />
         <Route path="invoices/create" element={<CreateInvoice />} />
         <Route path="invoices/:id" element={<InvoiceDetail />} />
@@ -70,7 +70,9 @@ const AppRoutes = () => {
         <Route path="audit-trail" element={<AuditTrail />} />
         <Route path="settings" element={<Settings />} />
       </Route>
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      
+      {/* Redirect unknown routes */}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 };
