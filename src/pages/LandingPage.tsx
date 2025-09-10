@@ -9,7 +9,7 @@ const LandingPage: React.FC = () => {
         <nav className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
-              <span className="text-2xl font-bold text-white">Compazz</span>
+              <img src="/logo-white.svg" alt="Compazz" className="h-8" />
             </div>
             <div className="hidden md:flex items-center space-x-8">
               <a href="#features" className="text-gray-300 hover:text-white font-medium">Features</a>
