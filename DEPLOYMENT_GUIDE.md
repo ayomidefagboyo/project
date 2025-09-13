@@ -40,14 +40,14 @@
 3. **Environment Variables in Vercel:**
    ```
    VITE_SUPABASE_URL=https://swxxvbmjccbzqvywgapo.supabase.co
-   VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN3eHh2Ym1qY2NienF2eXdnYXBvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY2NzUxNzcsImV4cCI6MjA3MjI1MTE3N30.LKJM6aaPBY7ltKRcAeIVa8g28t_AgErHdL9kIZRW728
+   VITE_SUPABASE_ANON_KEY=your_supabase_anon_key_here
    VITE_APP_NAME=Compazz
    VITE_APP_VERSION=1.0.0
    VITE_APP_ENV=production
    VITE_DEBUG=false
    VITE_ENABLE_ANALYTICS=true
    VITE_ENABLE_DEBUG_MODE=false
-   OPENAI_API_KEY=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
+   OPENAI_API_KEY=your_openai_api_key_here
    ```
 
 ### Option 2: Netlify (Alternative Frontend)
@@ -91,8 +91,8 @@
 5. Add environment variables:
    ```
    SUPABASE_URL=https://swxxvbmjccbzqvywgapo.supabase.co
-   SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN3eHh2Ym1qY2NienF2eXdnYXBvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NjY3NTE3NywiZXhwIjoyMDcyMjUxMTc3fQ.ZX_F0UWViJI5osbMXsI2N2Zww86QDdNq0JMvbyibnnA
-   OPENAI_API_KEY=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
+   SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key_here
+   OPENAI_API_KEY=your_openai_api_key_here
    ```
 
 ### Option 2: Render
