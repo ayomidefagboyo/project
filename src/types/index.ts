@@ -533,3 +533,65 @@ export interface UserPermissions {
     manageOutletSettings: boolean;
   };
 }
+
+// Subscription Plan Types
+export type SubscriptionPlan = 'startup' | 'business' | 'enterprise';
+
+export interface SubscriptionFeatures {
+  maxOutlets: number;
+  corePos: boolean;
+  basicInventory: boolean;
+  standardReporting: boolean;
+  emailSupport: boolean;
+  mobileApp: boolean;
+  basicPayments: boolean;
+  multiLocationManagement: boolean;
+  advancedAnalytics: boolean;
+  staffManagement: boolean;
+  inventorySync: boolean;
+  prioritySupport: boolean;
+  loyaltyPrograms: boolean;
+  advancedPayments: boolean;
+  apiAccess: boolean;
+  customBranding: boolean;
+  dedicatedAccountManager: boolean;
+  advancedSecurity: boolean;
+  customReports: boolean;
+  phoneSupport: boolean;
+  priorityFeatures: boolean;
+}
+
+export interface Subscription {
+  id: string;
+  userId: string;
+  plan: SubscriptionPlan;
+  status: 'active' | 'inactive' | 'cancelled' | 'past_due' | 'trialing';
+  stripeSubscriptionId?: string;
+  stripePriceId?: string;
+  currentPeriodStart: string;
+  currentPeriodEnd: string;
+  features: SubscriptionFeatures;
+  outlets: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlanConfig {
+  name: string;
+  description: string;
+  features: SubscriptionFeatures;
+  pricing: {
+    monthly: {
+      USD: number;
+      EUR: number;
+      GBP: number;
+    };
+  };
+  stripePriceIds: {
+    monthly: {
+      USD: string;
+      EUR: string;
+      GBP: string;
+    };
+  };
+}

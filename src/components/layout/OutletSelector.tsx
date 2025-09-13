@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Building2, Check, Plus } from 'lucide-react';
 import { useOutlet } from '@/contexts/OutletContext';
 import { Outlet as OutletType, BusinessType } from '@/types';
+import { SubscriptionMiddleware } from '@/lib/subscriptionMiddleware';
 
 const businessTypeIcons: Record<BusinessType, string> = {
   supermarket: '🛒',
@@ -29,6 +30,10 @@ const OutletSelector: React.FC<OutletSelectorProps> = ({ onCreateStore }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const canCreateStores = isSuperAdmin || isBusinessOwner || currentUser?.role === 'outlet_admin';
+
+  // Check outlet limits
+  const { canAddOutlet, currentCount, maxOutlets, loading: outletLimitLoading } =
+    SubscriptionMiddleware.useOutletLimit(currentUser?.id || '');
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -140,13 +145,33 @@ const OutletSelector: React.FC<OutletSelectorProps> = ({ onCreateStore }) => {
               )}
               
               {onCreateStore && (
-                <button 
-                  onClick={handleCreateStore}
-                  className="w-full flex items-center justify-center gap-2 px-2 py-1.5 text-xs font-medium text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-colors"
-                >
-                  <Plus size={14} />
-                  Create New Store
-                </button>
+                <>
+                  {canAddOutlet ? (
+                    <button
+                      onClick={handleCreateStore}
+                      className="w-full flex items-center justify-center gap-2 px-2 py-1.5 text-xs font-medium text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-colors"
+                    >
+                      <Plus size={14} />
+                      Create New Store
+                    </button>
+                  ) : (
+                    <div className="px-2 py-1.5">
+                      <div className="text-xs text-gray-500 dark:text-gray-400 text-center">
+                        Outlet limit reached ({currentCount}/{maxOutlets === -1 ? 'unlimited' : maxOutlets})
+                      </div>
+                      <button
+                        className="w-full flex items-center justify-center gap-2 px-2 py-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors mt-1"
+                        onClick={() => {
+                          // Navigate to pricing page
+                          window.location.href = '/pricing';
+                        }}
+                      >
+                        <Building2 size={14} />
+                        Upgrade Plan
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

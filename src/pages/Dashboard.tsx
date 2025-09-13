@@ -24,6 +24,7 @@ import { vendorInvoiceService } from '@/lib/vendorInvoiceService';
 import { VendorInvoice, DashboardView, Outlet } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import VendorInvoiceTable from '@/components/invoice/VendorInvoiceTable';
+import { FeatureGate } from '@/lib/subscriptionMiddleware';
 
 const Dashboard: React.FC = () => {
   const { 
@@ -237,14 +238,28 @@ const Dashboard: React.FC = () => {
                 <span>Filter</span>
                 <ChevronDown className="w-4 h-4" />
               </Button>
-              <Button 
-                className="flex items-center space-x-2 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100"
-                onClick={() => handleExportReport()}
+              <FeatureGate
+                userId={currentUser?.id || ''}
+                feature="advancedAnalytics"
+                fallback={
+                  <Button
+                    className="flex items-center space-x-2 bg-gray-400 cursor-not-allowed"
+                    disabled
+                  >
+                    <BarChart3 className="w-4 h-4" />
+                    <span>Export Report (Pro)</span>
+                  </Button>
+                }
               >
-                <BarChart3 className="w-4 h-4" />
-                <span>Export Report</span>
-                <ArrowRight className="w-4 h-4" />
-              </Button>
+                <Button
+                  className="flex items-center space-x-2 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100"
+                  onClick={() => handleExportReport()}
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  <span>Export Report</span>
+                  <ArrowRight className="w-4 h-4" />
+                </Button>
+              </FeatureGate>
             </div>
           </div>
         </div>

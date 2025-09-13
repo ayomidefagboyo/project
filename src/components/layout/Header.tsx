@@ -20,6 +20,7 @@ import InviteTeamMember from '@/components/auth/InviteTeamMember';
 import CreateStoreModal, { StoreFormData } from '@/components/modals/CreateStoreModal';
 import Toast from '@/components/ui/Toast';
 import { dataService } from '@/lib/services';
+import { subscriptionService } from '@/lib/subscriptionService';
 
 interface HeaderProps {
   isDarkMode: boolean;
@@ -66,8 +67,19 @@ const Header: React.FC<HeaderProps> = ({ isDarkMode, toggleDarkMode, onToggleSid
   };
 
   const handleCreateStore = async (storeData: StoreFormData) => {
+    if (!currentUser) return;
+
     try {
-      const newOutlet = await dataService.createOutlet(storeData);
+      // Check outlet limit before creating
+      const currentCount = await subscriptionService.getUserOutletCount(currentUser.id);
+      const canAdd = await subscriptionService.canAddOutlet(currentUser.id, currentCount);
+
+      if (!canAdd) {
+        showToast('You have reached your outlet limit. Please upgrade your plan to add more outlets.', 'warning');
+        return;
+      }
+
+      const newOutlet = await dataService.createOutlet(storeData, currentUser.id);
       setUserOutlets(prev => [...prev, newOutlet]);
       setShowCreateStoreModal(false);
       showToast('New store created successfully!', 'success');
