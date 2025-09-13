@@ -1,17 +1,18 @@
 import { supabase, TABLES } from './supabase';
-import { 
-  Outlet, 
-  User, 
-  Invoice, 
-  Expense, 
-  DailyReport, 
-  Vendor, 
+import {
+  Outlet,
+  User,
+  Invoice,
+  Expense,
+  DailyReport,
+  Vendor,
   Customer,
   AuditEntry,
   BusinessSettings,
   SalesTransaction,
   VendorInvoice
 } from '@/types';
+import { gatedApiCalls } from './apiMiddleware';
 
 export class DataService {
   // Generic CRUD operations
@@ -112,8 +113,16 @@ export class DataService {
     }
   }
 
-  // Outlet operations
-  async createOutlet(outlet: Partial<Outlet>): Promise<{ data: Outlet | null; error: string | null }> {
+  // Outlet operations with subscription gating
+  async createOutlet(outlet: Partial<Outlet>, userId?: string): Promise<{ data: Outlet | null; error: string | null }> {
+    if (userId) {
+      // Use gated API call to check outlet limits
+      const result = await gatedApiCalls.createOutlet(userId, outlet);
+      if (result.error) {
+        return { data: null, error: result.error };
+      }
+    }
+
     return this.create<Outlet>(TABLES.OUTLETS, outlet);
   }
 

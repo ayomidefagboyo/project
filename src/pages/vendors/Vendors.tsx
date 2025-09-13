@@ -7,6 +7,7 @@ import { Vendor, VendorType, VendorScope } from '@/types';
 import CreateVendorModal from '@/components/vendors/CreateVendorModal';
 import EditVendorModal from '@/components/vendors/EditVendorModal';
 import { formatCurrency } from '@/lib/utils';
+import { FeatureGate } from '@/lib/subscriptionMiddleware';
 
 const Vendors: React.FC = () => {
   const { currentOutlet, canCreateGlobalVendors, getAccessibleOutlets, isBusinessOwner, currentUser } = useOutlet();
@@ -211,19 +212,25 @@ const Vendors: React.FC = () => {
           />
         </div>
         
-        {/* Scope Filter - Only show for business owners */}
+        {/* Scope Filter - Only show for business owners with multi-location management */}
         {isBusinessOwner && (
-          <div className="relative w-full sm:w-auto">
-            <select
-              value={scopeFilter}
-              onChange={(e) => setScopeFilter(e.target.value as VendorScope | 'all')}
-              className="appearance-none w-full sm:w-auto pl-3 pr-8 py-2 text-sm border border-gray-300 dark:border-gray-500 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="all">All Vendors ({vendorCounts.total})</option>
-              <option value="global">Global ({vendorCounts.global})</option>
-              <option value="outlet_specific">Outlet-Specific ({vendorCounts.outlet_specific})</option>
-            </select>
-          </div>
+          <FeatureGate
+            userId={currentUser?.id || ''}
+            feature="multiLocationManagement"
+            fallback={null}
+          >
+            <div className="relative w-full sm:w-auto">
+              <select
+                value={scopeFilter}
+                onChange={(e) => setScopeFilter(e.target.value as VendorScope | 'all')}
+                className="appearance-none w-full sm:w-auto pl-3 pr-8 py-2 text-sm border border-gray-300 dark:border-gray-500 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="all">All Vendors ({vendorCounts.total})</option>
+                <option value="global">Global ({vendorCounts.global})</option>
+                <option value="outlet_specific">Outlet-Specific ({vendorCounts.outlet_specific})</option>
+              </select>
+            </div>
+          </FeatureGate>
         )}
       </div>
 
