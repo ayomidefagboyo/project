@@ -2,7 +2,7 @@
   "version": 2,
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "installCommand": "npm install --platform=linux --arch=x64",
+  "installCommand": "npm ci",
   "framework": "vite",
   "rewrites": [
     {
@@ -21,15 +21,11 @@
       ]
     }
   ],
-  "env": {
-    "npm_config_platform": "linux",
-    "npm_config_target_arch": "x64",
-    "npm_config_optional": "false"
-  },
   "build": {
     "env": {
       "npm_config_platform": "linux",
-      "npm_config_target_arch": "x64"
+      "npm_config_target_arch": "x64",
+      "npm_config_optional": "false"
     }
   }
 }
