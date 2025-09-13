@@ -34,8 +34,8 @@ Click "Advanced" → "Environment Variables" and add:
 
 ```
 SUPABASE_URL=https://swxxvbmjccbzqvywgapo.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=REDACTED_SUPABASE_SERVICE_ROLE_KEY
-OPENAI_API_KEY=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
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key_here
+OPENAI_API_KEY=your_openai_api_key_here
 BACKEND_CORS_ORIGINS=*
 PYTHON_VERSION=3.11
 ```
