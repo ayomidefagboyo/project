@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Button } from '@/components/ui/Button';
+import { Link } from 'react-router-dom';
+import { Mail, Lock, User, Building, ChevronDown, Chrome, ArrowRight } from 'lucide-react';
 import { authService } from '@/lib/auth';
 import { useOutlet } from '@/contexts/OutletContext';
 import { BusinessType } from '@/types';
@@ -19,8 +20,17 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
     businessType: 'retail' as BusinessType,
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { setCurrentUser, setUserOutlets, setCurrentOutlet } = useOutlet();
+
+  const businessTypes = [
+    { value: 'retail', label: 'Retail Store' },
+    { value: 'supermarket', label: 'Supermarket' },
+    { value: 'restaurant', label: 'Restaurant' },
+    { value: 'lounge', label: 'Lounge/Bar' },
+    { value: 'cafe', label: 'Cafe' },
+  ];
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -93,159 +103,313 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
     }
   };
 
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-xl w-full space-y-8">
-        <div>
-          <div className="mx-auto h-12 w-12 flex items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900">
-            <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">C</span>
-          </div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900 dark:text-white">
-            Create Your Business
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">
-            Set up your company on Compazz and start managing your finances
-          </p>
-        </div>
+  const handleGoogleSignUp = async () => {
+    setIsGoogleLoading(true);
+    setError(null);
+    
+    try {
+      const { user, error: authError } = await authService.signInWithGoogle();
+      
+      if (authError) {
+        setError(authError);
+        return;
+      }
+
+      if (user) {
+        setCurrentUser(user);
         
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Full Name
-              </label>
-              <input
-                id="name"
-                name="name"
-                type="text"
-                required
-                value={formData.name}
-                onChange={handleChange}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-700 placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-800"
-                placeholder="Enter your full name"
-              />
-            </div>
+        // Get user's outlets
+        const { data: outlets, error: outletsError } = await authService.getUserOutlets(user.id);
+        
+        if (outlets && !outletsError) {
+          setUserOutlets(outlets);
+          
+          // Set first outlet as current
+          if (outlets.length > 0) {
+            setCurrentOutlet(outlets[0]);
+          }
+        }
 
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Email address
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                required
-                value={formData.email}
-                onChange={handleChange}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-700 placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-800"
-                placeholder="Enter your email"
-              />
-            </div>
+        onSuccess?.();
+      }
+    } catch (err) {
+      setError('Google sign-up failed');
+      console.error('Google sign-up error:', err);
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  };
 
-            <div>
-              <label htmlFor="companyName" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Company Name
-              </label>
-              <input
-                id="companyName"
-                name="companyName"
-                type="text"
-                required
-                value={formData.companyName}
-                onChange={handleChange}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-700 placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-800"
-                placeholder="Enter company name"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="businessType" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Business Type (optional)
-              </label>
-              <select
-                id="businessType"
-                name="businessType"
-                value={formData.businessType}
-                onChange={handleChange}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-800"
-              >
-                <option value="retail">Retail</option>
-                <option value="supermarket">Supermarket</option>
-                <option value="restaurant">Restaurant</option>
-                <option value="lounge">Lounge/Bar</option>
-                <option value="cafe">Cafe</option>
-              </select>
-            </div>
+  return (
+    <div className="flex min-h-screen">
+      {/* Left side - Brand/Marketing */}
+      <div className="hidden lg:flex lg:w-1/2 bg-primary relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-br from-primary to-primary/80"></div>
+        <div className="relative z-10 flex flex-col justify-center px-16 py-24">
+          <div className="mb-12">
+            <Link to="/" className="text-3xl font-light text-primary-foreground tracking-tight">
+              Compazz
+            </Link>
           </div>
-
-          <div className="space-y-4">
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white">Account Security</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Password
-                </label>
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  autoComplete="new-password"
-                  required
-                  value={formData.password}
-                  onChange={handleChange}
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-700 placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-800"
-                  placeholder="Create a password"
-                />
+          <div className="max-w-md">
+            <h1 className="text-4xl font-light text-primary-foreground mb-6 leading-tight">
+              Start your financial transformation today
+            </h1>
+            <p className="text-lg text-primary-foreground/80 font-light leading-relaxed mb-8">
+              Join thousands of businesses streamlining their finances with AI-powered management.
+            </p>
+            <div className="space-y-4">
+              <div className="flex items-center text-primary-foreground/60">
+                <div className="w-2 h-2 bg-primary-foreground/40 rounded-full mr-4"></div>
+                <span className="font-light">Free 14-day trial</span>
               </div>
-
-              <div>
-                <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Confirm Password
-                </label>
-                <input
-                  id="confirmPassword"
-                  name="confirmPassword"
-                  type="password"
-                  autoComplete="new-password"
-                  required
-                  value={formData.confirmPassword}
-                  onChange={handleChange}
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-700 placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm bg-white dark:bg-gray-800"
-                  placeholder="Confirm your password"
-                />
+              <div className="flex items-center text-primary-foreground/60">
+                <div className="w-2 h-2 bg-primary-foreground/40 rounded-full mr-4"></div>
+                <span className="font-light">No credit card required</span>
+              </div>
+              <div className="flex items-center text-primary-foreground/60">
+                <div className="w-2 h-2 bg-primary-foreground/40 rounded-full mr-4"></div>
+                <span className="font-light">Setup in under 5 minutes</span>
               </div>
             </div>
           </div>
+        </div>
+      </div>
 
-          {error && (
-            <div className="rounded-md bg-red-50 dark:bg-red-900/20 p-4">
-              <div className="text-sm text-red-700 dark:text-red-400">
-                {error}
-              </div>
-            </div>
-          )}
-
-          <div>
-            <Button
-              type="submit"
-              disabled={isLoading}
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isLoading ? 'Creating your business...' : 'Create Business'}
-            </Button>
+      {/* Right side - Signup Form */}
+      <div className="w-full lg:w-1/2 flex items-center justify-center px-6 py-24">
+        <div className="w-full max-w-lg space-y-8">
+          {/* Mobile logo */}
+          <div className="lg:hidden text-center">
+            <Link to="/" className="text-3xl font-light text-foreground tracking-tight">
+              Compazz
+            </Link>
           </div>
 
-          <div className="text-center">
+          {/* Header */}
+          <div className="text-center lg:text-left">
+            <h2 className="text-3xl lg:text-4xl font-light text-foreground mb-3 tracking-tight">
+              Create your business account
+            </h2>
+            <p className="text-muted-foreground font-light">
+              Set up your company and start managing finances like never before
+            </p>
+          </div>
+
+          {/* Google Sign Up */}
+          <button
+            type="button"
+            onClick={handleGoogleSignUp}
+            disabled={isGoogleLoading || isLoading}
+            className="w-full flex items-center justify-center gap-3 px-6 py-4 border border-border rounded-lg text-foreground bg-background hover:bg-accent transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isGoogleLoading ? (
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-foreground"></div>
+            ) : (
+              <Chrome className="w-5 h-5" />
+            )}
+            {isGoogleLoading ? 'Creating account...' : 'Continue with Google'}
+          </button>
+
+          {/* Divider */}
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-border"></div>
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-4 bg-background text-muted-foreground font-light">or continue with email</span>
+            </div>
+          </div>
+
+          {/* Email Form */}
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <div className="space-y-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="name" className="block text-sm font-medium text-foreground mb-2">
+                    Full Name
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <User className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                    <input
+                      id="name"
+                      name="name"
+                      type="text"
+                      required
+                      value={formData.name}
+                      onChange={handleChange}
+                      className="block w-full pl-12 pr-4 py-4 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
+                      placeholder="Your full name"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="email" className="block text-sm font-medium text-foreground mb-2">
+                    Email Address
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <Mail className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                    <input
+                      id="email"
+                      name="email"
+                      type="email"
+                      autoComplete="email"
+                      required
+                      value={formData.email}
+                      onChange={handleChange}
+                      className="block w-full pl-12 pr-4 py-4 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
+                      placeholder="your@email.com"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="companyName" className="block text-sm font-medium text-foreground mb-2">
+                    Company Name
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <Building className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                    <input
+                      id="companyName"
+                      name="companyName"
+                      type="text"
+                      required
+                      value={formData.companyName}
+                      onChange={handleChange}
+                      className="block w-full pl-12 pr-4 py-4 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
+                      placeholder="Your company"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="businessType" className="block text-sm font-medium text-foreground mb-2">
+                    Business Type
+                  </label>
+                  <div className="relative">
+                    <select
+                      id="businessType"
+                      name="businessType"
+                      value={formData.businessType}
+                      onChange={handleChange}
+                      className="block w-full appearance-none px-4 py-4 border border-border rounded-lg text-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light pr-12"
+                    >
+                      {businessTypes.map((type) => (
+                        <option key={type.value} value={type.value}>
+                          {type.label}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none">
+                      <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="password" className="block text-sm font-medium text-foreground mb-2">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <Lock className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                    <input
+                      id="password"
+                      name="password"
+                      type="password"
+                      autoComplete="new-password"
+                      required
+                      value={formData.password}
+                      onChange={handleChange}
+                      className="block w-full pl-12 pr-4 py-4 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
+                      placeholder="Create password"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="confirmPassword" className="block text-sm font-medium text-foreground mb-2">
+                    Confirm Password
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <Lock className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                    <input
+                      id="confirmPassword"
+                      name="confirmPassword"
+                      type="password"
+                      autoComplete="new-password"
+                      required
+                      value={formData.confirmPassword}
+                      onChange={handleChange}
+                      className="block w-full pl-12 pr-4 py-4 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
+                      placeholder="Confirm password"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <p className="text-red-800 text-sm font-light">{error}</p>
+              </div>
+            )}
+
             <button
-              type="button"
-              onClick={onSwitchToLogin}
-              className="font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300"
+              type="submit"
+              disabled={isLoading || isGoogleLoading}
+              className="w-full btn-primary py-4 text-lg font-medium group disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Already have an account? Sign in
+              {isLoading ? (
+                <div className="flex items-center justify-center">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-foreground mr-3"></div>
+                  Creating your business...
+                </div>
+              ) : (
+                <div className="flex items-center justify-center">
+                  Create Business Account
+                  <ArrowRight className="ml-2 h-5 w-5 transition-transform group-hover:translate-x-1" />
+                </div>
+              )}
             </button>
+
+            <div className="text-center text-sm">
+              <button
+                type="button"
+                onClick={onSwitchToLogin}
+                className="font-medium text-primary hover:text-primary/80 transition-colors"
+              >
+                Already have an account? Sign in
+              </button>
+            </div>
+          </form>
+
+          {/* Footer */}
+          <div className="text-center text-xs text-muted-foreground font-light">
+            By creating an account, you agree to our{' '}
+            <Link to="/terms" className="text-primary hover:text-primary/80">
+              Terms of Service
+            </Link>{' '}
+            and{' '}
+            <Link to="/privacy" className="text-primary hover:text-primary/80">
+              Privacy Policy
+            </Link>
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );

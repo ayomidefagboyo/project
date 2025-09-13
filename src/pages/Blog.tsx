@@ -97,8 +97,8 @@ const Blog: React.FC = () => {
               </Link>
             </div>
             <div className="hidden md:flex items-center space-x-12">
-              <Link to="/features" className="text-gray-500 hover:text-gray-900 font-medium text-sm transition-colors">Features</Link>
-              <Link to="/pricing" className="text-gray-500 hover:text-gray-900 font-medium text-sm transition-colors">Pricing</Link>
+              <Link to="/#features" className="text-gray-500 hover:text-gray-900 font-medium text-sm transition-colors">Features</Link>
+              <Link to="/#pricing" className="text-gray-500 hover:text-gray-900 font-medium text-sm transition-colors">Pricing</Link>
               <Link to="/about" className="text-gray-500 hover:text-gray-900 font-medium text-sm transition-colors">About</Link>
               <Link to="/blog" className="text-gray-900 font-medium text-sm">Blog</Link>
             </div>

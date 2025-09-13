@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
     ALLOWED_FILE_TYPES: list = [".pdf", ".jpg", ".jpeg", ".png", ".gif"]
     
+    # Stripe Settings
+    STRIPE_SECRET_KEY: Optional[str] = os.getenv("STRIPE_SECRET_KEY", "")
+    VITE_STRIPE_PUBLISHABLE_KEY: Optional[str] = os.getenv("VITE_STRIPE_PUBLISHABLE_KEY", "")
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

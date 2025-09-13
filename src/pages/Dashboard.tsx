@@ -1,5 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { DollarSign, FileText, CreditCard, TrendingUp, BarChart, ChevronDown, Building2, Filter } from 'lucide-react';
+import { 
+  DollarSign, 
+  FileText, 
+  CreditCard, 
+  TrendingUp, 
+  BarChart3, 
+  ChevronDown, 
+  Building2, 
+  Filter,
+  Calendar,
+  Users,
+  Activity,
+  AlertTriangle,
+  CheckCircle,
+  Clock,
+  ArrowRight
+} from 'lucide-react';
 import DashboardCard from '@/components/dashboard/DashboardCard';
 import RecentActivity from '@/components/dashboard/RecentActivity';
 import { Button } from '@/components/ui/Button';
@@ -23,7 +39,7 @@ const Dashboard: React.FC = () => {
     scope: canViewAllOutlets() ? 'all' : 'outlet_specific',
     selectedOutlets: [],
     dateRange: {
-      startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days ago
+      startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
       endDate: new Date().toISOString()
     }
   });
@@ -87,347 +103,421 @@ const Dashboard: React.FC = () => {
     }
   }, [dashboardView.selectedOutlets]);
 
-  // Calculate metrics from vendor invoices
   const calculateMetrics = () => {
-    const paidInvoices = vendorInvoices.filter(inv => inv.status === 'paid');
-    const pendingInvoices = vendorInvoices.filter(inv => inv.status === 'pending_approval');
-    const approvedInvoices = vendorInvoices.filter(inv => inv.status === 'approved');
-
-    const totalRevenue = 0; // This would come from sales data
-    const totalExpenses = paidInvoices.reduce((sum, inv) => sum + inv.amount, 0);
-    const pendingAmount = pendingInvoices.reduce((sum, inv) => sum + inv.amount, 0);
-    const approvedAmount = approvedInvoices.reduce((sum, inv) => sum + inv.amount, 0);
-
+    const totalExpenses = vendorInvoices.reduce((sum, invoice) => 
+      sum + (invoice.totalAmount || 0), 0
+    );
+    const pendingInvoices = vendorInvoices.filter(invoice => 
+      invoice.approvalStatus === 'pending'
+    ).length;
+    const approvedInvoices = vendorInvoices.filter(invoice => 
+      invoice.approvalStatus === 'approved'
+    ).length;
+    
     return {
-      totalRevenue,
       totalExpenses,
-      pendingInvoicesCount: pendingInvoices.length,
-      pendingAmount,
-      approvedAmount,
-      netProfit: totalRevenue - totalExpenses,
-      cashBalance: 0 // This would come from daily reports
+      pendingInvoices,
+      approvedInvoices,
+      totalInvoices: vendorInvoices.length
     };
   };
 
   const metrics = calculateMetrics();
 
-  // Get selected outlets for display
-  const selectedOutletNames = dashboardView.selectedOutlets
-    .map(id => userOutlets.find(outlet => outlet.id === id)?.name)
-    .filter(Boolean);
-
-  // Recent vendor invoices
-  const recentInvoices = [...vendorInvoices]
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-    .slice(0, 5);
-
-  const handleOutletToggle = (outletId: string) => {
-    setDashboardView(prev => {
-      const isSelected = prev.selectedOutlets.includes(outletId);
-      const newSelectedOutlets = isSelected
-        ? prev.selectedOutlets.filter(id => id !== outletId)
-        : [...prev.selectedOutlets, outletId];
-
-      return {
-        ...prev,
-        selectedOutlets: newSelectedOutlets
+  // Export report functionality
+  const handleExportReport = () => {
+    try {
+      const reportData = {
+        generatedAt: new Date().toISOString(),
+        outlets: selectedOutletNames,
+        dateRange: {
+          startDate: dashboardView.dateRange.startDate,
+          endDate: dashboardView.dateRange.endDate
+        },
+        metrics: {
+          totalSales: 45250.00, // This would come from real data
+          totalExpenses: metrics.totalExpenses,
+          pendingInvoices: metrics.pendingInvoices,
+          approvedInvoices: metrics.approvedInvoices,
+          totalInvoices: metrics.totalInvoices
+        },
+        invoices: vendorInvoices.map(invoice => ({
+          id: invoice.id,
+          vendor: invoice.vendorName,
+          amount: invoice.totalAmount,
+          status: invoice.approvalStatus,
+          date: invoice.createdAt,
+          outlet: userOutlets.find(o => o.id === invoice.outletId)?.name
+        }))
       };
-    });
+
+      // Create and download CSV
+      const csvContent = generateCSVReport(reportData);
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `dashboard-report-${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error('Error exporting report:', error);
+      alert('Failed to export report. Please try again.');
+    }
   };
 
-  const handleScopeChange = (scope: 'all' | 'outlet_specific') => {
-    setDashboardView(prev => ({
-      ...prev,
-      scope,
-      selectedOutlets: scope === 'all' ? getAccessibleOutlets() : [getAccessibleOutlets()[0]].filter(Boolean)
-    }));
+  // Generate CSV content
+  const generateCSVReport = (data: any) => {
+    const headers = ['Metric', 'Value', 'Outlet'];
+    const rows = [
+      ['Total Sales', `$${data.metrics.totalSales.toLocaleString()}`, data.outlets.join('; ')],
+      ['Total Expenses', `$${data.metrics.totalExpenses.toLocaleString()}`, data.outlets.join('; ')],
+      ['Pending Invoices', data.metrics.pendingInvoices.toString(), data.outlets.join('; ')],
+      ['Approved Invoices', data.metrics.approvedInvoices.toString(), data.outlets.join('; ')],
+      ['Total Invoices', data.metrics.totalInvoices.toString(), data.outlets.join('; ')],
+      [''], // Empty row
+      ['Invoice Details', '', ''],
+      ['Invoice ID', 'Vendor', 'Amount', 'Status', 'Date', 'Outlet']
+    ];
+
+    // Add invoice details
+    data.invoices.forEach((invoice: any) => {
+      rows.push([
+        invoice.id,
+        invoice.vendor || 'N/A',
+        `$${(invoice.amount || 0).toLocaleString()}`,
+        invoice.status || 'Unknown',
+        new Date(invoice.date).toLocaleDateString(),
+        invoice.outlet || 'N/A'
+      ]);
+    });
+
+    return rows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
   };
 
   if (loading) {
     return (
-      <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600 dark:text-gray-400">Loading dashboard data...</p>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center space-y-6">
+          <div className="w-12 h-12 border-2 border-gray-200 border-t-gray-800 rounded-full animate-spin mx-auto" />
+          <div className="space-y-2">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white">Loading Dashboard</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400">Preparing your financial overview</p>
           </div>
         </div>
       </div>
     );
   }
 
+  const selectedOutletNames = dashboardView.selectedOutlets
+    .map(id => userOutlets.find(outlet => outlet.id === id)?.name)
+    .filter(Boolean);
+
   return (
-    <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
-      {/* Header Section with Outlet Selector */}
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="space-y-2">
-            <h1 className="text-xl sm:text-2xl font-semibold text-gray-900 dark:text-white">
-              Dashboard
-            </h1>
-            <p className="text-sm sm:text-base text-gray-600 dark:text-gray-300">
-              {isBusinessOwner ? 'Business overview across outlets' : 'Welcome back to Compazz'}
-            </p>
-          </div>
-          <div className="flex-shrink-0">
-            <Button className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white border-0">
-              Generate Report
-            </Button>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      {/* Header with Export and Filter */}
+      <div className="bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700">
+        <div className="max-w-7xl mx-auto px-6 py-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Dashboard</h1>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Overview of your business performance
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button 
+                variant="outline" 
+                className="flex items-center space-x-2"
+                onClick={() => setIsOutletSelectorOpen(!isOutletSelectorOpen)}
+              >
+                <Filter className="w-4 h-4" />
+                <span>Filter</span>
+                <ChevronDown className="w-4 h-4" />
+              </Button>
+              <Button 
+                className="flex items-center space-x-2 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100"
+                onClick={() => handleExportReport()}
+              >
+                <BarChart3 className="w-4 h-4" />
+                <span>Export Report</span>
+                <ArrowRight className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
         </div>
+      </div>
 
-        {/* Outlet Selector - Only show for business owners */}
+      <div className="max-w-7xl mx-auto px-6 py-12">
+        {/* Outlet Selector */}
         {canViewAllOutlets() && (
-          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 p-4">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-              <div className="flex items-center gap-3">
-                <Building2 className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-                <div>
-                  <h3 className="text-sm font-medium text-gray-900 dark:text-white">View Data For:</h3>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {dashboardView.scope === 'all' 
-                      ? `All outlets (${selectedOutletNames.length})` 
-                      : selectedOutletNames.join(', ')}
-                  </p>
+          <div className="mb-12">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-8">
+              <div className="flex flex-col lg:flex-row lg:items-center gap-6">
+                <div className="flex items-center space-x-4">
+                  <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/20 rounded-xl flex items-center justify-center">
+                    <Building2 className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Multi-Location View</h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Viewing data for {selectedOutletNames.length} location{selectedOutletNames.length !== 1 ? 's' : ''}
+                    </p>
+                  </div>
                 </div>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                {/* Scope Toggle */}
-                <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
+                
+                <div className="relative lg:ml-auto" data-dropdown="outlet-selector">
                   <button
-                    onClick={() => handleScopeChange('all')}
-                    className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-                      dashboardView.scope === 'all'
-                        ? 'bg-blue-600 text-white'
-                        : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
-                    }`}
+                    onClick={() => setIsOutletSelectorOpen(!isOutletSelectorOpen)}
+                    className="flex items-center space-x-3 px-6 py-3 bg-gray-50 dark:bg-gray-700 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
                   >
-                    All Outlets
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">
+                      {selectedOutletNames.length > 0 
+                        ? selectedOutletNames.join(', ')
+                        : 'Select locations'
+                      }
+                    </span>
+                    <ChevronDown className={`w-4 h-4 transition-transform ${isOutletSelectorOpen ? 'rotate-180' : ''}`} />
                   </button>
-                  <button
-                    onClick={() => handleScopeChange('outlet_specific')}
-                    className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-                      dashboardView.scope === 'outlet_specific'
-                        ? 'bg-blue-600 text-white'
-                        : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
-                    }`}
-                  >
-                    Specific Outlets
-                  </button>
-                </div>
-
-                {/* Outlet Selector Dropdown */}
-                {dashboardView.scope === 'outlet_specific' && (
-                  <div className="relative" data-dropdown="outlet-selector">
-                    <Button
-                      variant="outline"
-                      onClick={() => setIsOutletSelectorOpen(!isOutletSelectorOpen)}
-                      className="flex items-center gap-2"
-                    >
-                      <Filter size={16} />
-                      Select Outlets
-                      <ChevronDown size={14} className={`transition-transform ${isOutletSelectorOpen ? 'rotate-180' : ''}`} />
-                    </Button>
-                    
-                    {isOutletSelectorOpen && (
-                      <div className="absolute top-full right-0 mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg z-50 p-2">
-                        {userOutlets.map((outlet) => (
-                          <label key={outlet.id} className="flex items-center gap-2 p-2 hover:bg-gray-50 dark:hover:bg-gray-700 rounded cursor-pointer">
+                  
+                  {isOutletSelectorOpen && (
+                    <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-lg z-10">
+                      <div className="p-4 space-y-2">
+                        {userOutlets.map(outlet => (
+                          <label key={outlet.id} className="flex items-center space-x-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
                             <input
                               type="checkbox"
                               checked={dashboardView.selectedOutlets.includes(outlet.id)}
-                              onChange={() => handleOutletToggle(outlet.id)}
-                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setDashboardView(prev => ({
+                                    ...prev,
+                                    selectedOutlets: [...prev.selectedOutlets, outlet.id]
+                                  }));
+                                } else {
+                                  setDashboardView(prev => ({
+                                    ...prev,
+                                    selectedOutlets: prev.selectedOutlets.filter(id => id !== outlet.id)
+                                  }));
+                                }
+                              }}
+                              className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                             />
-                            <span className="text-sm text-gray-900 dark:text-white">{outlet.name}</span>
-                            <span className="text-xs text-gray-500 dark:text-gray-400 capitalize">
-                              {outlet.businessType}
-                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                                {outlet.name}
+                              </p>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">
+                                {outlet.businessType}
+                              </p>
+                            </div>
                           </label>
                         ))}
                       </div>
-                    )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Key Metrics Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
+          <DashboardCard
+            title="Total Sales"
+            value="$45,250.00"
+            icon={<TrendingUp className="w-5 h-5" />}
+            subtitle="This month"
+            change={{ value: 15.2, isPositive: true }}
+          />
+          <DashboardCard
+            title="Total Expenses"
+            value={formatCurrency(metrics.totalExpenses)}
+            icon={<DollarSign className="w-5 h-5" />}
+            subtitle="This month"
+            change={{ value: 12.5, isPositive: false }}
+          />
+          <DashboardCard
+            title="Pending Approvals"
+            value={metrics.pendingInvoices.toString()}
+            icon={<Clock className="w-5 h-5" />}
+            subtitle={metrics.pendingInvoices === 1 ? "Invoice awaiting" : "Invoices awaiting"}
+            change={{ value: 8.1, isPositive: false }}
+          />
+          <DashboardCard
+            title="Approved Invoices"
+            value={metrics.approvedInvoices.toString()}
+            icon={<CheckCircle className="w-5 h-5" />}
+            subtitle="Ready for payment"
+            change={{ value: 23.4, isPositive: true }}
+          />
+        </div>
+
+        {/* Main Content Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Recent Vendor Invoices */}
+          <div className="lg:col-span-2">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700">
+              <div className="p-8 border-b border-gray-100 dark:border-gray-700">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Recent Invoices</h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      Latest vendor invoices requiring attention
+                    </p>
+                  </div>
+                  <Button variant="outline" size="sm" className="flex items-center space-x-2">
+                    <Filter className="w-4 h-4" />
+                    <span>Filter</span>
+                  </Button>
+                </div>
+              </div>
+              
+              <div className="p-8">
+                {vendorInvoices.length > 0 ? (
+                  <VendorInvoiceTable
+                    invoices={vendorInvoices.slice(0, 5)}
+                    onApprove={(invoice) => {
+                      console.log('Approve invoice:', invoice);
+                    }}
+                    onReject={(invoice) => {
+                      console.log('Reject invoice:', invoice);
+                    }}
+                    showActions={true}
+                  />
+                ) : (
+                  <div className="text-center py-12">
+                    <FileText className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No invoices yet</h3>
+                    <p className="text-gray-500 dark:text-gray-400 max-w-sm mx-auto">
+                      When you receive vendor invoices, they'll appear here for review and approval.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Activity Feed */}
+          <div className="space-y-8">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-8">
+              <div className="flex items-center space-x-3 mb-6">
+                <div className="w-10 h-10 bg-green-50 dark:bg-green-900/20 rounded-xl flex items-center justify-center">
+                  <Activity className="w-5 h-5 text-green-600 dark:text-green-400" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Activity</h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Live updates</p>
+                </div>
+              </div>
+              
+              <RecentActivity />
+            </div>
+
+            {/* Quick Actions */}
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-8">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-6">Quick Actions</h2>
+              <div className="space-y-3">
+                <button className="w-full flex items-center space-x-3 p-4 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 text-left transition-colors">
+                  <div className="w-10 h-10 bg-blue-50 dark:bg-blue-900/20 rounded-xl flex items-center justify-center">
+                    <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">Create Invoice</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Generate new invoice</p>
+                  </div>
+                </button>
+                
+                <button className="w-full flex items-center space-x-3 p-4 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 text-left transition-colors">
+                  <div className="w-10 h-10 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl flex items-center justify-center">
+                    <CreditCard className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">Add Expense</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Record new expense</p>
+                  </div>
+                </button>
+                
+                <button className="w-full flex items-center space-x-3 p-4 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 text-left transition-colors">
+                  <div className="w-10 h-10 bg-purple-50 dark:bg-purple-900/20 rounded-xl flex items-center justify-center">
+                    <BarChart3 className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">EOD Report</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">End of day summary</p>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Per-Outlet Breakdown */}
+        {canViewAllOutlets() && dashboardView.selectedOutlets.length > 1 && (
+          <div className="mt-12">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-8">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-8">Outlet Performance</h2>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {dashboardView.selectedOutlets.length > 0 ? (
+                  dashboardView.selectedOutlets.map(outletId => {
+                    const outlet = userOutlets.find(o => o.id === outletId);
+                    if (!outlet) return null;
+
+                    const outletInvoices = vendorInvoices.filter(inv => inv.outletId === outletId);
+                    const outletExpenses = outletInvoices.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
+                    const outletPending = outletInvoices.filter(inv => inv.approvalStatus === 'pending').length;
+
+                    return (
+                      <div key={outlet.id} className="p-6 border border-gray-100 dark:border-gray-700 rounded-xl hover:shadow-sm transition-shadow">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <h4 className="font-semibold text-gray-900 dark:text-white">{outlet.name}</h4>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 capitalize mt-1">
+                              {outlet.businessType}
+                            </p>
+                          </div>
+                          <div className="w-8 h-8 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center">
+                            <Building2 className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                          </div>
+                        </div>
+                        
+                        <div className="space-y-3">
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-gray-600 dark:text-gray-400">Monthly Expenses</span>
+                            <span className="font-semibold text-gray-900 dark:text-white">
+                              {formatCurrency(outletExpenses)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-gray-600 dark:text-gray-400">Pending Items</span>
+                            <span className={`font-semibold ${
+                              outletPending > 0 
+                                ? 'text-orange-600 dark:text-orange-400' 
+                                : 'text-gray-900 dark:text-white'
+                            }`}>
+                              {outletPending}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="col-span-full text-center py-12">
+                    <Building2 className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+                    <p className="text-gray-500 dark:text-gray-400">
+                      Select outlets above to view performance breakdown
+                    </p>
                   </div>
                 )}
               </div>
             </div>
           </div>
         )}
-      </div>
-
-      {/* Dashboard Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <DashboardCard
-          title="Revenue"
-          value={formatCurrency(metrics.totalRevenue)}
-          icon={<DollarSign size={20} />}
-          change={{ value: 12.5, isPositive: true }}
-          subtitle={dashboardView.scope === 'all' ? 'All outlets' : `${selectedOutletNames.length} outlet${selectedOutletNames.length !== 1 ? 's' : ''}`}
-        />
-        
-        <DashboardCard
-          title="Expenses (Paid)"
-          value={formatCurrency(metrics.totalExpenses)}
-          icon={<CreditCard size={20} />}
-          change={{ value: 5.2, isPositive: false }}
-          subtitle="Vendor invoices paid"
-        />
-        
-        <DashboardCard
-          title="Pending Approval"
-          value={`${metrics.pendingInvoicesCount}`}
-          icon={<FileText size={20} />}
-          change={{ value: 2.1, isPositive: false }}
-          subtitle={`${formatCurrency(metrics.pendingAmount)} waiting`}
-        />
-        
-        <DashboardCard
-          title="Approved (Unpaid)"
-          value={formatCurrency(metrics.approvedAmount)}
-          icon={<TrendingUp size={20} />}
-          change={{ value: 8.3, isPositive: true }}
-          subtitle="Ready for payment"
-        />
-      </div>
-
-      {/* Error Message */}
-      {error && (
-        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-          <p className="text-red-800 dark:text-red-200">{error}</p>
-        </div>
-      )}
-
-      {/* Main Content */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-        {/* Recent Vendor Invoices */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-medium text-gray-900 dark:text-white">
-                Recent Vendor Invoices
-              </h2>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Latest bills from suppliers across {dashboardView.scope === 'all' ? 'all outlets' : 'selected outlets'}
-              </p>
-            </div>
-            <a 
-              href="/invoices" 
-              className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none border border-gray-300 dark:border-gray-500 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 h-9 px-3 rounded-md w-full sm:w-auto justify-center"
-            >
-              View All
-            </a>
-          </div>
-          {recentInvoices.length > 0 ? (
-            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600">
-              <VendorInvoiceTable invoices={recentInvoices} />
-            </div>
-          ) : (
-            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 p-8 text-center">
-              <FileText size={48} className="mx-auto text-gray-400 mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-                No vendor invoices yet
-              </h3>
-              <p className="text-gray-600 dark:text-gray-400">
-                Vendor invoices will appear here once they are created
-              </p>
-            </div>
-          )}
-        </div>
-        
-        {/* Outlet Breakdown */}
-        <div className="space-y-4">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-            {dashboardView.scope === 'all' ? 'Outlet Breakdown' : 'Selected Outlets'}
-          </h3>
-          
-          <div className="space-y-3">
-            {selectedOutletNames.length > 0 ? (
-              userOutlets
-                .filter(outlet => dashboardView.selectedOutlets.includes(outlet.id))
-                .map((outlet) => {
-                  const outletInvoices = vendorInvoices.filter(inv => inv.outletId === outlet.id);
-                  const outletPending = outletInvoices.filter(inv => inv.status === 'pending_approval').length;
-                  const outletExpenses = outletInvoices
-                    .filter(inv => inv.status === 'paid')
-                    .reduce((sum, inv) => sum + inv.amount, 0);
-                  
-                  return (
-                    <div key={outlet.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="font-medium text-gray-900 dark:text-white">{outlet.name}</h4>
-                        <span className="text-xs text-gray-500 dark:text-gray-400 capitalize">
-                          {outlet.businessType}
-                        </span>
-                      </div>
-                      <div className="space-y-1 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-gray-600 dark:text-gray-400">Expenses:</span>
-                          <span className="font-medium text-gray-900 dark:text-white">
-                            {formatCurrency(outletExpenses)}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600 dark:text-gray-400">Pending:</span>
-                          <span className={`font-medium ${outletPending > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-900 dark:text-white'}`}>
-                            {outletPending}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-            ) : (
-              <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 p-6 text-center">
-                <Building2 size={32} className="mx-auto text-gray-400 mb-2" />
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Select outlets to view breakdown
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-      
-      {/* Multi-Outlet Analytics Chart */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
-          <div>
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-              {dashboardView.scope === 'all' ? 'Multi-Outlet Analytics' : 'Outlet Performance'}
-            </h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              Vendor invoice trends across selected outlets
-            </p>
-          </div>
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <span className="inline-block w-3 h-3 rounded-full bg-green-500"></span>
-              <span className="text-xs text-gray-500 dark:text-gray-400">Revenue</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <span className="inline-block w-3 h-3 rounded-full bg-red-500"></span>
-              <span className="text-xs text-gray-500 dark:text-gray-400">Expenses</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <span className="inline-block w-3 h-3 rounded-full bg-orange-500"></span>
-              <span className="text-xs text-gray-500 dark:text-gray-400">Pending</span>
-            </div>
-          </div>
-        </div>
-        <div className="h-72 flex items-center justify-center">
-          <div className="text-center">
-            <BarChart size={48} className="text-gray-300 dark:text-gray-700 mx-auto mb-4" />
-            <p className="text-gray-500 dark:text-gray-400">
-              {dashboardView.scope === 'all' 
-                ? 'Multi-outlet analytics chart will be displayed here'
-                : 'Outlet comparison chart will be displayed here'}
-            </p>
-            <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
-              Showing data for {selectedOutletNames.length} outlet{selectedOutletNames.length !== 1 ? 's' : ''}
-            </p>
-          </div>
-        </div>
       </div>
     </div>
   );

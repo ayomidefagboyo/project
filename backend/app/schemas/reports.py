@@ -2,8 +2,8 @@
 Pydantic schemas for EOD reporting and analytics data validation
 """
 
-from pydantic import BaseModel, Field, validator
-from typing import Optional, Dict, Any, List
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional, Dict, Any, List, ForwardRef
 from datetime import datetime, date
 from enum import Enum
 
@@ -29,8 +29,9 @@ class EODData(BaseModel):
     inventory_cost: float = Field(0.0, ge=0, description="Inventory cost")
     notes: Optional[str] = Field(None, max_length=1000, description="Additional notes")
 
-    @validator('sales_cash', 'sales_transfer', 'sales_pos', 'sales_credit', 
-               'opening_balance', 'closing_balance', 'bank_deposit', 'inventory_cost')
+    @field_validator('sales_cash', 'sales_transfer', 'sales_pos', 'sales_credit', 
+                     'opening_balance', 'closing_balance', 'bank_deposit', 'inventory_cost')
+    @classmethod
     def validate_amounts(cls, v):
         if v < 0:
             raise ValueError('Amount cannot be negative')
@@ -78,8 +79,9 @@ class EODUpdate(BaseModel):
     notes: Optional[str] = Field(None, max_length=1000)
     status: Optional[ReportStatus] = None
 
-    @validator('sales_cash', 'sales_transfer', 'sales_pos', 'sales_credit', 
-               'opening_balance', 'closing_balance', 'bank_deposit', 'inventory_cost')
+    @field_validator('sales_cash', 'sales_transfer', 'sales_pos', 'sales_credit', 
+                     'opening_balance', 'closing_balance', 'bank_deposit', 'inventory_cost')
+    @classmethod
     def validate_amounts(cls, v):
         if v is not None and v < 0:
             raise ValueError('Amount cannot be negative')

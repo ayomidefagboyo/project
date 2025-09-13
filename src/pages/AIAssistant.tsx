@@ -1,15 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Bot,
+  Brain,
   MessageSquare,
   Send,
   Shield,
   TrendingDown,
   Eye,
   Zap,
-  Brain,
   TrendingUp,
-  AlertTriangle
+  AlertTriangle,
+  BarChart3,
+  Search,
+  DollarSign,
+  Activity,
+  Plus,
+  Edit2,
+  Trash2,
+  Check,
+  X,
+  MoreVertical
 } from 'lucide-react';
 import { useOutlet } from '@/contexts/OutletContext';
 import { eodService, useLoadingState, ErrorMessage } from '@/lib/services';
@@ -83,7 +92,7 @@ interface Anomaly {
   data: any;
 }
 
-// Helper function to format AI response text for better readability
+// Helper function to format AI response text and remove emojis
 const formatResponseText = (content: string) => {
   return content
     // Remove markdown headers and make them bold text
@@ -94,9 +103,92 @@ const formatResponseText = (content: string) => {
     .replace(/\\*(.+?)\\*/g, '$1')
     // Clean up bullet points
     .replace(/^\\s*[\u2022\\*\\-]\\s*/gm, '\u2022 ')
+    // Remove emojis
+    .replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '')
     // Remove excessive line breaks but keep paragraph structure
     .replace(/\\n{3,}/g, '\\n\\n')
     .trim();
+};
+
+// Helper function to render AI responses with appropriate icons
+const renderAIResponse = (content: string) => {
+  const cleanContent = formatResponseText(content);
+  const lines = cleanContent.split('\\n');
+  
+  return (
+    <div className="space-y-3">
+      {lines.map((line, index) => {
+        const trimmedLine = line.trim();
+        if (!trimmedLine) return <div key={index} className="h-2" />;
+        
+        // Sales Analysis
+        if (trimmedLine.includes('Sales Summary') || trimmedLine.includes('Sales Performance')) {
+          return (
+            <div key={index} className="flex items-start space-x-3 p-3 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-lg">
+              <BarChart3 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 mt-0.5" />
+              <div className="font-medium text-foreground">{trimmedLine}</div>
+            </div>
+          );
+        }
+        
+        // Top Performer
+        if (trimmedLine.includes('Top Performer') || trimmedLine.includes('Best:')) {
+          return (
+            <div key={index} className="flex items-start space-x-3 p-3 bg-blue-50/50 dark:bg-blue-900/10 rounded-lg">
+              <TrendingUp className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5" />
+              <div className="text-foreground">{trimmedLine}</div>
+            </div>
+          );
+        }
+        
+        // Fraud Analysis
+        if (trimmedLine.includes('Fraud') || trimmedLine.includes('fraud')) {
+          return (
+            <div key={index} className="flex items-start space-x-3 p-3 bg-red-50/50 dark:bg-red-900/10 rounded-lg">
+              <Shield className="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5" />
+              <div className="font-medium text-red-700 dark:text-red-300">{trimmedLine}</div>
+            </div>
+          );
+        }
+        
+        // Anomaly Detection
+        if (trimmedLine.includes('Anomaly') || trimmedLine.includes('anomaly') || trimmedLine.includes('Alert')) {
+          return (
+            <div key={index} className="flex items-start space-x-3 p-3 bg-amber-50/50 dark:bg-amber-900/10 rounded-lg">
+              <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5" />
+              <div className="font-medium text-amber-700 dark:text-amber-300">{trimmedLine}</div>
+            </div>
+          );
+        }
+        
+        // Profit Analysis
+        if (trimmedLine.includes('Profit') || trimmedLine.includes('profit')) {
+          return (
+            <div key={index} className="flex items-start space-x-3 p-3 bg-green-50/50 dark:bg-green-900/10 rounded-lg">
+              <DollarSign className="w-5 h-5 text-green-600 dark:text-green-400 mt-0.5" />
+              <div className="text-foreground">{trimmedLine}</div>
+            </div>
+          );
+        }
+        
+        // Bullet points
+        if (trimmedLine.startsWith('\u2022')) {
+          return (
+            <div key={index} className="ml-8 text-muted-foreground">
+              {trimmedLine}
+            </div>
+          );
+        }
+        
+        // Regular lines
+        return (
+          <div key={index} className="text-foreground leading-relaxed">
+            {trimmedLine}
+          </div>
+        );
+      })}
+    </div>
+  );
 };
 
 const AIAssistant: React.FC = () => {
@@ -114,7 +206,9 @@ const AIAssistant: React.FC = () => {
   const [aiLoading, setAiLoading] = useState(false);
   const [detectedAnomalies, setDetectedAnomalies] = useState<Anomaly[]>([]);
   const [aiInsights, setAiInsights] = useState<AIInsight[]>([]);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
+  const [newConversationTitle, setNewConversationTitle] = useState('');
   
   // Auto-collapse sidebar on mobile
   useEffect(() => {
@@ -243,16 +337,44 @@ const AIAssistant: React.FC = () => {
   };
 
   // AI Assistant Functions
-  const createNewConversation = () => {
+  const createNewConversation = (title?: string) => {
     const newConversation: Conversation = {
       id: `conv_${Date.now()}`,
-      title: `Business Analysis ${conversations.length + 1}`,
+      title: title || `Business Analysis ${conversations.length + 1}`,
       messages: [],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
     setConversations(prev => [newConversation, ...prev]);
     setActiveConversationId(newConversation.id);
+    return newConversation;
+  };
+
+  const deleteConversation = (conversationId: string) => {
+    setConversations(prev => prev.filter(conv => conv.id !== conversationId));
+    if (activeConversationId === conversationId) {
+      const remainingConversations = conversations.filter(conv => conv.id !== conversationId);
+      if (remainingConversations.length > 0) {
+        setActiveConversationId(remainingConversations[0].id);
+      } else {
+        createNewConversation();
+      }
+    }
+  };
+
+  const updateConversationTitle = (conversationId: string, newTitle: string) => {
+    setConversations(prev => prev.map(conv =>
+      conv.id === conversationId
+        ? { ...conv, title: newTitle, updated_at: new Date().toISOString() }
+        : conv
+    ));
+    setEditingConversationId(null);
+    setNewConversationTitle('');
+  };
+
+  const startEditingTitle = (conversationId: string, currentTitle: string) => {
+    setEditingConversationId(conversationId);
+    setNewConversationTitle(currentTitle);
   };
 
   const detectAnomalies = async () => {
@@ -532,118 +654,250 @@ Ask me about specific metrics, trends, or any concerns about your business opera
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600 dark:text-gray-400">Loading AI Assistant...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-4 text-muted-foreground font-light">Loading Compazz Insights...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-white dark:bg-gray-900">
-      <div className="h-screen flex flex-col">
-        {error && <ErrorMessage error={error} onDismiss={() => setError(null)} />}
-
-        {/* Header - Mobile Responsive */}
-        <div className="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex-shrink-0">
-          <div className="px-3 sm:px-6 py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <Bot className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600 mr-2 sm:mr-3" />
-                <h1 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-white">
-                  AI Assistant
-                </h1>
+    <div className="h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+      <div className="h-full flex flex-col">
+        {error && (
+          <div className="bg-destructive/10 border-b border-destructive/20 px-6 py-4">
+            <div className="max-w-6xl mx-auto flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <AlertTriangle className="w-5 h-5 text-destructive" />
+                <span className="text-destructive font-medium">{error}</span>
               </div>
               <button
-                onClick={createNewConversation}
-                className="flex items-center px-2 sm:px-3 py-1.5 text-xs sm:text-sm bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+                onClick={() => setError(null)}
+                className="text-destructive hover:text-destructive/80 transition-colors"
               >
-                <MessageSquare className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                <span className="hidden sm:inline">New Chat</span>
-                <span className="sm:hidden">New</span>
+                <AlertTriangle className="w-4 h-4" />
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Header */}
+        <div className="border-b border-border bg-card flex-shrink-0">
+          <div className="max-w-6xl mx-auto px-6 py-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <div className="w-10 h-10 bg-gradient-to-tr from-primary to-primary/80 rounded-xl flex items-center justify-center shadow-sm">
+                  <Brain className="w-5 h-5 text-primary-foreground" />
+                </div>
+                <div>
+                  <h1 className="text-2xl font-light text-foreground tracking-tight">
+                    Compazz Insights
+                  </h1>
+                </div>
+              </div>
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={() => createNewConversation()}
+                  className="btn-primary px-4 py-2 text-sm font-medium"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  New Chat
+                </button>
+                {conversations.length > 0 && (
+                  <div className="text-xs text-muted-foreground">
+                    {conversations.length} conversation{conversations.length !== 1 ? 's' : ''}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
 
         {/* Main Content */}
         <div className="flex flex-1 min-h-0">
-          {/* Sidebar - Desktop Only */}
-          <div className={`${isSidebarCollapsed ? 'w-0' : 'w-64 sm:w-80'} border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col transition-all duration-300 ${isSidebarCollapsed ? 'border-r-0' : ''} hidden sm:flex`}>
+          {/* Sidebar */}
+          <div className={`${isSidebarCollapsed ? 'w-0' : 'w-80'} border-r border-border bg-card flex flex-col transition-all duration-300 ${isSidebarCollapsed ? 'border-r-0' : ''} hidden lg:flex`}>
             {!isSidebarCollapsed && (
-              <div className="p-3 sm:p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                <h3 className="font-medium text-sm sm:text-base text-gray-900 dark:text-white">Recent Conversations</h3>
-                <button
-                  onClick={() => setIsSidebarCollapsed(true)}
-                  className="p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-                >
-                  <div className="w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center">
-                    <div className="w-3 h-3 border-l-2 border-t-2 border-gray-500 transform rotate-45"></div>
+              <>
+                <div className="p-6 border-b border-border">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-medium text-foreground tracking-tight">Conversations</h3>
+                    <button
+                      onClick={() => setIsSidebarCollapsed(true)}
+                      className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded-lg hover:bg-muted"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
-                </button>
-              </div>
-            )}
-            {!isSidebarCollapsed && (
-              <div className="flex-1 overflow-y-auto">
-                {conversations.map((conversation) => (
                   <button
-                    key={conversation.id}
-                    onClick={() => setActiveConversationId(conversation.id)}
-                    className={`w-full p-2 sm:p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700 border-b border-gray-100 dark:border-gray-700 transition-colors ${
-                      activeConversationId === conversation.id ? 'bg-blue-50 dark:bg-blue-900/20 border-r-2 border-r-blue-500' : ''
-                    }`}
+                    onClick={() => createNewConversation()}
+                    className="w-full flex items-center space-x-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
                   >
-                    <div className="font-medium text-xs sm:text-sm text-gray-900 dark:text-white truncate">
-                      {conversation.title}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      {conversation.messages.length} messages
-                    </div>
+                    <Plus className="w-4 h-4" />
+                    <span>New Chat</span>
                   </button>
-                ))}
-              </div>
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  {conversations.map((conversation) => (
+                    <div
+                      key={conversation.id}
+                      className={`group border-b border-border transition-colors ${
+                        activeConversationId === conversation.id ? 'bg-primary/5 border-r-2 border-r-primary' : 'hover:bg-muted/50'
+                      }`}
+                    >
+                      <div className="flex items-center">
+                        <button
+                          onClick={() => setActiveConversationId(conversation.id)}
+                          className="flex-1 p-4 text-left"
+                        >
+                          {editingConversationId === conversation.id ? (
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="text"
+                                value={newConversationTitle}
+                                onChange={(e) => setNewConversationTitle(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    updateConversationTitle(conversation.id, newConversationTitle);
+                                  } else if (e.key === 'Escape') {
+                                    setEditingConversationId(null);
+                                    setNewConversationTitle('');
+                                  }
+                                }}
+                                className="flex-1 px-2 py-1 text-xs border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary bg-background"
+                                autoFocus
+                              />
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  updateConversationTitle(conversation.id, newConversationTitle);
+                                }}
+                                className="p-1 text-emerald-600 hover:bg-emerald-50 rounded"
+                              >
+                                <Check className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingConversationId(null);
+                                  setNewConversationTitle('');
+                                }}
+                                className="p-1 text-red-600 hover:bg-red-50 rounded"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="font-medium text-sm text-foreground truncate">
+                                {conversation.title}
+                              </div>
+                              <div className="text-xs text-muted-foreground mt-1 flex items-center justify-between">
+                                <span>{conversation.messages.length} messages</span>
+                                <span>{new Date(conversation.updated_at).toLocaleDateString()}</span>
+                              </div>
+                            </>
+                          )}
+                        </button>
+                        
+                        {editingConversationId !== conversation.id && (
+                          <div className="opacity-0 group-hover:opacity-100 transition-opacity pr-2">
+                            <div className="flex items-center space-x-1">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  startEditingTitle(conversation.id, conversation.title);
+                                }}
+                                className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors"
+                                title="Edit title"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                              {conversations.length > 1 && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    deleteConversation(conversation.id);
+                                  }}
+                                  className="p-1.5 text-muted-foreground hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                  title="Delete conversation"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
           </div>
 
-          {/* Toggle Button for Collapsed Sidebar - Desktop Only */}
+          {/* Toggle Button for Collapsed Sidebar */}
           {isSidebarCollapsed && (
-            <div className="absolute top-20 left-4 z-10 hidden sm:block">
+            <div className="absolute top-24 left-6 z-10 hidden lg:block">
               <button
                 onClick={() => setIsSidebarCollapsed(false)}
-                className="p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm hover:shadow-md transition-shadow text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+                className="p-3 bg-card border border-border rounded-xl shadow-sm hover:shadow-md transition-all text-muted-foreground hover:text-foreground"
               >
-                <MessageSquare className="h-4 w-4 sm:h-5 sm:w-5" />
+                <MessageSquare className="w-5 h-5" />
               </button>
             </div>
           )}
 
-          {/* Chat Area - Mobile Responsive */}
-          <div className="flex-1 flex flex-col bg-white dark:bg-gray-800 relative">
+          {/* Chat Area */}
+          <div className="flex-1 flex flex-col bg-card relative">
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-3 sm:p-6">
-              <div className="max-w-full sm:max-w-3xl mx-auto">
-                {/* Welcome Screen with Quick Questions */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="max-w-4xl mx-auto">
+                {/* Welcome Screen */}
                 {!activeConversationId || conversations.find(c => c.id === activeConversationId)?.messages.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full min-h-72 sm:min-h-96">
-                    <div className="text-center mb-6 sm:mb-8 px-4">
-                      <Bot className="h-12 w-12 sm:h-16 sm:w-16 text-blue-600 mx-auto mb-3 sm:mb-4" />
-                      <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 dark:text-white mb-2">
-                        How can I help you today?
+                  <div className="flex flex-col items-center justify-center h-full min-h-96">
+                    <div className="text-center mb-12">
+                      <div className="w-16 h-16 bg-gradient-to-tr from-primary to-primary/80 rounded-2xl flex items-center justify-center shadow-sm mx-auto mb-6">
+                        <Brain className="w-8 h-8 text-primary-foreground" />
+                      </div>
+                      <h2 className="text-3xl font-light text-foreground mb-3 tracking-tight">
+                        Welcome to Compazz Insights
                       </h2>
-                      <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400">
-                        Ask me anything about your business performance, analytics, or operations
+                      <p className="text-muted-foreground font-light max-w-lg mx-auto leading-relaxed">
+                        Your AI-powered business intelligence assistant. Ask me about sales performance, 
+                        fraud detection, operational anomalies, or any business analytics questions.
                       </p>
                     </div>
                     
-                    {/* Quick Questions Grid - Mobile Responsive */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 w-full max-w-full sm:max-w-2xl px-4">
+                    {/* Quick Actions Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-3xl">
                       {[
-                        { question: 'How are sales performing today?', icon: '📊' },
-                        { question: 'Check for suspicious activities', icon: '🔍' },
-                        { question: 'What are today\'s profit margins?', icon: '💰' },
-                        { question: 'Detect any operational anomalies', icon: '⚠️' }
+                        { 
+                          question: 'How are sales performing today?', 
+                          icon: BarChart3,
+                          color: 'emerald',
+                          description: 'Get detailed sales analytics and performance metrics'
+                        },
+                        { 
+                          question: 'Check for suspicious activities', 
+                          icon: Shield,
+                          color: 'red',
+                          description: 'Run fraud detection and security analysis'
+                        },
+                        { 
+                          question: 'What are today\'s profit margins?', 
+                          icon: DollarSign,
+                          color: 'green',
+                          description: 'Analyze profitability and margin trends'
+                        },
+                        { 
+                          question: 'Detect any operational anomalies', 
+                          icon: AlertTriangle,
+                          color: 'amber',
+                          description: 'Identify unusual patterns and outliers'
+                        }
                       ].map((item, index) => (
                         <button
                           key={index}
@@ -651,39 +905,48 @@ Ask me about specific metrics, trends, or any concerns about your business opera
                             setCurrentMessage(item.question);
                             setTimeout(() => sendMessage(), 100);
                           }}
-                          className="p-4 sm:p-6 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-xl border border-gray-200 dark:border-gray-600 text-left transition-all hover:shadow-md"
+                          className="card p-6 text-left transition-all hover:shadow-md group"
                         >
-                          <div className="text-xl sm:text-2xl mb-2">{item.icon}</div>
-                          <div className="font-medium text-sm sm:text-base text-gray-900 dark:text-white">
+                          <div className={`w-10 h-10 bg-${item.color}-50 dark:bg-${item.color}-900/20 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform`}>
+                            <item.icon className={`w-5 h-5 text-${item.color}-600 dark:text-${item.color}-400`} />
+                          </div>
+                          <div className="font-medium text-foreground mb-2 tracking-tight">
                             {item.question}
+                          </div>
+                          <div className="text-sm text-muted-foreground font-light">
+                            {item.description}
                           </div>
                         </button>
                       ))}
                     </div>
                   </div>
                 ) : (
-                  /* Regular Conversation View - Mobile Responsive */
-                  <div className="space-y-4 sm:space-y-6">
+                  /* Conversation View */
+                  <div className="space-y-8 pb-24">
                     {conversations.find(c => c.id === activeConversationId)?.messages.map((message) => (
                       <div key={message.id} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-full sm:max-w-2xl ${message.type === 'user' ? 'ml-2 sm:ml-12' : 'mr-2 sm:mr-12'}`}>
+                        <div className={`max-w-3xl ${message.type === 'user' ? 'ml-16' : 'mr-16'}`}>
                           {message.type === 'ai' && (
-                            <div className="flex items-center mb-2">
-                              <Bot className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 mr-2" />
-                              <span className="text-xs sm:text-sm font-medium text-gray-900 dark:text-white">AI Assistant</span>
+                            <div className="flex items-center mb-3">
+                              <div className="w-8 h-8 bg-gradient-to-tr from-primary to-primary/80 rounded-lg flex items-center justify-center mr-3">
+                                <Brain className="w-4 h-4 text-primary-foreground" />
+                              </div>
+                              <span className="text-sm font-medium text-foreground">Compazz Insights</span>
                             </div>
                           )}
-                          <div className={`p-3 sm:p-4 rounded-2xl ${
+                          <div className={`rounded-2xl ${
                             message.type === 'user' 
-                              ? 'bg-blue-600 text-white' 
-                              : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
+                              ? 'bg-primary text-primary-foreground p-4' 
+                              : 'bg-muted/30 p-6'
                           }`}>
-                            <div className="text-xs sm:text-sm leading-relaxed whitespace-pre-wrap">
-                              {message.type === 'ai' ? formatResponseText(message.content) : message.content}
+                            <div className="leading-relaxed">
+                              {message.type === 'ai' ? renderAIResponse(message.content) : (
+                                <div className="font-medium">{message.content}</div>
+                              )}
                             </div>
                           </div>
-                          <div className={`text-xs mt-2 ${
-                            message.type === 'user' ? 'text-right text-gray-500' : 'text-gray-500'
+                          <div className={`text-xs mt-3 font-light ${
+                            message.type === 'user' ? 'text-right text-muted-foreground' : 'text-muted-foreground'
                           }`}>
                             {new Date(message.timestamp).toLocaleTimeString()}
                           </div>
@@ -691,18 +954,20 @@ Ask me about specific metrics, trends, or any concerns about your business opera
                       </div>
                     ))}
                     
-                    {/* Loading State - Mobile Responsive */}
+                    {/* Loading State */}
                     {aiLoading && (
                       <div className="flex justify-start">
-                        <div className="max-w-full sm:max-w-2xl mr-2 sm:mr-12">
-                          <div className="flex items-center mb-2">
-                            <Bot className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 mr-2" />
-                            <span className="text-xs sm:text-sm font-medium text-gray-900 dark:text-white">AI Assistant</span>
+                        <div className="max-w-3xl mr-16">
+                          <div className="flex items-center mb-3">
+                            <div className="w-8 h-8 bg-gradient-to-tr from-primary to-primary/80 rounded-lg flex items-center justify-center mr-3">
+                              <Brain className="w-4 h-4 text-primary-foreground" />
+                            </div>
+                            <span className="text-sm font-medium text-foreground">Compazz Insights</span>
                           </div>
-                          <div className="bg-gray-100 dark:bg-gray-700 p-3 sm:p-4 rounded-2xl">
-                            <div className="flex items-center space-x-2">
-                              <div className="animate-spin rounded-full h-3 w-3 sm:h-4 sm:w-4 border-2 border-blue-600 border-t-transparent"></div>
-                              <div className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Thinking...</div>
+                          <div className="bg-muted/30 p-6 rounded-2xl">
+                            <div className="flex items-center space-x-3">
+                              <div className="animate-spin rounded-full h-5 w-5 border-2 border-primary border-t-transparent"></div>
+                              <div className="text-muted-foreground font-light">Analyzing your business data...</div>
                             </div>
                           </div>
                         </div>
@@ -713,10 +978,10 @@ Ask me about specific metrics, trends, or any concerns about your business opera
               </div>
             </div>
 
-            {/* Input Area - Mobile Responsive */}
-            <div className="border-t border-gray-200 dark:border-gray-700 p-3 sm:p-6 flex-shrink-0">
-              <div className="max-w-full sm:max-w-3xl mx-auto">
-                <div className="flex items-end space-x-2 sm:space-x-3">
+            {/* Fixed Input Area */}
+            <div className="absolute bottom-0 left-0 right-0 border-t border-border bg-card/95 backdrop-blur-sm">
+              <div className="max-w-4xl mx-auto p-6">
+                <div className="flex items-end space-x-4">
                   <div className="flex-1">
                     <textarea
                       value={currentMessage}
@@ -727,19 +992,19 @@ Ask me about specific metrics, trends, or any concerns about your business opera
                           sendMessage();
                         }
                       }}
-                      placeholder="Ask me about your business performance, fraud detection, or trends..."
-                      className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white resize-none"
+                      placeholder="Ask about sales performance, fraud detection, profit analysis, or operational insights..."
+                      className="w-full px-4 py-3 text-sm border border-border rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent bg-background text-foreground resize-none font-light placeholder:text-muted-foreground"
                       disabled={aiLoading}
                       rows={1}
-                      style={{ minHeight: '40px', maxHeight: '120px' }}
+                      style={{ minHeight: '48px', maxHeight: '120px' }}
                     />
                   </div>
                   <button
                     onClick={sendMessage}
                     disabled={!currentMessage.trim() || aiLoading}
-                    className="p-2 sm:p-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="btn-primary px-4 py-3 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <Send className="h-3 w-3 sm:h-4 sm:w-4" />
+                    <Send className="w-4 h-4" />
                   </button>
                 </div>
               </div>

@@ -1,5 +1,17 @@
 import React, { useState } from 'react';
-import { Bell, Search, Sun, Moon, User, LogOut, Settings as SettingsIcon, UserPlus, Menu } from 'lucide-react';
+import { 
+  Bell, 
+  Search, 
+  Sun, 
+  Moon, 
+  User, 
+  LogOut, 
+  Settings as SettingsIcon, 
+  UserPlus, 
+  Menu,
+  ChevronDown,
+  Building2
+} from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import OutletSelector from './OutletSelector';
 import { useOutlet } from '@/contexts/OutletContext';
@@ -16,10 +28,11 @@ interface HeaderProps {
 }
 
 const Header: React.FC<HeaderProps> = ({ isDarkMode, toggleDarkMode, onToggleSidebar }) => {
-  const { currentUser, setCurrentUser, setCurrentOutlet, setUserOutlets, hasPermission } = useOutlet();
+  const { currentUser, setCurrentUser, setCurrentOutlet, setUserOutlets, hasPermission, currentOutlet } = useOutlet();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showCreateStoreModal, setShowCreateStoreModal] = useState(false);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [toast, setToast] = useState<{
     message: string;
     type: 'success' | 'error' | 'warning' | 'info';
@@ -30,219 +43,228 @@ const Header: React.FC<HeaderProps> = ({ isDarkMode, toggleDarkMode, onToggleSid
     isVisible: false
   });
 
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info') => {
+    setToast({ message, type, isVisible: true });
+  };
+
   const handleLogout = async () => {
     try {
-      const { error } = await authService.signOut();
-      if (error) {
-        console.error('Logout error:', error);
-      } else {
-        setCurrentUser(null);
-        setCurrentOutlet(null);
-        setUserOutlets([]);
-      }
+      await authService.signOut();
+      setCurrentUser(null);
+      setCurrentOutlet(null);
+      setUserOutlets([]);
+      window.location.href = '/';
     } catch (error) {
       console.error('Logout error:', error);
+      showToast('Failed to logout', 'error');
     }
   };
 
-  const canInviteUsers = hasPermission('manage_users');
-
-  const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
-    setToast({
-      message,
-      type,
-      isVisible: true
-    });
-  };
-
-  const hideToast = () => {
-    setToast(prev => ({
-      ...prev,
-      isVisible: false
-    }));
+  const handleInviteSuccess = () => {
+    showToast('Team member invited successfully!', 'success');
+    setShowInviteModal(false);
   };
 
   const handleCreateStore = async (storeData: StoreFormData) => {
     try {
-      console.log('Creating store:', storeData);
-      
-      // Convert the form data to match the Outlet interface
-      const outletData = {
-        name: storeData.name,
-        businessType: storeData.businessType,
-        status: 'active' as const,
-        address: {
-          street: storeData.address.street || '',
-          city: storeData.address.city || '',
-          state: storeData.address.state || '',
-          zip: storeData.address.zipCode || '', // Note: converting zipCode to zip
-          country: storeData.address.country || ''
-        },
-        phone: storeData.phone || '',
-        email: storeData.email || '',
-        // Default values for required fields
-        openingHours: {
-          monday: { open: '09:00', close: '17:00', isOpen: true },
-          tuesday: { open: '09:00', close: '17:00', isOpen: true },
-          wednesday: { open: '09:00', close: '17:00', isOpen: true },
-          thursday: { open: '09:00', close: '17:00', isOpen: true },
-          friday: { open: '09:00', close: '17:00', isOpen: true },
-          saturday: { open: '09:00', close: '17:00', isOpen: true },
-          sunday: { open: '09:00', close: '17:00', isOpen: false }
-        },
-        taxRate: 0.10, // 10% default tax rate
-        currency: 'USD',
-        timezone: 'UTC'
-      };
-
-      const { data: newOutlet, error } = await dataService.createOutlet(outletData);
-
-      if (error) {
-        console.error('Failed to create store:', error);
-        showToast(`Failed to create store: ${error}`, 'error');
-        return;
-      }
-
-      if (newOutlet) {
-        console.log('Store created successfully:', newOutlet);
-        showToast('Store created successfully!', 'success');
-        
-        // TODO: Refresh user outlets list to include the new store
-        // This would require accessing setUserOutlets from context
-        // For now, user can refresh the page to see the new store
-      }
+      const newOutlet = await dataService.createOutlet(storeData);
+      setUserOutlets(prev => [...prev, newOutlet]);
+      setShowCreateStoreModal(false);
+      showToast('New store created successfully!', 'success');
     } catch (error) {
-      console.error('Failed to create store:', error);
+      console.error('Error creating store:', error);
       showToast('Failed to create store. Please try again.', 'error');
     }
   };
-  
+
   return (
-    <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-600 h-16 px-3 sm:px-4 flex items-center justify-between">
-      <div className="flex items-center gap-3 sm:gap-4">
-        {/* Mobile sidebar toggle */}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onToggleSidebar}
-          className="lg:hidden p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
-        >
-          <Menu size={20} />
-        </Button>
-        
-        <OutletSelector onCreateStore={() => setShowCreateStoreModal(true)} />
-        
-        <div className="relative hidden sm:block">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500 dark:text-gray-400" size={20} />
-          <input
-            type="text"
-            placeholder="Search invoices, expenses, vendors..."
-            className="pl-10 pr-4 py-2 w-80 border border-gray-300 dark:border-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
-          />
-        </div>
-      </div>
+    <>
+      <header className="bg-white/80 backdrop-blur-xl border-b border-gray-100 dark:bg-gray-900/80 dark:border-gray-800 sticky top-0 z-30">
+        <div className="flex items-center justify-between h-16 px-6">
+          {/* Left Section */}
+          <div className="flex items-center space-x-4">
+            {/* Mobile menu button */}
+            <button
+              onClick={onToggleSidebar}
+              className="lg:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            >
+              <Menu className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+            </button>
 
-      <div className="flex items-center gap-2 sm:gap-4">
-        {/* Quick Invite Button - Only show for users who can invite */}
-        {canInviteUsers && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowInviteModal(true)}
-            className="flex items-center gap-2 hidden sm:flex border-gray-300 dark:border-gray-500 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
-          >
-            <UserPlus size={16} />
-            <span className="hidden sm:inline">Invite Team</span>
-          </Button>
-        )}
+            {/* Outlet Selector */}
+            <OutletSelector />
+          </div>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={toggleDarkMode}
-          className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
-        >
-          {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="sm"
-          className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
-        >
-          <Bell size={20} />
-        </Button>
-
-        {/* User Menu */}
-        <div className="relative">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-            className="flex items-center gap-2 p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
-          >
-            <User size={20} />
-            <span className="hidden sm:inline">{currentUser?.name || 'User'}</span>
-          </Button>
-
-          {isUserMenuOpen && (
-            <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-700 rounded-md shadow-lg py-1 z-50 border border-gray-200 dark:border-gray-600">
-              <div className="px-4 py-2 text-sm text-gray-700 dark:text-gray-200 border-b border-gray-200 dark:border-gray-600">
-                <div className="font-medium">{currentUser?.name}</div>
-                <div className="text-gray-500 dark:text-gray-400">{currentUser?.email}</div>
+          {/* Center Section - Search */}
+          <div className="flex-1 max-w-md mx-8">
+            <div className="relative">
+              <div 
+                className={`
+                  flex items-center bg-gray-50 dark:bg-gray-800 rounded-xl transition-all duration-200
+                  ${isSearchFocused 
+                    ? 'ring-2 ring-gray-900 dark:ring-white bg-white dark:bg-gray-700' 
+                    : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                  }
+                  w-full
+                `}
+              >
+                <Search className="w-4 h-4 text-gray-400 ml-4" />
+                <input
+                  type="text"
+                  placeholder="Search transactions, invoices..."
+                  className="w-full px-4 py-3 bg-transparent text-sm text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none"
+                  onFocus={() => setIsSearchFocused(true)}
+                  onBlur={() => setIsSearchFocused(false)}
+                />
+                {isSearchFocused && (
+                  <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 p-4">
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                      Start typing to search...
+                    </div>
+                  </div>
+                )}
               </div>
-              
-              <a
-                href="/settings"
-                className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600"
-              >
-                <SettingsIcon size={16} />
-                Settings
-              </a>
-              
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600 text-left"
-              >
-                <LogOut size={16} />
-                Sign out
-              </button>
             </div>
-          )}
-        </div>
-        
-        {/* Click outside to close user menu */}
-        {isUserMenuOpen && (
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => setIsUserMenuOpen(false)}
-          />
-        )}
-      </div>
+          </div>
 
-      {/* Invite Team Member Modal */}
-      {showInviteModal && (
-        <InviteTeamMember onClose={() => setShowInviteModal(false)} />
+          {/* Right Section */}
+          <div className="flex items-center space-x-3">
+
+            {/* Notifications */}
+            <button className="relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors group">
+              <Bell className="w-5 h-5 text-gray-600 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors" />
+              <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full flex items-center justify-center">
+                <span className="w-1.5 h-1.5 bg-white rounded-full"></span>
+              </span>
+            </button>
+
+            {/* Dark mode toggle */}
+            <button
+              onClick={toggleDarkMode}
+              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors group"
+            >
+              {isDarkMode ? (
+                <Sun className="w-5 h-5 text-gray-600 dark:text-gray-300 group-hover:text-yellow-500 dark:group-hover:text-yellow-400 transition-colors" />
+              ) : (
+                <Moon className="w-5 h-5 text-gray-600 group-hover:text-blue-600 transition-colors" />
+              )}
+            </button>
+
+            {/* User Menu */}
+            <div className="relative">
+              <button
+                onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                className="flex items-center space-x-3 px-3 py-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors group"
+              >
+                <div className="w-8 h-8 bg-gradient-to-tr from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 rounded-lg flex items-center justify-center">
+                  <span className="text-sm font-semibold text-white dark:text-gray-900">
+                    {currentUser?.name?.charAt(0) || currentUser?.email?.charAt(0) || 'U'}
+                  </span>
+                </div>
+                <div className="hidden sm:block text-left">
+                  <div className="text-sm font-medium text-gray-900 dark:text-white">
+                    {currentUser?.name || 'User'}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 capitalize">
+                    {currentUser?.role?.replace('_', ' ') || 'Member'}
+                  </div>
+                </div>
+                <ChevronDown className={`w-4 h-4 text-gray-500 dark:text-gray-400 transition-transform ${isUserMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {/* Dropdown Menu */}
+              {isUserMenuOpen && (
+                <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 py-2 z-50">
+                  {/* User Info */}
+                  <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+                    <div className="font-medium text-gray-900 dark:text-white">
+                      {currentUser?.name || 'User'}
+                    </div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                      {currentUser?.email}
+                    </div>
+                  </div>
+
+                  {/* Menu Items */}
+                  <div className="py-2">
+                    <button
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        // Navigate to settings
+                      }}
+                      className="w-full flex items-center space-x-3 px-4 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      <SettingsIcon className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                      <span className="text-sm text-gray-700 dark:text-gray-200">Settings</span>
+                    </button>
+
+                    {hasPermission('invite_users') && (
+                      <button
+                        onClick={() => {
+                          setIsUserMenuOpen(false);
+                          setShowInviteModal(true);
+                        }}
+                        className="w-full flex items-center space-x-3 px-4 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                      >
+                        <UserPlus className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                        <span className="text-sm text-gray-700 dark:text-gray-200">Invite Team Member</span>
+                      </button>
+                    )}
+
+                    <hr className="my-2 border-gray-100 dark:border-gray-700" />
+
+                    <button
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        handleLogout();
+                      }}
+                      className="w-full flex items-center space-x-3 px-4 py-2 text-left hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors group"
+                    >
+                      <LogOut className="w-4 h-4 text-gray-500 dark:text-gray-400 group-hover:text-red-600 dark:group-hover:text-red-400" />
+                      <span className="text-sm text-gray-700 dark:text-gray-200 group-hover:text-red-600 dark:group-hover:text-red-400">
+                        Sign Out
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Click away listener for dropdown */}
+      {isUserMenuOpen && (
+        <div 
+          className="fixed inset-0 z-20" 
+          onClick={() => setIsUserMenuOpen(false)}
+        />
       )}
 
-      {/* Create Store Modal */}
+      {/* Modals */}
+      {showInviteModal && (
+        <InviteTeamMember
+          onClose={() => setShowInviteModal(false)}
+          onSuccess={handleInviteSuccess}
+        />
+      )}
+
       {showCreateStoreModal && (
         <CreateStoreModal
-          isOpen={showCreateStoreModal}
           onClose={() => setShowCreateStoreModal(false)}
           onCreate={handleCreateStore}
         />
       )}
 
-      {/* Toast Notification */}
-      <Toast
-        message={toast.message}
-        type={toast.type}
-        isVisible={toast.isVisible}
-        onClose={hideToast}
-        duration={4000}
-      />
-    </header>
+      {/* Toast */}
+      {toast.isVisible && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(prev => ({ ...prev, isVisible: false }))}
+        />
+      )}
+    </>
   );
 };
 
