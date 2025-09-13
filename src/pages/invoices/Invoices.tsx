@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { PlusCircle, Filter, Search, CheckCircle, Clock, XCircle, DollarSign } from 'lucide-react';
+import { Plus, Filter, Search, CheckCircle, Clock, XCircle, DollarSign, Receipt, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useOutlet } from '@/contexts/OutletContext';
 import { vendorInvoiceService } from '@/lib/vendorInvoiceService';
@@ -71,11 +71,16 @@ const Invoices: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="space-y-4 sm:space-y-6 p-3 sm:p-4 lg:p-6">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600 dark:text-gray-400">Loading vendor invoices...</p>
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+        <div className="max-w-7xl mx-auto px-6 py-12">
+          <div className="flex items-center justify-center h-64">
+            <div className="text-center">
+              <div className="relative">
+                <div className="w-16 h-16 border-4 border-gray-200 dark:border-gray-700 rounded-full animate-spin border-t-gray-900 dark:border-t-white mx-auto"></div>
+                <Receipt className="w-6 h-6 text-gray-400 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2" />
+              </div>
+              <p className="mt-6 text-gray-600 dark:text-gray-400 font-light">Loading vendor invoices...</p>
+            </div>
           </div>
         </div>
       </div>
@@ -83,145 +88,169 @@ const Invoices: React.FC = () => {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6 p-3 sm:p-4 lg:p-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-semibold text-gray-900 dark:text-white">Vendor Invoices</h1>
-          <p className="text-sm sm:text-base text-gray-500 dark:text-gray-400">
-            Manage bills from suppliers and vendors
-            {canApproveVendorInvoices() && totalPending > 0 && (
-              <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-200">
-                {formatCurrency(totalPending)} pending approval
-              </span>
-            )}
-          </p>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+      <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+        {/* Header Section */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+          <div className="space-y-2">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-gradient-to-tr from-gray-900 to-gray-700 dark:from-white dark:to-gray-200 rounded-xl flex items-center justify-center shadow-sm">
+                <Receipt className="w-5 h-5 text-white dark:text-gray-900" />
+              </div>
+              <h1 className="text-3xl font-light text-gray-900 dark:text-white tracking-tight">Vendor Invoices</h1>
+            </div>
+            <p className="text-gray-600 dark:text-gray-400 font-light">
+              Manage bills from suppliers and vendors with precision
+              {canApproveVendorInvoices() && totalPending > 0 && (
+                <span className="ml-3 inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-900/20 dark:text-amber-200 dark:border-amber-800">
+                  <AlertTriangle className="w-3 h-3 mr-1" />
+                  {formatCurrency(totalPending)} pending approval
+                </span>
+              )}
+            </p>
+          </div>
+          <Button 
+            asChild 
+            className="bg-gray-900 hover:bg-gray-800 text-white border-0 px-6 py-3 rounded-xl font-medium transition-all duration-200 shadow-sm hover:shadow-md dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100"
+          >
+            <Link to="/dashboard/invoices/create" className="flex items-center space-x-2">
+              <Plus className="w-4 h-4" />
+              <span>Create Invoice</span>
+            </Link>
+          </Button>
         </div>
-        <Button asChild className="w-full sm:w-auto">
-          <Link to="/invoices/create" className="flex items-center justify-center">
-            <PlusCircle size={16} className="mr-2" />
-            <span className="hidden sm:inline">Create Invoice</span>
-            <span className="sm:hidden">Create</span>
-          </Link>
-        </Button>
-      </div>
 
-      {/* Status Summary Cards - Only show for approvers */}
-      {canApproveVendorInvoices() && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Pending</p>
-                <p className="text-2xl font-semibold text-orange-600 dark:text-orange-400">{statusCounts.pending_approval}</p>
+        {/* Status Summary Cards - Only show for approvers */}
+        {canApproveVendorInvoices() && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="card p-6 hover:shadow-lg transition-all duration-200">
+              <div className="flex items-center justify-between">
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Pending Approval</p>
+                  <p className="text-3xl font-light text-amber-600 dark:text-amber-400 tracking-tight">{statusCounts.pending_approval}</p>
+                </div>
+                <div className="w-12 h-12 bg-amber-50 dark:bg-amber-900/20 rounded-xl flex items-center justify-center">
+                  <Clock className="w-6 h-6 text-amber-600 dark:text-amber-400" />
+                </div>
               </div>
-              <Clock className="h-8 w-8 text-orange-600 dark:text-orange-400" />
+            </div>
+            <div className="card p-6 hover:shadow-lg transition-all duration-200">
+              <div className="flex items-center justify-between">
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Approved</p>
+                  <p className="text-3xl font-light text-blue-600 dark:text-blue-400 tracking-tight">{statusCounts.approved}</p>
+                </div>
+                <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/20 rounded-xl flex items-center justify-center">
+                  <CheckCircle className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                </div>
+              </div>
+            </div>
+            <div className="card p-6 hover:shadow-lg transition-all duration-200">
+              <div className="flex items-center justify-between">
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Paid</p>
+                  <p className="text-3xl font-light text-emerald-600 dark:text-emerald-400 tracking-tight">{statusCounts.paid}</p>
+                </div>
+                <div className="w-12 h-12 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl flex items-center justify-center">
+                  <DollarSign className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
+                </div>
+              </div>
+            </div>
+            <div className="card p-6 hover:shadow-lg transition-all duration-200">
+              <div className="flex items-center justify-between">
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Rejected</p>
+                  <p className="text-3xl font-light text-red-500 dark:text-red-400 tracking-tight">{statusCounts.rejected}</p>
+                </div>
+                <div className="w-12 h-12 bg-red-50 dark:bg-red-900/20 rounded-xl flex items-center justify-center">
+                  <XCircle className="w-6 h-6 text-red-500 dark:text-red-400" />
+                </div>
+              </div>
             </div>
           </div>
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Approved</p>
-                <p className="text-2xl font-semibold text-blue-600 dark:text-blue-400">{statusCounts.approved}</p>
-              </div>
-              <CheckCircle className="h-8 w-8 text-blue-600 dark:text-blue-400" />
+        )}
+
+        {/* Error Message */}
+        {error && (
+          <div className="card border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-900/10 p-4">
+            <div className="flex items-center space-x-2">
+              <XCircle className="w-4 h-4 text-red-600 dark:text-red-400" />
+              <p className="text-red-800 dark:text-red-200 font-light">{error}</p>
             </div>
           </div>
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Paid</p>
-                <p className="text-2xl font-semibold text-green-600 dark:text-green-400">{statusCounts.paid}</p>
+        )}
+
+        {/* Filters */}
+        <div className="card p-6">
+          <div className="flex flex-col lg:flex-row gap-4">
+            <div className="relative flex-1">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                <Search className="w-4 h-4 text-gray-400" />
               </div>
-              <DollarSign className="h-8 w-8 text-green-600 dark:text-green-400" />
+              <input
+                type="text"
+                placeholder="Search invoices, vendors, or descriptions..."
+                className="w-full pl-11 pr-4 py-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-white focus:border-transparent transition-all duration-200"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
             </div>
-          </div>
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Rejected</p>
-                <p className="text-2xl font-semibold text-red-600 dark:text-red-400">{statusCounts.rejected}</p>
+            <div className="relative lg:w-48">
+              <select
+                className="appearance-none w-full pl-4 pr-10 py-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-white focus:border-transparent transition-all duration-200"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as InvoiceApprovalStatus | 'all')}
+              >
+                <option value="all">All Statuses</option>
+                <option value="pending_approval">Pending Approval</option>
+                <option value="approved">Approved</option>
+                <option value="paid">Paid</option>
+                <option value="rejected">Rejected</option>
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400">
+                <Filter className="w-4 h-4" />
               </div>
-              <XCircle className="h-8 w-8 text-red-600 dark:text-red-400" />
             </div>
           </div>
         </div>
-      )}
 
-      {/* Error Message */}
-      {error && (
-        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-          <p className="text-red-800 dark:text-red-200">{error}</p>
-        </div>
-      )}
-
-      {/* Filters - Mobile Responsive */}
-      <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
-        <div className="relative flex-grow">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Search size={16} className="text-gray-400" />
-          </div>
-          <input
-            type="text"
-            placeholder="Search by invoice number, vendor name, or description..."
-            className="w-full pl-9 sm:pl-10 pr-4 py-2 sm:py-2.5 text-sm sm:text-base border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+        {/* Vendor Invoices Table */}
+        <div className="card p-0 overflow-hidden">
+          <VendorInvoiceTable 
+            invoices={filteredInvoices} 
+            onApprove={canApproveVendorInvoices() ? async (invoiceId) => {
+              try {
+                const { error } = await vendorInvoiceService.approveVendorInvoice(invoiceId, currentUser?.id || '');
+                if (!error) {
+                  loadVendorInvoices(); // Refresh list
+                }
+              } catch (err) {
+                console.error('Error approving invoice:', err);
+              }
+            } : undefined}
+            onReject={canApproveVendorInvoices() ? async (invoiceId, reason) => {
+              try {
+                const { error } = await vendorInvoiceService.rejectVendorInvoice(invoiceId, currentUser?.id || '', reason);
+                if (!error) {
+                  loadVendorInvoices(); // Refresh list
+                }
+              } catch (err) {
+                console.error('Error rejecting invoice:', err);
+              }
+            } : undefined}
+            onMarkPaid={canApproveVendorInvoices() ? async (invoiceId, paymentReference) => {
+              try {
+                const { error } = await vendorInvoiceService.markInvoiceAsPaid(invoiceId, currentUser?.id || '', paymentReference);
+                if (!error) {
+                  loadVendorInvoices(); // Refresh list
+                }
+              } catch (err) {
+                console.error('Error marking invoice as paid:', err);
+              }
+            } : undefined}
           />
         </div>
-        <div className="flex gap-2">
-          <div className="relative w-full sm:w-auto">
-            <select
-              className="appearance-none w-full sm:w-auto pl-3 pr-8 py-2 sm:py-2.5 text-sm sm:text-base border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as InvoiceApprovalStatus | 'all')}
-            >
-              <option value="all">All Statuses</option>
-              <option value="pending_approval">Pending Approval</option>
-              <option value="approved">Approved</option>
-              <option value="paid">Paid</option>
-              <option value="rejected">Rejected</option>
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700 dark:text-gray-300">
-              <Filter size={14} />
-            </div>
-          </div>
-        </div>
       </div>
-
-      {/* Vendor Invoices Table */}
-      <VendorInvoiceTable 
-        invoices={filteredInvoices} 
-        onApprove={canApproveVendorInvoices() ? async (invoiceId) => {
-          try {
-            const { error } = await vendorInvoiceService.approveVendorInvoice(invoiceId, currentUser?.id || '');
-            if (!error) {
-              loadVendorInvoices(); // Refresh list
-            }
-          } catch (err) {
-            console.error('Error approving invoice:', err);
-          }
-        } : undefined}
-        onReject={canApproveVendorInvoices() ? async (invoiceId, reason) => {
-          try {
-            const { error } = await vendorInvoiceService.rejectVendorInvoice(invoiceId, currentUser?.id || '', reason);
-            if (!error) {
-              loadVendorInvoices(); // Refresh list
-            }
-          } catch (err) {
-            console.error('Error rejecting invoice:', err);
-          }
-        } : undefined}
-        onMarkPaid={canApproveVendorInvoices() ? async (invoiceId, paymentReference) => {
-          try {
-            const { error } = await vendorInvoiceService.markInvoiceAsPaid(invoiceId, currentUser?.id || '', paymentReference);
-            if (!error) {
-              loadVendorInvoices(); // Refresh list
-            }
-          } catch (err) {
-            console.error('Error marking invoice as paid:', err);
-          }
-        } : undefined}
-      />
     </div>
   );
 };

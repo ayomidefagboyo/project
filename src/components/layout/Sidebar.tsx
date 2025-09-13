@@ -18,7 +18,9 @@ import {
   Receipt,
   DollarSign,
   Users,
-  Shield
+  Shield,
+  Menu,
+  Zap
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 
@@ -33,6 +35,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
   const location = useLocation();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isCreateDropdownOpen, setIsCreateDropdownOpen] = useState(false);
+  const [isCreateReportOpen, setIsCreateReportOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown when clicking outside
@@ -51,18 +54,18 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
 
   const navItems = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-    { name: 'AI Assistant', href: '/ai-assistant', icon: Bot },
-    { name: 'Daily Reports', href: '/daily-reports', icon: BarChart3 },
-    { name: 'Invoices', href: '/invoices', icon: FileText },
-    { name: 'Expenses', href: '/expenses', icon: CreditCard },
-    { name: 'Vendors', href: '/vendors', icon: Users },
-    { name: 'Audit Trail', href: '/audit-trail', icon: Shield },
+    { name: 'Compazz Insights', href: '/dashboard/ai-assistant', icon: Bot },
+    { name: 'Daily Reports', href: '/dashboard/daily-reports', icon: BarChart3 },
+    { name: 'Invoices', href: '/dashboard/invoices', icon: FileText },
+    { name: 'Expenses', href: '/dashboard/expenses', icon: CreditCard },
+    { name: 'Vendors', href: '/dashboard/vendors', icon: Users },
+    { name: 'Audit Trail', href: '/dashboard/audit-trail', icon: Shield },
   ];
 
   const createReportItems = [
-    { name: 'End of Day', href: '/eod', icon: Clock },
-    { name: 'Create Invoice', href: '/invoices/create', icon: Receipt },
-    { name: 'Add Expense', href: '/expenses/create', icon: DollarSign },
+    { name: 'End of Day', href: '/dashboard/eod', icon: Clock, color: 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/20' },
+    { name: 'Create Invoice', href: '/dashboard/invoices/create', icon: Receipt, color: 'text-emerald-600 bg-emerald-50 dark:text-emerald-400 dark:bg-emerald-900/20' },
+    { name: 'Add Expense', href: '/dashboard/expenses/create', icon: DollarSign, color: 'text-purple-600 bg-purple-50 dark:text-purple-400 dark:bg-purple-900/20' },
   ];
 
   const isActive = (href: string) => {
@@ -72,214 +75,197 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
     return location.pathname.startsWith(href);
   };
 
-  const toggleCollapse = () => {
-    setIsCollapsed(!isCollapsed);
+  const NavItem = ({ item, isCollapsed = false }: { item: any; isCollapsed?: boolean }) => {
+    const active = isActive(item.href);
+    
+    return (
+      <Link
+        to={item.href}
+        className={`
+          group relative flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-200 ease-in-out
+          ${active 
+            ? 'bg-gray-900 text-white shadow-sm dark:bg-white dark:text-gray-900' 
+            : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-800/50'
+          }
+          ${isCollapsed ? 'justify-center px-3' : ''}
+        `}
+      >
+        <item.icon className={`flex-shrink-0 ${isCollapsed ? 'w-6 h-6' : 'w-5 h-5'} transition-colors`} />
+        {!isCollapsed && (
+          <span className="font-medium text-sm truncate">{item.name}</span>
+        )}
+        
+        {/* Active indicator */}
+        {active && !isCollapsed && (
+          <div className="absolute right-3 w-2 h-2 bg-current rounded-full opacity-60" />
+        )}
+        
+        {/* Tooltip for collapsed state */}
+        {isCollapsed && (
+          <div className="absolute left-full ml-3 px-3 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-50">
+            {item.name}
+            <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1 w-2 h-2 bg-gray-900 rotate-45" />
+          </div>
+        )}
+      </Link>
+    );
   };
+
+  const QuickActionItem = ({ item, isCollapsed = false }: { item: any; isCollapsed?: boolean }) => (
+    <Link
+      to={item.href}
+      className={`
+        group flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-800/50
+        ${isCollapsed ? 'justify-center px-3' : ''}
+      `}
+    >
+      <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${item.color}`}>
+        <item.icon className="w-4 h-4" />
+      </div>
+      {!isCollapsed && (
+        <span className="font-medium text-sm text-gray-700 dark:text-gray-200 truncate">{item.name}</span>
+      )}
+      
+      {/* Tooltip for collapsed state */}
+      {isCollapsed && (
+        <div className="absolute left-full ml-3 px-3 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-50">
+          {item.name}
+          <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1 w-2 h-2 bg-gray-900 rotate-45" />
+        </div>
+      )}
+    </Link>
+  );
 
   return (
     <>
-      {/* Mobile sidebar */}
-      <div className={`lg:hidden fixed inset-0 z-50 ${isOpen ? 'block' : 'hidden'}`}>
-        {/* Backdrop */}
-        <div className="fixed inset-0 bg-black bg-opacity-50" onClick={onToggle}></div>
-        <div className="fixed inset-y-0 left-0 w-64 bg-white dark:bg-gray-800 shadow-xl transform transition-transform duration-300 ease-in-out z-60">
-          {/* Mobile header */}
-          <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-600">
-            <img src="/logo.svg" alt="Compazz" className="h-6" />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onToggle}
-              className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
-            >
-              <X size={20} />
-            </Button>
-          </div>
-          
-          {/* Mobile Create Report Dropdown */}
-          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-600">
-            <div className="relative" ref={dropdownRef}>
-              <Button
-                variant="outline"
-                onClick={() => setIsCreateDropdownOpen(!isCreateDropdownOpen)}
-                className="w-full justify-between text-sm font-medium"
-              >
-                <div className="flex items-center gap-2">
-                  <Plus size={16} />
-                  Create Report
-                </div>
-                <ChevronDown size={14} className={`transition-transform ${isCreateDropdownOpen ? 'rotate-180' : ''}`} />
-              </Button>
-              
-              {isCreateDropdownOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg z-[70] pointer-events-auto">
-                  {createReportItems.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <Link
-                        key={item.name}
-                        to={item.href}
-                        onClick={() => {
-                          setIsCreateDropdownOpen(false);
-                          onToggle(); // Close sidebar on mobile when clicking a link
-                        }}
-                        className="block w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white transition-colors first:rounded-t-lg last:rounded-b-lg"
-                      >
-                        <div className="flex items-center gap-3">
-                          <Icon size={16} />
-                          {item.name}
-                        </div>
-                      </Link>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
+      {/* Mobile overlay */}
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 lg:hidden" 
+          onClick={onToggle}
+        />
+      )}
 
-          {/* Mobile navigation */}
-          <nav className="mt-4 px-4 pb-4">
-            <ul className="space-y-2">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <li key={item.name}>
-                    <Link
-                      to={item.href}
-                      onClick={onToggle} // Close sidebar on mobile when clicking a link
-                      className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                        isActive(item.href)
-                          ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200 border border-blue-200 dark:border-blue-700'
-                          : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white'
-                      }`}
-                    >
-                      <Icon size={20} />
-                      {item.name}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </nav>
-
-          {/* Mobile Settings */}
-          <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-600">
-            <Link
-              to="/settings"
-              onClick={onToggle}
-              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                isActive('/settings')
-                  ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200 border border-blue-200 dark:border-blue-700'
-                  : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white'
-              }`}
-            >
-              <Settings size={20} />
-              Settings
+      {/* Sidebar */}
+      <div
+        className={`
+          ${className}
+          ${isOpen ? 'translate-x-0' : '-translate-x-full'}
+          ${isCollapsed ? 'w-20' : 'w-80'}
+          fixed inset-y-0 left-0 z-50 flex flex-col bg-white/95 backdrop-blur-xl border-r border-gray-100
+          dark:bg-gray-900/95 dark:border-gray-800
+          lg:relative lg:translate-x-0 lg:transition-all lg:duration-300 lg:ease-in-out
+          transition-transform duration-300 ease-in-out
+        `}
+      >
+        {/* Header */}
+        <div className={`flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-800 ${isCollapsed ? 'px-4' : ''}`}>
+          {!isCollapsed && (
+            <Link to="/" className="flex items-center space-x-3">
+              <div className="w-8 h-8 bg-gradient-to-tr from-gray-900 to-gray-700 dark:from-white dark:to-gray-200 rounded-lg flex items-center justify-center">
+                <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
+              </div>
+              <span className="text-xl font-semibold text-gray-900 dark:text-white tracking-tight">
+                Compazz
+              </span>
             </Link>
-          </div>
-        </div>
-      </div>
+          )}
 
-      {/* Desktop sidebar */}
-      <div className={`hidden lg:block bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-600 transition-all duration-300 ease-in-out relative ${className} ${isCollapsed ? 'w-14' : 'w-56'} flex-shrink-0`}>
-        {/* Desktop header */}
-        <div className={`p-4 border-b border-gray-200 dark:border-gray-600 ${isCollapsed ? 'p-3' : ''}`}>
-          <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
-            {!isCollapsed && (
-              <>
-                <img src="/logo.svg" alt="Compazz" className="h-6" />
-              </>
-            )}
-            {isCollapsed && (
-              <img src="/logo-icon.svg" alt="Compazz" className="h-8 w-8" />
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={toggleCollapse}
-              className={`p-1.5 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 ${isCollapsed ? 'absolute -right-2 top-4 z-10' : ''}`}
+          <div className="flex items-center space-x-2">
+            {/* Collapse button for desktop */}
+            <button
+              onClick={() => setIsCollapsed(!isCollapsed)}
+              className="hidden lg:flex items-center justify-center w-8 h-8 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             >
-              {isCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
-            </Button>
+              {isCollapsed ? (
+                <ChevronRight className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+              ) : (
+                <ChevronLeft className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+              )}
+            </button>
+
+            {/* Close button for mobile */}
+            <button
+              onClick={onToggle}
+              className="flex lg:hidden items-center justify-center w-8 h-8 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            >
+              <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+            </button>
           </div>
         </div>
-        
-        {/* Create Report Dropdown */}
-        {!isCollapsed && (
-          <div className="p-3 border-b border-gray-200 dark:border-gray-600">
-            <div className="relative" ref={dropdownRef}>
-              <Button
-                variant="outline"
-                onClick={() => setIsCreateDropdownOpen(!isCreateDropdownOpen)}
-                className="w-full justify-between text-sm font-medium"
-              >
-                <div className="flex items-center gap-2">
-                  <Plus size={16} />
-                  Create Report
+
+        {/* Navigation */}
+        <div className="flex-1 overflow-y-auto scrollbar-hide">
+          <div className={`p-6 ${isCollapsed ? 'px-4' : ''}`}>
+            {/* Create Report Dropdown */}
+            {!isCollapsed && (
+              <div className="mb-4">
+                <div className="relative">
+                  <button
+                    onClick={() => setIsCreateReportOpen(!isCreateReportOpen)}
+                    className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <Plus className="w-5 h-5" />
+                      <span className="font-medium text-sm">Create Report</span>
+                    </div>
+                    <ChevronDown className={`w-4 h-4 transition-transform ${isCreateReportOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  
+                  {isCreateReportOpen && (
+                    <div className="mt-2 space-y-1">
+                      {createReportItems.map((item) => (
+                        <Link
+                          key={item.name}
+                          to={item.href}
+                          className="flex items-center gap-3 px-4 py-2 ml-4 rounded-lg transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50"
+                        >
+                          <div className={`flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center ${item.color}`}>
+                            <item.icon className="w-3 h-3" />
+                          </div>
+                          <span className="font-medium text-sm text-gray-700 dark:text-gray-200">{item.name}</span>
+                        </Link>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <ChevronDown size={14} className={`transition-transform ${isCreateDropdownOpen ? 'rotate-180' : ''}`} />
-              </Button>
-              
-              {isCreateDropdownOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg z-50">
-                  {createReportItems.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <Link
-                        key={item.name}
-                        to={item.href}
-                        onClick={() => setIsCreateDropdownOpen(false)}
-                        className="flex items-center gap-3 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white transition-colors"
-                      >
-                        <Icon size={16} />
-                        {item.name}
-                      </Link>
-                    );
-                  })}
-                </div>
-              )}
+              </div>
+            )}
+
+            {/* Main Navigation */}
+            <div className="space-y-2">
+              {navItems.map((item) => (
+                <NavItem key={item.name} item={item} isCollapsed={isCollapsed} />
+              ))}
             </div>
           </div>
-        )}
+        </div>
 
-        {/* Desktop navigation */}
-        <nav className={`flex-1 ${isCollapsed ? 'px-2' : 'px-3'}`}>
-          <ul className="space-y-1">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <li key={item.name}>
-                  <Link
-                    to={item.href}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
-                      isActive(item.href)
-                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200 border border-blue-200 dark:border-blue-700'
-                        : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white'
-                    } ${isCollapsed ? 'justify-center px-2' : ''}`}
-                    title={isCollapsed ? item.name : undefined}
-                  >
-                    <Icon size={18} />
-                    {!isCollapsed && <span className="truncate">{item.name}</span>}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
-
-        {/* Settings at bottom */}
-        <div className={`p-3 border-t border-gray-200 dark:border-gray-600 ${isCollapsed ? 'px-2' : ''}`}>
+        {/* Footer */}
+        <div className={`p-6 border-t border-gray-100 dark:border-gray-800 ${isCollapsed ? 'px-4' : ''}`}>
           <Link
-            to="/settings"
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
-              isActive('/settings')
-                ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200 border border-blue-200 dark:border-blue-700'
-                : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white'
-            } ${isCollapsed ? 'justify-center px-2' : ''}`}
-            title={isCollapsed ? 'Settings' : undefined}
+            to="/dashboard/settings"
+            className={`
+              group flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-800/50
+              ${isActive('/dashboard/settings') 
+                ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' 
+                : 'text-gray-600 dark:text-gray-300'
+              }
+              ${isCollapsed ? 'justify-center px-3' : ''}
+            `}
           >
-            <Settings size={18} />
-            {!isCollapsed && <span className="truncate">Settings</span>}
+            <Settings className={`flex-shrink-0 ${isCollapsed ? 'w-6 h-6' : 'w-5 h-5'}`} />
+            {!isCollapsed && (
+              <span className="font-medium text-sm">Settings</span>
+            )}
+            
+            {/* Tooltip for collapsed state */}
+            {isCollapsed && (
+              <div className="absolute left-full ml-3 px-3 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-50">
+                Settings
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1 w-2 h-2 bg-gray-900 rotate-45" />
+              </div>
+            )}
           </Link>
         </div>
       </div>

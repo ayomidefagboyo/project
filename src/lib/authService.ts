@@ -3,6 +3,7 @@
  */
 
 import { apiClient } from './apiClient';
+import { supabase } from './supabase';
 import { User, UserRole } from '@/types';
 
 export interface AuthUser {
@@ -60,28 +61,32 @@ class AuthService {
     try {
       console.log('Starting owner signup with credentials:', { ...credentials, password: '[HIDDEN]' });
       
-      const response = await apiClient.post('/auth/signup/owner', credentials);
-      
-      if (response.error) {
-        console.error('Owner signup error:', response.error);
-        return { user: null, error: response.error };
+      const { data, error } = await supabase.auth.signUp({
+        email: credentials.email,
+        password: credentials.password,
+        options: {
+          data: {
+            name: credentials.name,
+            company_name: credentials.companyName,
+            business_type: credentials.businessType,
+          }
+        }
+      });
+
+      if (error) {
+        console.error('Owner signup error:', error);
+        return { user: null, error: error.message };
       }
 
-      if (response.data) {
-        // Store the token
-        if (response.data.access_token) {
-          apiClient.setToken(response.data.access_token);
-          localStorage.setItem('auth_token', response.data.access_token);
-        }
-
+      if (data.user) {
         const authUser: AuthUser = {
-          id: response.data.user.id,
-          email: response.data.user.email,
-          name: response.data.user.name,
-          role: response.data.user.role,
-          outletId: response.data.user.outlet_id,
-          permissions: response.data.user.permissions || [],
-          isOwner: response.data.user.role === 'outlet_admin',
+          id: data.user.id,
+          email: data.user.email || '',
+          name: credentials.name,
+          role: 'outlet_admin' as UserRole,
+          outletId: 'default-outlet',
+          permissions: [],
+          isOwner: true,
         };
 
         return { user: authUser, error: null };
@@ -100,27 +105,24 @@ class AuthService {
   // User login
   async signIn(credentials: LoginCredentials): Promise<AuthResponse> {
     try {
-      const response = await apiClient.post('/auth/signin', credentials);
-      
-      if (response.error) {
-        return { user: null, error: response.error };
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: credentials.email,
+        password: credentials.password,
+      });
+
+      if (error) {
+        return { user: null, error: error.message };
       }
 
-      if (response.data) {
-        // Store the token
-        if (response.data.access_token) {
-          apiClient.setToken(response.data.access_token);
-          localStorage.setItem('auth_token', response.data.access_token);
-        }
-
+      if (data.user) {
         const authUser: AuthUser = {
-          id: response.data.user.id,
-          email: response.data.user.email,
-          name: response.data.user.name,
-          role: response.data.user.role,
-          outletId: response.data.user.outlet_id,
-          permissions: response.data.user.permissions || [],
-          isOwner: response.data.user.role === 'outlet_admin',
+          id: data.user.id,
+          email: data.user.email || '',
+          name: data.user.user_metadata?.name || data.user.email?.split('@')[0] || '',
+          role: 'outlet_admin' as UserRole, // Default role
+          outletId: 'default-outlet',
+          permissions: [],
+          isOwner: true,
         };
 
         return { user: authUser, error: null };
@@ -139,33 +141,30 @@ class AuthService {
   // User logout
   async signOut(): Promise<void> {
     try {
-      await apiClient.post('/auth/signout');
+      await supabase.auth.signOut();
     } catch (error) {
       console.error('Sign out error:', error);
-    } finally {
-      // Clear local authentication
-      apiClient.clearAuth();
     }
   }
 
   // Get current user
   async getCurrentUser(): Promise<AuthResponse> {
     try {
-      const response = await apiClient.get('/auth/me');
+      const { data: { user }, error } = await supabase.auth.getUser();
       
-      if (response.error) {
-        return { user: null, error: response.error };
+      if (error) {
+        return { user: null, error: error.message };
       }
 
-      if (response.data) {
+      if (user) {
         const authUser: AuthUser = {
-          id: response.data.id,
-          email: response.data.email,
-          name: response.data.name,
-          role: response.data.role,
-          outletId: response.data.outlet_id,
-          permissions: response.data.permissions || [],
-          isOwner: response.data.role === 'outlet_admin',
+          id: user.id,
+          email: user.email || '',
+          name: user.user_metadata?.name || user.email?.split('@')[0] || '',
+          role: 'outlet_admin' as UserRole,
+          outletId: 'default-outlet',
+          permissions: [],
+          isOwner: true,
         };
 
         return { user: authUser, error: null };

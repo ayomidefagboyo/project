@@ -2,11 +2,17 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { OutletProvider, useOutlet } from '@/contexts/OutletContext';
 import Layout from '@/components/layout/Layout';
+import ScrollToTop from '@/components/ScrollToTop';
 import LandingPage from '@/pages/LandingPage';
-import Features from '@/pages/Features';
-import Pricing from '@/pages/Pricing';
 import About from '@/pages/About';
 import Blog from '@/pages/Blog';
+import AIRevolutionizingFinance from '@/pages/blog/AIRevolutionizingFinance';
+import AutomatedInvoiceProcessing from '@/pages/blog/AutomatedInvoiceProcessing';
+import MultiLocationFinance from '@/pages/blog/MultiLocationFinance';
+import MobileFirstFinancialManagement from '@/pages/blog/MobileFirstFinancialManagement';
+import FinancialAnalyticsRestaurants from '@/pages/blog/FinancialAnalyticsRestaurants';
+import FinancialDataSecurity from '@/pages/blog/FinancialDataSecurity';
+import FutureEODReporting from '@/pages/blog/FutureEODReporting';
 import Dashboard from '@/pages/Dashboard';
 import Invoices from '@/pages/invoices/Invoices';
 import CreateInvoice from '@/pages/invoices/CreateInvoice';
@@ -52,11 +58,17 @@ const AppRoutes = () => {
     <Routes>
       {/* Public routes */}
       <Route path="/" element={<LandingPage />} />
-      <Route path="/features" element={<Features />} />
-      <Route path="/pricing" element={<Pricing />} />
       <Route path="/about" element={<About />} />
       <Route path="/blog" element={<Blog />} />
-      <Route path="/auth" element={<AuthWrapper onAuthSuccess={() => {}} />} />
+      <Route path="/blog/ai-revolutionizing-finance" element={<AIRevolutionizingFinance />} />
+      <Route path="/blog/automated-invoice-processing-roi" element={<AutomatedInvoiceProcessing />} />
+      <Route path="/blog/streamline-multi-location-finance" element={<MultiLocationFinance />} />
+      {/* Additional blog articles */}
+      <Route path="/blog/mobile-first-financial-management" element={<MobileFirstFinancialManagement />} />
+      <Route path="/blog/financial-analytics-restaurants" element={<FinancialAnalyticsRestaurants />} />
+      <Route path="/blog/financial-data-security" element={<FinancialDataSecurity />} />
+      <Route path="/blog/future-eod-reporting" element={<FutureEODReporting />} />
+      <Route path="/auth" element={<AuthWrapper onAuthSuccess={() => window.location.href = '/dashboard'} />} />
       
       {/* Protected routes */}
       <Route path="/dashboard" element={
@@ -90,6 +102,7 @@ const App = () => {
   return (
     <OutletProvider>
       <Router>
+        <ScrollToTop />
         <AppRoutes />
       </Router>
     </OutletProvider>

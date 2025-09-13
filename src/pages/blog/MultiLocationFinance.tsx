@@ -80,7 +80,12 @@ const MultiLocationFinance: React.FC = () => {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
               <Link to="/" className="flex items-center">
-                <span className="text-2xl font-bold text-blue-600">Compazz</span>
+                <div className="flex items-center space-x-3">
+                  <div className="w-8 h-8 bg-gradient-to-tr from-gray-900 to-gray-700 rounded-lg flex items-center justify-center">
+                    <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
+                  </div>
+                  <span className="text-xl font-bold text-gray-900 tracking-tight">Compazz</span>
+                </div>
               </Link>
             </div>
             <div className="hidden md:flex items-center space-x-8">

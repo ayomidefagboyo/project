@@ -5,11 +5,8 @@ EOD (End of Day) reporting endpoints
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import Optional, Dict, Any
 from datetime import date
-from app.schemas.reports import (
-    EODCreate, EODUpdate, EnhancedDailyReport, EODListResponse,
-    EODAnalytics, EODStatsResponse, EODSearchRequest, EODComparisonRequest,
-    EODComparisonResponse, EODApprovalRequest, EODApprovalResponse,
-    EODExistsResponse, EODSummaryResponse
+from app.schemas.reports_simple import (
+    EODCreate, EODUpdate, EnhancedDailyReport
 )
 from app.services.eod_service import eod_service
 from app.core.security import require_auth, get_user_outlet_id, require_permissions

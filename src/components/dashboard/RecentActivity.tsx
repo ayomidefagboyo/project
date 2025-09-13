@@ -30,7 +30,7 @@ const RecentActivity: React.FC<RecentActivityProps> = ({ activities }) => {
       <h3 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">Recent Activity</h3>
       
       <div className="space-y-4">
-        {activities.map((activity) => (
+        {activities?.map((activity) => (
           <div key={activity.id} className="flex items-start">
             <div className={`flex items-center justify-center w-8 h-8 rounded-full ${getActionColor(activity.action)} bg-opacity-10 dark:bg-opacity-10 mr-3 mt-0.5 flex-shrink-0`}>
               <span className="text-sm">{getActionIcon(activity.action)}</span>
@@ -54,13 +54,13 @@ const RecentActivity: React.FC<RecentActivityProps> = ({ activities }) => {
         ))}
       </div>
       
-      {activities.length === 0 && (
+      {(!activities || activities.length === 0) && (
         <div className="text-center py-4">
           <p className="text-gray-500 dark:text-gray-400">No recent activity</p>
         </div>
       )}
       
-      {activities.length > 0 && (
+      {activities && activities.length > 0 && (
         <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
           <button className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300">
             View all activity →

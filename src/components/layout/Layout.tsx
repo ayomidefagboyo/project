@@ -18,14 +18,22 @@ const Layout: React.FC = () => {
     setIsDarkMode(!isDarkMode);
   };
 
-  // Apply dark mode to document
+  // Apply dark mode to document only when in dashboard
   useEffect(() => {
+    // Only apply dark mode when Layout is mounted (inside dashboard)
+    const originalClass = document.documentElement.className;
+    
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
     }
     localStorage.setItem('darkMode', JSON.stringify(isDarkMode));
+
+    // Cleanup: remove dark mode when Layout unmounts (e.g., going to landing page)
+    return () => {
+      document.documentElement.className = originalClass;
+    };
   }, [isDarkMode]);
 
   return (
