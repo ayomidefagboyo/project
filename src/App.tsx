@@ -28,6 +28,14 @@ import AuditTrail from '@/pages/AuditTrail';
 import Settings from '@/pages/Settings';
 import AuthWrapper from '@/components/auth/AuthWrapper';
 
+// Calculator imports
+import CalculatorLanding from '@/pages/calculators/CalculatorLanding';
+import ROICalculator from '@/pages/calculators/ROICalculator';
+import BreakEvenCalculator from '@/pages/calculators/BreakEvenCalculator';
+import CashFlowCalculator from '@/pages/calculators/CashFlowCalculator';
+import ProfitMarginCalculator from '@/pages/calculators/ProfitMarginCalculator';
+import InventoryTurnoverCalculator from '@/pages/calculators/InventoryTurnoverCalculator';
+
 // Protected Route Component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { currentUser, isLoading } = useOutlet();
@@ -68,6 +76,15 @@ const AppRoutes = () => {
       <Route path="/blog/financial-analytics-restaurants" element={<FinancialAnalyticsRestaurants />} />
       <Route path="/blog/financial-data-security" element={<FinancialDataSecurity />} />
       <Route path="/blog/future-eod-reporting" element={<FutureEODReporting />} />
+
+      {/* Calculator routes - public access for SEO */}
+      <Route path="/calculators" element={<CalculatorLanding />} />
+      <Route path="/calculators/roi" element={<ROICalculator />} />
+      <Route path="/calculators/break-even" element={<BreakEvenCalculator />} />
+      <Route path="/calculators/cash-flow" element={<CashFlowCalculator />} />
+      <Route path="/calculators/profit-margin" element={<ProfitMarginCalculator />} />
+      <Route path="/calculators/inventory-turnover" element={<InventoryTurnoverCalculator />} />
+
       <Route path="/auth" element={<AuthWrapper onAuthSuccess={() => window.location.href = '/dashboard'} />} />
       
       {/* Protected routes */}

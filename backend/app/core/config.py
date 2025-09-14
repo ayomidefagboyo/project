@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Compazz Financial Management"
     VERSION: str = "1.0.0"
     
-    # CORS Settings
-    BACKEND_CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
+    # CORS Settings - Add your production frontend URL
+    BACKEND_CORS_ORIGINS: str = os.getenv("BACKEND_CORS_ORIGINS", "http://localhost:5173,http://localhost:3000,https://compazz.app")
     
     # Supabase Settings
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
