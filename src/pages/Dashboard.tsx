@@ -24,7 +24,7 @@ import { vendorInvoiceService } from '@/lib/vendorInvoiceService';
 import { VendorInvoice, DashboardView, Outlet } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import VendorInvoiceTable from '@/components/invoice/VendorInvoiceTable';
-import { FeatureGate } from '@/lib/subscriptionMiddleware';
+import { FeatureGate } from '@/components/subscription/FeatureGate';
 
 const Dashboard: React.FC = () => {
   const { 

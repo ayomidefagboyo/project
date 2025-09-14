@@ -7,7 +7,7 @@ import { Vendor, VendorType, VendorScope } from '@/types';
 import CreateVendorModal from '@/components/vendors/CreateVendorModal';
 import EditVendorModal from '@/components/vendors/EditVendorModal';
 import { formatCurrency } from '@/lib/utils';
-import { FeatureGate } from '@/lib/subscriptionMiddleware';
+import { FeatureGate } from '@/components/subscription/FeatureGate';
 
 const Vendors: React.FC = () => {
   const { currentOutlet, canCreateGlobalVendors, getAccessibleOutlets, isBusinessOwner, currentUser } = useOutlet();
