@@ -14,6 +14,10 @@ export interface Subscription {
   status: string;
   current_period_start: number;
   current_period_end: number;
+  cancel_at_period_end: boolean;
+  trial_start?: number;
+  trial_end?: number;
+  is_trial: boolean;
   plan: {
     id: string;
     amount: number;
@@ -42,7 +46,7 @@ class StripeService {
   // Create a payment intent for one-time payments
   async createPaymentIntent(amount: number, currency = 'usd'): Promise<PaymentIntent> {
     try {
-      const response = await apiClient.post('/payments/create-payment-intent', {
+      const response = await apiClient.post('/stripe/create-payment-intent', {
         amount: amount * 100, // Convert to cents
         currency,
       });
@@ -53,19 +57,20 @@ class StripeService {
     }
   }
 
-  // Create a subscription checkout session
-  async createSubscriptionCheckout(planId: string, successUrl: string, cancelUrl: string) {
+  // Create a subscription checkout session with trial
+  async createSubscriptionCheckout(planId: string, successUrl: string, cancelUrl: string, trialDays = 7) {
     try {
       const plan = paymentPlans[planId as keyof typeof paymentPlans];
       if (!plan) {
         throw new Error('Invalid plan ID');
       }
 
-      const response = await apiClient.post('/payments/create-subscription-checkout', {
+      const response = await apiClient.post('/stripe/create-subscription-checkout', {
         priceId: plan.priceId,
         successUrl,
         cancelUrl,
         planId,
+        trialDays,
       });
 
       return response.data;
@@ -112,10 +117,31 @@ class StripeService {
     }
   }
 
+  // Create a subscription directly with trial
+  async createSubscription(planId: string, trialDays = 7, paymentMethodId?: string) {
+    try {
+      const plan = paymentPlans[planId as keyof typeof paymentPlans];
+      if (!plan) {
+        throw new Error('Invalid plan ID');
+      }
+
+      const response = await apiClient.post('/stripe/create-subscription', {
+        priceId: plan.priceId,
+        trialDays,
+        paymentMethodId,
+      });
+
+      return response.data;
+    } catch (error) {
+      console.error('Error creating subscription:', error);
+      throw new Error('Failed to create subscription');
+    }
+  }
+
   // Get customer information
   async getCustomer(customerId: string): Promise<Customer> {
     try {
-      const response = await apiClient.get(`/payments/customer/${customerId}`);
+      const response = await apiClient.get(`/stripe/customer/${customerId}`);
       return response.data;
     } catch (error) {
       console.error('Error fetching customer:', error);
@@ -126,7 +152,7 @@ class StripeService {
   // Cancel a subscription
   async cancelSubscription(subscriptionId: string) {
     try {
-      const response = await apiClient.post(`/payments/subscription/${subscriptionId}/cancel`);
+      const response = await apiClient.post(`/stripe/subscription/${subscriptionId}/cancel`);
       return response.data;
     } catch (error) {
       console.error('Error canceling subscription:', error);
@@ -137,7 +163,7 @@ class StripeService {
   // Update subscription
   async updateSubscription(subscriptionId: string, newPriceId: string) {
     try {
-      const response = await apiClient.post(`/payments/subscription/${subscriptionId}/update`, {
+      const response = await apiClient.post(`/stripe/subscription/${subscriptionId}/update`, {
         priceId: newPriceId,
       });
       return response.data;
@@ -150,7 +176,7 @@ class StripeService {
   // Get subscription details
   async getSubscription(subscriptionId: string): Promise<Subscription> {
     try {
-      const response = await apiClient.get(`/payments/subscription/${subscriptionId}`);
+      const response = await apiClient.get(`/stripe/subscription/${subscriptionId}`);
       return response.data;
     } catch (error) {
       console.error('Error fetching subscription:', error);
@@ -161,7 +187,7 @@ class StripeService {
   // Create a setup intent for saving payment methods
   async createSetupIntent(customerId?: string) {
     try {
-      const response = await apiClient.post('/payments/create-setup-intent', {
+      const response = await apiClient.post('/stripe/create-setup-intent', {
         customerId,
       });
       return response.data;
@@ -174,11 +200,41 @@ class StripeService {
   // Get payment methods for a customer
   async getPaymentMethods(customerId: string) {
     try {
-      const response = await apiClient.get(`/payments/customer/${customerId}/payment-methods`);
+      const response = await apiClient.get(`/stripe/customer/${customerId}/payment-methods`);
       return response.data;
     } catch (error) {
       console.error('Error fetching payment methods:', error);
       throw new Error('Failed to fetch payment methods');
+    }
+  }
+
+  // Check if subscription is in trial
+  isTrialActive(subscription: Subscription): boolean {
+    return subscription.is_trial && subscription.status === 'trialing';
+  }
+
+  // Get days remaining in trial
+  getTrialDaysRemaining(subscription: Subscription): number {
+    if (!subscription.trial_end) return 0;
+    
+    const now = Math.floor(Date.now() / 1000);
+    const daysRemaining = Math.ceil((subscription.trial_end - now) / (24 * 60 * 60));
+    return Math.max(0, daysRemaining);
+  }
+
+  // Format trial status for display
+  getTrialStatus(subscription: Subscription): string {
+    if (!this.isTrialActive(subscription)) {
+      return 'No active trial';
+    }
+    
+    const daysRemaining = this.getTrialDaysRemaining(subscription);
+    if (daysRemaining === 0) {
+      return 'Trial ends today';
+    } else if (daysRemaining === 1) {
+      return '1 day remaining';
+    } else {
+      return `${daysRemaining} days remaining`;
     }
   }
 

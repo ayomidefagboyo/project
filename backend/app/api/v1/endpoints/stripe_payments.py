@@ -24,6 +24,7 @@ class SubscriptionCheckoutRequest(BaseModel):
     successUrl: str
     cancelUrl: str
     planId: str
+    trialDays: Optional[int] = 7  # Default 7-day trial
     metadata: Optional[Dict[str, str]] = None
 
 class SetupIntentRequest(BaseModel):
@@ -31,6 +32,13 @@ class SetupIntentRequest(BaseModel):
 
 class SubscriptionUpdateRequest(BaseModel):
     priceId: str
+
+class SubscriptionCreateRequest(BaseModel):
+    priceId: str
+    customerId: Optional[str] = None
+    trialDays: Optional[int] = 7  # Default 7-day trial
+    paymentMethodId: Optional[str] = None  # Required if no trial
+    metadata: Optional[Dict[str, str]] = None
 
 @router.post("/create-payment-intent")
 async def create_payment_intent(
@@ -87,7 +95,28 @@ async def create_subscription_checkout(
         # Create or get customer
         customer_id = await get_or_create_stripe_customer(current_user)
         
-        # Create checkout session
+        # Prepare subscription data with trial
+        subscription_data = {
+            'metadata': {
+                'user_id': current_user['id'],
+                'outlet_id': get_user_outlet_id(current_user),
+                'plan_id': request.planId,
+                **(request.metadata or {})
+            }
+        }
+        
+        # Add trial period if specified
+        if request.trialDays and request.trialDays > 0:
+            subscription_data.update({
+                'trial_period_days': request.trialDays,
+                'trial_settings': {
+                    'end_behavior': {
+                        'missing_payment_method': 'cancel'  # Cancel if no payment method after trial
+                    }
+                }
+            })
+        
+        # Create checkout session with trial
         session = stripe.checkout.Session.create(
             customer=customer_id,
             payment_method_types=['card'],
@@ -96,12 +125,14 @@ async def create_subscription_checkout(
                 'quantity': 1,
             }],
             mode='subscription',
+            subscription_data=subscription_data,
             success_url=request.successUrl,
             cancel_url=request.cancelUrl,
             metadata={
                 'user_id': current_user['id'],
                 'outlet_id': get_user_outlet_id(current_user),
                 'plan_id': request.planId,
+                'trial_days': str(request.trialDays or 0),
                 **(request.metadata or {})
             }
         )
@@ -119,6 +150,69 @@ async def create_subscription_checkout(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create checkout session"
+        )
+
+@router.post("/create-subscription")
+async def create_subscription(
+    request: SubscriptionCreateRequest,
+    current_user: Dict[str, Any] = Depends(require_auth)
+):
+    """
+    Create a subscription directly with trial period
+    """
+    try:
+        # Get or create customer
+        customer_id = request.customerId or await get_or_create_stripe_customer(current_user)
+        
+        # Prepare subscription parameters
+        subscription_params = {
+            'customer': customer_id,
+            'items': [{
+                'price': request.priceId,
+            }],
+            'metadata': {
+                'user_id': current_user['id'],
+                'outlet_id': get_user_outlet_id(current_user),
+                **(request.metadata or {})
+            }
+        }
+        
+        # Add trial period if specified
+        if request.trialDays and request.trialDays > 0:
+            subscription_params.update({
+                'trial_period_days': request.trialDays,
+                'trial_settings': {
+                    'end_behavior': {
+                        'missing_payment_method': 'cancel'
+                    }
+                }
+            })
+        else:
+            # If no trial, payment method is required
+            if not request.paymentMethodId:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Payment method required when no trial period is specified"
+                )
+            subscription_params['default_payment_method'] = request.paymentMethodId
+        
+        # Create subscription
+        subscription = stripe.Subscription.create(**subscription_params)
+        
+        return {
+            'subscription': format_subscription(subscription),
+            'trial_end': subscription.trial_end if subscription.trial_end else None,
+            'status': subscription.status
+        }
+    except stripe.error.StripeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Stripe error: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create subscription"
         )
 
 @router.post("/create-setup-intent")
@@ -388,6 +482,9 @@ def format_subscription(subscription) -> Dict[str, Any]:
         'current_period_start': subscription.current_period_start,
         'current_period_end': subscription.current_period_end,
         'cancel_at_period_end': subscription.cancel_at_period_end,
+        'trial_start': subscription.trial_start if hasattr(subscription, 'trial_start') else None,
+        'trial_end': subscription.trial_end if hasattr(subscription, 'trial_end') else None,
+        'is_trial': subscription.status == 'trialing',
         'plan': {
             'id': subscription.items.data[0].price.id,
             'amount': subscription.items.data[0].price.unit_amount,

@@ -48,7 +48,8 @@ const LandingPage: React.FC = () => {
         const { sessionId } = await stripeService.createSubscriptionCheckout(
           planId,
           successUrl,
-          cancelUrl
+          cancelUrl,
+          7 // 7-day free trial
         );
 
         await stripeService.redirectToCheckout(sessionId);
@@ -165,7 +166,7 @@ const LandingPage: React.FC = () => {
     },
     {
       question: "Is there a free trial available?",
-      answer: "Yes! We offer a 14-day free trial with full access to all features. No credit card required to start your trial."
+      answer: "Yes! We offer a 7-day free trial with full access to all features. You can cancel anytime during the trial period."
     },
     {
       question: "How secure is my financial data?",
@@ -509,7 +510,7 @@ const LandingPage: React.FC = () => {
               Simple, transparent pricing
             </h2>
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto text-balance mb-8">
-              Start with a 30-day free trial. Choose the plan that fits your business needs.
+              Start with a 7-day free trial. Choose the plan that fits your business needs.
             </p>
             
             {/* Billing Toggle */}
@@ -611,7 +612,7 @@ const LandingPage: React.FC = () => {
                 <span className="text-lg text-muted-foreground ml-1 transition-all duration-300">/month</span>
               </div>
               <div className="flex items-center mb-6 min-h-[32px]">
-                <span className="text-sm text-emerald-600 font-medium bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1 rounded-full mr-2">30-day free trial</span>
+                <span className="text-sm text-emerald-600 font-medium bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1 rounded-full mr-2">7-day free trial</span>
                 <div className={`transition-all duration-300 ease-in-out ${
                   isAnnual ? 'opacity-100 scale-100 translate-x-0' : 'opacity-0 scale-95 translate-x-2'
                 }`}>
