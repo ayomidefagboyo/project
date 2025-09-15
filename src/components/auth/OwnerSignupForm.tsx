@@ -231,18 +231,18 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
                 ))}
                 <span className="ml-2 text-primary-foreground/80 font-light">4.8/5 from 280+ businesses</span>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="bg-primary-foreground/10 rounded-lg p-3">
-                  <p className="text-primary-foreground/80 text-xs font-light italic">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="bg-primary-foreground/10 rounded-lg p-4 flex-1">
+                  <p className="text-primary-foreground/80 text-sm font-light italic leading-relaxed">
                     "As a CPA firm, we need precision. Compazz caught inconsistencies in our expense tracking that manual reviews missed. It's like having an AI auditor that never sleeps."
                   </p>
-                  <p className="text-primary-foreground/60 text-xs mt-2">- James Rodriguez, Rodriguez & Associates CPA</p>
+                  <p className="text-primary-foreground/60 text-xs mt-3 font-medium">- James Rodriguez, Rodriguez & Associates CPA</p>
                 </div>
-                <div className="bg-primary-foreground/10 rounded-lg p-3">
-                  <p className="text-primary-foreground/80 text-xs font-light italic">
+                <div className="bg-primary-foreground/10 rounded-lg p-4 flex-1">
+                  <p className="text-primary-foreground/80 text-sm font-light italic leading-relaxed">
                     "Our SaaS startup burned through £15K in 'mystery expenses' before Compazz. Now I can see exactly where every pound goes and our runway calculations are spot-on."
                   </p>
-                  <p className="text-primary-foreground/60 text-xs mt-2">- Alex Thompson, TechFlow Solutions (YC S23)</p>
+                  <p className="text-primary-foreground/60 text-xs mt-3 font-medium">- Alex Thompson, TechFlow Solutions (YC S23)</p>
                 </div>
               </div>
             </div>
