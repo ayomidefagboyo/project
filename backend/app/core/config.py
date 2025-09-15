@@ -2,7 +2,7 @@
 Configuration settings for the FastAPI application
 """
 
-from pydantic import BaseSettings
+from pydantic_settings import BaseSettings
 from typing import Optional
 import os
 
@@ -47,9 +47,10 @@ class Settings(BaseSettings):
     STRIPE_SECRET_KEY: Optional[str] = os.getenv("STRIPE_SECRET_KEY", "")
     VITE_STRIPE_PUBLISHABLE_KEY: Optional[str] = os.getenv("VITE_STRIPE_PUBLISHABLE_KEY", "")
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    model_config = {
+        "env_file": ".env",
+        "case_sensitive": True
+    }
 
 
 # Create settings instance
