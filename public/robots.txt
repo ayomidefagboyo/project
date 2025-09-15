@@ -2,9 +2,18 @@ User-agent: *
 Allow: /
 
 # Sitemap
-Sitemap: https://compazz.com/sitemap.xml
+Sitemap: https://compazz.app/sitemap.xml
 
-# Disallow admin and dashboard areas
+# Allow important SEO pages
+Allow: /blog/
+Allow: /calculators/
+Allow: /about
+Allow: /auth
+
+# Disallow private areas
 Disallow: /dashboard/
 Disallow: /admin/
 Disallow: /api/
+
+# Crawl delay (optional)
+Crawl-delay: 1
