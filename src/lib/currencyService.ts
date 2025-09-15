@@ -86,20 +86,48 @@ class CurrencyService {
   // Detect user's country from browser
   private async detectCountry(): Promise<string | null> {
     try {
-      // Try to get country from browser's timezone
-      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const country = timezone.split('/')[0];
-      
-      // If timezone method doesn't work, try geolocation API
-      if (!country || country === 'UTC') {
-        const response = await fetch('https://ipapi.co/json/');
+      // Try geolocation API first (more reliable)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+      const response = await fetch('https://ipapi.co/json/', {
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
         const data = await response.json();
-        return data.country_code;
+        if (data.country_code && data.country_code !== 'XX') {
+          console.log('Detected country:', data.country_code);
+          return data.country_code;
+        }
       }
-      
-      return country;
+
+      // Fallback: try to infer from timezone (limited accuracy)
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      console.log('Timezone fallback:', timezone);
+
+      // Simple timezone to country mapping for major regions
+      const timezoneToCountry: Record<string, string> = {
+        'America/New_York': 'US',
+        'America/Los_Angeles': 'US',
+        'America/Chicago': 'US',
+        'America/Toronto': 'CA',
+        'Europe/London': 'GB',
+        'Europe/Berlin': 'DE',
+        'Europe/Paris': 'FR',
+        'Africa/Lagos': 'NG',
+        'Africa/Nairobi': 'KE',
+        'Asia/Tokyo': 'JP',
+        'Asia/Shanghai': 'CN',
+        'Asia/Kolkata': 'IN',
+        'Australia/Sydney': 'AU'
+      };
+
+      return timezoneToCountry[timezone] || null;
     } catch (error) {
-      console.error('Failed to detect country:', error);
+      console.log('Country detection failed, using default USD');
       return null;
     }
   }
