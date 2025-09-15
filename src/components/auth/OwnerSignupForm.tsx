@@ -154,7 +154,7 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
             <div className="space-y-4 mb-8">
               <div className="flex items-center text-primary-foreground/60">
                 <div className="w-2 h-2 bg-primary-foreground/40 rounded-full mr-4"></div>
-                <span className="font-light">Free 14-day trial</span>
+                <span className="font-light">Free 7-day trial</span>
               </div>
               <div className="flex items-center text-primary-foreground/60">
                 <div className="w-2 h-2 bg-primary-foreground/40 rounded-full mr-4"></div>
