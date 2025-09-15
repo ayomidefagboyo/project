@@ -136,7 +136,6 @@ export class SubscriptionService {
         .from('subscriptions')
         .select('*')
         .eq('user_id', userId)
-        .eq('status', 'active')
         .single();
 
       if (error) {
@@ -189,17 +188,21 @@ export class SubscriptionService {
   // Get current outlet count for user
   async getUserOutletCount(userId: string): Promise<number> {
     try {
+      // Query users table to find outlets associated with this user
       const { data, error } = await supabase
-        .from('outlets')
-        .select('id')
-        .eq('owner_id', userId);
+        .from('users')
+        .select('outlet_id')
+        .eq('id', userId)
+        .not('outlet_id', 'is', null);
 
       if (error) {
         console.error('Error counting outlets:', error);
         return 0;
       }
 
-      return data?.length || 0;
+      // Count unique outlet_ids for this user
+      const uniqueOutlets = new Set(data?.map(user => user.outlet_id));
+      return uniqueOutlets.size;
     } catch (error) {
       console.error('Error in getUserOutletCount:', error);
       return 0;

@@ -70,13 +70,18 @@ const Header: React.FC<HeaderProps> = ({ isDarkMode, toggleDarkMode, onToggleSid
     if (!currentUser) return;
 
     try {
-      // Check outlet limit before creating
-      const currentCount = await subscriptionService.getUserOutletCount(currentUser.id);
-      const canAdd = await subscriptionService.canAddOutlet(currentUser.id, currentCount);
+      // Check outlet limit before creating (gracefully handle missing subscription data)
+      try {
+        const currentCount = await subscriptionService.getUserOutletCount(currentUser.id);
+        const canAdd = await subscriptionService.canAddOutlet(currentUser.id, currentCount);
 
-      if (!canAdd) {
-        showToast('You have reached your outlet limit. Please upgrade your plan to add more outlets.', 'warning');
-        return;
+        if (!canAdd) {
+          showToast('You have reached your outlet limit. Please upgrade your plan to add more outlets.', 'warning');
+          return;
+        }
+      } catch (subscriptionError) {
+        console.warn('Subscription check failed, allowing outlet creation:', subscriptionError);
+        // Continue with outlet creation if subscription check fails
       }
 
       const newOutlet = await dataService.createOutlet(storeData, currentUser.id);
