@@ -217,20 +217,14 @@ const LandingPage: React.FC = () => {
                     {loadingPlan === 'business' ? (
                       <>
                         <Loader2 className="mr-2 w-5 h-5 animate-spin" />
-                        Starting Free Trial...
+                        Launching App...
                       </>
                     ) : (
-                      'Start 7-Day Free Trial'
+                      'Launch App'
                     )}
                     <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
                   </button>
                 </div>
-                <Link 
-                  to="/auth?mode=signup" 
-                  className="btn-secondary px-8 py-3.5 text-lg"
-                >
-                  Launch App
-                </Link>
               </div>
             </div>
             
