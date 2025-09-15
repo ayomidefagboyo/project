@@ -17,8 +17,18 @@ supabase_admin: Optional[Client] = None
 async def init_db() -> None:
     """Initialize database connections"""
     global supabase, supabase_admin
-    
+
     try:
+        # Validate that we have the required settings
+        if not settings.SUPABASE_URL:
+            raise ValueError("SUPABASE_URL is required but not set")
+        if not settings.SUPABASE_ANON_KEY:
+            raise ValueError("SUPABASE_ANON_KEY is required but not set")
+        if not settings.SUPABASE_SERVICE_ROLE_KEY:
+            raise ValueError("SUPABASE_SERVICE_ROLE_KEY is required but not set")
+
+        logger.info(f"🔗 Connecting to Supabase at: {settings.SUPABASE_URL}")
+
         # Create regular Supabase client
         supabase = create_client(
             settings.SUPABASE_URL,
@@ -30,7 +40,7 @@ async def init_db() -> None:
                 }
             }
         )
-        
+
         # Create admin client for server-side operations
         supabase_admin = create_client(
             settings.SUPABASE_URL,
@@ -42,11 +52,12 @@ async def init_db() -> None:
                 }
             }
         )
-        
+
         logger.info("✅ Database connections initialized successfully")
-        
+
     except Exception as e:
         logger.error(f"❌ Failed to initialize database: {e}")
+        logger.error("💡 Make sure SUPABASE_URL, SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY are set in environment variables")
         raise
 
 
