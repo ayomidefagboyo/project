@@ -32,25 +32,13 @@ async def init_db() -> None:
         # Create regular Supabase client
         supabase = create_client(
             settings.SUPABASE_URL,
-            settings.SUPABASE_ANON_KEY,
-            options={
-                "auth": {
-                    "auto_refresh_token": True,
-                    "persist_session": False
-                }
-            }
+            settings.SUPABASE_ANON_KEY
         )
 
         # Create admin client for server-side operations
         supabase_admin = create_client(
             settings.SUPABASE_URL,
-            settings.SUPABASE_SERVICE_ROLE_KEY,
-            options={
-                "auth": {
-                    "auto_refresh_token": False,
-                    "persist_session": False
-                }
-            }
+            settings.SUPABASE_SERVICE_ROLE_KEY
         )
 
         logger.info("✅ Database connections initialized successfully")
