@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Calendar, Clock, User, Share2, Calculator, TrendingUp, DollarSign, Target, CheckCircle, ArrowRight } from 'lucide-react';
 import { Helmet } from 'react-helmet-async';
+import PublicHeader from '@/components/layout/PublicHeader';
 
 const ROICalculatorGuide: React.FC = () => {
   const tableOfContents = [
@@ -115,30 +116,7 @@ const ROICalculatorGuide: React.FC = () => {
       </Helmet>
 
       <div className="min-h-screen bg-gray-50">
-        {/* Header */}
-        <header className="fixed top-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-b border-gray-100 z-50">
-          <nav className="max-w-7xl mx-auto px-6 lg:px-8">
-            <div className="flex justify-between items-center h-20">
-              <div className="flex items-center">
-                <Link to="/" className="flex items-center">
-                  <span className="text-2xl font-medium text-gray-900 tracking-tight">Compazz</span>
-                </Link>
-              </div>
-              <div className="hidden md:flex items-center space-x-12">
-                <Link to="/#features" className="text-gray-500 hover:text-gray-900 font-medium text-sm transition-colors">Features</Link>
-                <Link to="/#pricing" className="text-gray-500 hover:text-gray-900 font-medium text-sm transition-colors">Pricing</Link>
-                <Link to="/calculators" className="text-gray-500 hover:text-gray-900 font-medium text-sm transition-colors">Calculators</Link>
-                <Link to="/blog" className="text-gray-500 hover:text-gray-900 font-medium text-sm transition-colors">Blog</Link>
-              </div>
-              <div className="flex items-center space-x-4">
-                <Link to="/auth" className="text-gray-500 hover:text-gray-900 font-medium text-sm transition-colors">Sign In</Link>
-                <Link to="/dashboard" className="bg-gray-900 text-white px-6 py-2.5 rounded-xl font-medium text-sm hover:bg-gray-800 transition-all duration-200">
-                  Get Started
-                </Link>
-              </div>
-            </div>
-          </nav>
-        </header>
+        <PublicHeader />
 
         {/* Back to Blog */}
         <div className="pt-32 pb-8">

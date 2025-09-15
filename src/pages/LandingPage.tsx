@@ -19,6 +19,7 @@ import { paymentPlans } from '@/lib/stripe';
 import stripeService from '@/lib/stripeService';
 import { currencyService, type CurrencyInfo } from '@/lib/currencyService';
 import LegalModal from '@/components/modals/LegalModal';
+import PublicHeader from '@/components/layout/PublicHeader';
 
 const LandingPage: React.FC = () => {
   const location = useLocation();
@@ -179,42 +180,7 @@ const LandingPage: React.FC = () => {
   ];
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Navbar */}
-      <header className="fixed top-0 left-0 right-0 bg-background/95 backdrop-blur-md border-b border-border z-50">
-        <nav className="container-width px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
-              <Link to="/" className="flex items-center space-x-3">
-                <div className="w-8 h-8 bg-gradient-to-tr from-gray-900 to-gray-700 rounded-lg flex items-center justify-center">
-                  <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
-                </div>
-                <span className="text-xl font-bold text-gray-900 tracking-tight">Compazz</span>
-              </Link>
-            </div>
-            <div className="hidden md:flex items-center space-x-8">
-              <button onClick={() => scrollToSection('features')} className="text-muted-foreground hover:text-foreground font-medium transition-colors">Features</button>
-              <button onClick={() => scrollToSection('pricing')} className="text-muted-foreground hover:text-foreground font-medium transition-colors">Pricing</button>
-              <Link to="/calculators" className="text-muted-foreground hover:text-foreground font-medium transition-colors">Calculators</Link>
-              <Link to="/about" className="text-muted-foreground hover:text-foreground font-medium transition-colors">About</Link>
-              <Link to="/blog" className="text-muted-foreground hover:text-foreground font-medium transition-colors">Blog</Link>
-            </div>
-            <div className="flex items-center space-x-4">
-              <Link 
-                to="/auth?mode=login" 
-                className="text-muted-foreground hover:text-foreground font-medium transition-colors"
-              >
-                Sign In
-              </Link>
-              <Link 
-                to="/auth?mode=signup" 
-                className="btn-primary px-6 py-2.5"
-              >
-                Get Started
-              </Link>
-            </div>
-          </div>
-        </nav>
-      </header>
+      <PublicHeader />
 
       {/* Hero Section */}
       <section className="pt-24 section-padding bg-gradient-to-br from-accent/30 to-secondary/50">
@@ -331,11 +297,37 @@ const LandingPage: React.FC = () => {
               <div className="w-16 h-16 bg-accent rounded-xl flex items-center justify-center mb-6">
                 <Receipt className="h-8 w-8 text-accent-foreground" />
               </div>
-              <h3 className="text-2xl font-semibold text-foreground mb-4">Smart Invoice Management</h3>
-              <p className="text-muted-foreground text-lg leading-relaxed">
-                Create, send, and track invoices automatically. Get paid faster with integrated payment processing 
-                and automated reminders. Never lose track of outstanding payments again.
+              <h3 className="text-2xl font-semibold text-foreground mb-4">Smart Receipt Scanning</h3>
+              <p className="text-muted-foreground text-lg leading-relaxed mb-4">
+                Transform receipt photos into expense reports instantly with our AI-powered scanning technology.
+                Eliminate manual data entry and reduce errors by up to 90%.
               </p>
+              <ul className="text-muted-foreground space-y-2">
+                <li className="flex items-start">
+                  <div className="w-1.5 h-1.5 bg-accent-foreground rounded-full mt-2 mr-3 flex-shrink-0"></div>
+                  Advanced photo scanning with 95%+ accuracy
+                </li>
+                <li className="flex items-start">
+                  <div className="w-1.5 h-1.5 bg-accent-foreground rounded-full mt-2 mr-3 flex-shrink-0"></div>
+                  Real-time receipt scanning with confidence scoring
+                </li>
+                <li className="flex items-start">
+                  <div className="w-1.5 h-1.5 bg-accent-foreground rounded-full mt-2 mr-3 flex-shrink-0"></div>
+                  Automatic data extraction: vendor name, amount, date, description
+                </li>
+                <li className="flex items-start">
+                  <div className="w-1.5 h-1.5 bg-accent-foreground rounded-full mt-2 mr-3 flex-shrink-0"></div>
+                  Multi-format support with 10MB file limit
+                </li>
+                <li className="flex items-start">
+                  <div className="w-1.5 h-1.5 bg-accent-foreground rounded-full mt-2 mr-3 flex-shrink-0"></div>
+                  Smart categorization and expense validation
+                </li>
+                <li className="flex items-start">
+                  <div className="w-1.5 h-1.5 bg-accent-foreground rounded-full mt-2 mr-3 flex-shrink-0"></div>
+                  Mobile-first experience with camera integration
+                </li>
+              </ul>
             </div>
             
             {/* Medium card - bottom left */}
@@ -654,6 +646,22 @@ const LandingPage: React.FC = () => {
                 <li className="flex items-center text-muted-foreground">
                   <Check className="w-5 h-5 text-emerald-500 mr-3 flex-shrink-0" />
                   Team collaboration tools
+                </li>
+                <li className="flex items-center text-muted-foreground">
+                  <Check className="w-5 h-5 text-emerald-500 mr-3 flex-shrink-0" />
+                  Smart receipt photo scanning (95%+ accuracy)
+                </li>
+                <li className="flex items-center text-muted-foreground">
+                  <Check className="w-5 h-5 text-emerald-500 mr-3 flex-shrink-0" />
+                  Instant receipt scanning & automatic data capture
+                </li>
+                <li className="flex items-center text-muted-foreground">
+                  <Check className="w-5 h-5 text-emerald-500 mr-3 flex-shrink-0" />
+                  Automatic expense sorting & validation
+                </li>
+                <li className="flex items-center text-muted-foreground">
+                  <Check className="w-5 h-5 text-emerald-500 mr-3 flex-shrink-0" />
+                  Camera app & support for all receipt formats
                 </li>
               </ul>
             </div>
