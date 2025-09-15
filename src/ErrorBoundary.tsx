@@ -20,7 +20,11 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error('Error caught by boundary:', error, errorInfo);
+    // Only log in development
+    if (import.meta.env.DEV) {
+      console.error('Error caught by boundary:', error, errorInfo);
+    }
+    // In production, optionally send to monitoring service
   }
 
   render() {
@@ -28,7 +32,10 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
       return (
         <div style={{ padding: '20px', textAlign: 'center' }}>
           <h1>Something went wrong.</h1>
-          <p>Error: {this.state.error?.message}</p>
+          {/* Only show error details in development */}
+          {import.meta.env.DEV && (
+            <p>Error: {this.state.error?.message}</p>
+          )}
           <button onClick={() => this.setState({ hasError: false })}>
             Try again
           </button>

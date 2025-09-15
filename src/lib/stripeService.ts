@@ -1,5 +1,7 @@
 import { stripePromise, paymentPlans } from './stripe';
 import { apiClient } from './apiClient';
+import { logger } from './logger';
+
 
 export interface PaymentIntent {
   id: string;
@@ -52,7 +54,7 @@ class StripeService {
       });
       return response.data;
     } catch (error) {
-      console.error('Error creating payment intent:', error);
+      logger.error('Error creating payment intent:', error);
       throw new Error('Failed to create payment intent');
     }
   }
@@ -74,10 +76,10 @@ class StripeService {
       });
 
       return response.data;
-    } catch (error) {
-      console.error('Error creating subscription checkout:', error);
-      throw new Error('Failed to create subscription checkout');
-    }
+        } catch (error) {
+          logger.error('Error creating subscription checkout:', error);
+          throw new Error('Failed to create subscription checkout');
+        }
   }
 
   // Redirect to Stripe Checkout
@@ -90,7 +92,7 @@ class StripeService {
         throw new Error(error.message);
       }
     } catch (error) {
-      console.error('Error redirecting to checkout:', error);
+      logger.error('Error redirecting to checkout:', error);
       throw error;
     }
   }
@@ -112,7 +114,7 @@ class StripeService {
 
       return paymentIntent;
     } catch (error) {
-      console.error('Error confirming payment:', error);
+      logger.error('Error confirming payment:', error);
       throw error;
     }
   }
@@ -133,7 +135,7 @@ class StripeService {
 
       return response.data;
     } catch (error) {
-      console.error('Error creating subscription:', error);
+      logger.error('Error creating subscription:', error);
       throw new Error('Failed to create subscription');
     }
   }
@@ -144,7 +146,7 @@ class StripeService {
       const response = await apiClient.get(`/stripe/customer/${customerId}`);
       return response.data;
     } catch (error) {
-      console.error('Error fetching customer:', error);
+      logger.error('Error fetching customer:', error);
       throw new Error('Failed to fetch customer information');
     }
   }
@@ -155,7 +157,7 @@ class StripeService {
       const response = await apiClient.post(`/stripe/subscription/${subscriptionId}/cancel`);
       return response.data;
     } catch (error) {
-      console.error('Error canceling subscription:', error);
+      logger.error('Error canceling subscription:', error);
       throw new Error('Failed to cancel subscription');
     }
   }
@@ -168,7 +170,7 @@ class StripeService {
       });
       return response.data;
     } catch (error) {
-      console.error('Error updating subscription:', error);
+      logger.error('Error updating subscription:', error);
       throw new Error('Failed to update subscription');
     }
   }
@@ -179,7 +181,7 @@ class StripeService {
       const response = await apiClient.get(`/stripe/subscription/${subscriptionId}`);
       return response.data;
     } catch (error) {
-      console.error('Error fetching subscription:', error);
+      logger.error('Error fetching subscription:', error);
       throw new Error('Failed to fetch subscription details');
     }
   }
@@ -192,7 +194,7 @@ class StripeService {
       });
       return response.data;
     } catch (error) {
-      console.error('Error creating setup intent:', error);
+      logger.error('Error creating setup intent:', error);
       throw new Error('Failed to create setup intent');
     }
   }
@@ -203,7 +205,7 @@ class StripeService {
       const response = await apiClient.get(`/stripe/customer/${customerId}/payment-methods`);
       return response.data;
     } catch (error) {
-      console.error('Error fetching payment methods:', error);
+      logger.error('Error fetching payment methods:', error);
       throw new Error('Failed to fetch payment methods');
     }
   }

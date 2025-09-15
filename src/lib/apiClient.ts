@@ -2,6 +2,8 @@
  * HTTP client for FastAPI backend communication
  */
 
+import { logger } from './logger';
+
 export interface ApiResponse<T = any> {
   data: T | null;
   error: string | null;
