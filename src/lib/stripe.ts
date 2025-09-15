@@ -23,7 +23,7 @@ export const paymentPlans = {
     name: 'Startup',
     description: 'Perfect for small businesses with up to 2 outlets',
     priceGBP: 25, // Actual Stripe price in GBP
-    priceId: 'price_startup_gbp_monthly', // Your actual Stripe price ID for £25
+    priceId: 'price_1S6vsm17pn15PHGvl4WyWKyo', // Startup monthly price ID
     features: [
       'Up to 2 outlets',
       'Basic reporting',
@@ -38,7 +38,7 @@ export const paymentPlans = {
     name: 'Business',
     description: 'Ideal for growing businesses with multiple outlets',
     priceGBP: 69, // Actual Stripe price in GBP
-    priceId: 'price_business_gbp_monthly', // Your actual Stripe price ID for £69
+    priceId: 'price_1S6vue17pn15PHGvRwvVme0u', // Business monthly price ID
     features: [
       'Everything in Startup plus:',
       'Up to 10 outlets',
@@ -53,7 +53,7 @@ export const paymentPlans = {
     name: 'Enterprise',
     description: 'For established businesses with complex needs',
     priceGBP: 159, // Actual Stripe price in GBP
-    priceId: 'price_enterprise_gbp_monthly', // Your actual Stripe price ID for £159
+    priceId: 'price_1S6vwy17pn15PHGvWhJAdoIa', // Enterprise monthly price ID
     features: [
       'Everything in Business plus:',
       'Unlimited outlets',
