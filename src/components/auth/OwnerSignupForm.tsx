@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Mail, Lock, User, Chrome, ArrowRight, Check, Star } from 'lucide-react';
+import { Mail, Lock, User, Building, Chrome, ArrowRight, Check, Star } from 'lucide-react';
 import { paymentPlans } from '@/lib/stripe';
 import { authService } from '@/lib/auth';
 import { useOutlet } from '@/contexts/OutletContext';
