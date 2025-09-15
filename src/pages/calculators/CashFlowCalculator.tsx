@@ -172,6 +172,8 @@ const CashFlowCalculator: React.FC = () => {
     <CalculatorLayout
       title="Cash Flow Calculator"
       description="Forecast your business cash flow to identify potential shortages and plan for growth. Track monthly inflows, outflows, and cash balance projections."
+      keywords="cash flow calculator, cash flow forecast, business cash flow, cash flow projection, liquidity planning, working capital"
+      canonical="/calculators/cash-flow"
       results={calculations ? {
         title: 'Cash Flow Projection',
         value: `$${calculations.finalCashBalance.toLocaleString()}`,

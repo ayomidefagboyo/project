@@ -97,6 +97,8 @@ const BreakEvenCalculator: React.FC = () => {
     <CalculatorLayout
       title="Break-Even Calculator"
       description="Calculate when your business will break even and start generating profit. Analyze unit economics, contribution margins, and plan for profitability."
+      keywords="break-even calculator, break even analysis, contribution margin calculator, unit economics, profitability calculator, business break even"
+      canonical="/calculators/break-even"
       results={calculations ? {
         title: 'Break-Even Analysis',
         value: calculations.breakEvenUnits.toLocaleString(),

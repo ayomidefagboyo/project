@@ -131,6 +131,8 @@ const InventoryTurnoverCalculator: React.FC = () => {
     <CalculatorLayout
       title="Inventory Turnover Calculator"
       description="Calculate inventory turnover ratio and days in inventory to optimize stock levels, reduce carrying costs, and improve cash flow management."
+      keywords="inventory turnover calculator, inventory turnover ratio, days in inventory, stock turnover, inventory management, carrying costs"
+      canonical="/calculators/inventory-turnover"
       results={calculations ? {
         title: 'Inventory Turnover Analysis',
         value: `${calculations.inventoryTurnover.toFixed(1)}x`,

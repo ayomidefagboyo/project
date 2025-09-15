@@ -97,6 +97,8 @@ const ROICalculator: React.FC = () => {
     <CalculatorLayout
       title="ROI Calculator"
       description="Calculate return on investment for business decisions, equipment purchases, marketing campaigns, and more. Make data-driven financial decisions with instant ROI analysis."
+      keywords="ROI calculator, return on investment calculator, investment ROI, business ROI calculator, ROI analysis, investment returns, financial calculator"
+      canonical="/calculators/roi"
       results={calculations ? {
         title: 'Your ROI Results',
         value: `${calculations.roiPercentage >= 0 ? '+' : ''}${calculations.roiPercentage.toFixed(1)}%`,

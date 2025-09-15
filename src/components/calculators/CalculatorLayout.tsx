@@ -10,6 +10,7 @@ import {
   X
 } from 'lucide-react';
 import PublicHeader from '@/components/layout/PublicHeader';
+import SEOHead from '@/components/seo/SEOHead';
 
 interface CalculatorLayoutProps {
   title: string;
@@ -23,6 +24,8 @@ interface CalculatorLayoutProps {
   };
   onExportPDF?: () => void;
   onExportExcel?: () => void;
+  keywords?: string;
+  canonical?: string;
 }
 
 const CalculatorLayout: React.FC<CalculatorLayoutProps> = ({
@@ -31,7 +34,9 @@ const CalculatorLayout: React.FC<CalculatorLayoutProps> = ({
   children,
   results,
   onExportPDF,
-  onExportExcel
+  onExportExcel,
+  keywords,
+  canonical
 }) => {
   const [showEmailCapture, setShowEmailCapture] = useState(false);
   const [email, setEmail] = useState('');
@@ -73,8 +78,35 @@ const CalculatorLayout: React.FC<CalculatorLayoutProps> = ({
     }
   };
 
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": title,
+    "description": description,
+    "url": canonical ? `https://compazz.app${canonical}` : undefined,
+    "applicationCategory": "BusinessApplication",
+    "operatingSystem": "Web Browser",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "publisher": {
+      "@type": "Organization",
+      "name": "Compazz",
+      "url": "https://compazz.app"
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground">
+      <SEOHead
+        title={title}
+        description={description}
+        keywords={keywords}
+        canonical={canonical}
+        structuredData={structuredData}
+      />
       <PublicHeader />
 
       {/* Calculator Header */}

@@ -1,5 +1,6 @@
 
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { HelmetProvider } from 'react-helmet-async';
 import { OutletProvider, useOutlet } from '@/contexts/OutletContext';
 import Layout from '@/components/layout/Layout';
 import ScrollToTop from '@/components/ScrollToTop';
@@ -117,12 +118,14 @@ const AppRoutes = () => {
 // Main App Component
 const App = () => {
   return (
-    <OutletProvider>
-      <Router>
-        <ScrollToTop />
-        <AppRoutes />
-      </Router>
-    </OutletProvider>
+    <HelmetProvider>
+      <OutletProvider>
+        <Router>
+          <ScrollToTop />
+          <AppRoutes />
+        </Router>
+      </OutletProvider>
+    </HelmetProvider>
   );
 };
 
