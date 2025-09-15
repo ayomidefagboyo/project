@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import Logo from '@/components/ui/Logo';
 
 const PublicHeader: React.FC = () => {
   const scrollToSection = (id: string) => {
@@ -17,14 +18,7 @@ const PublicHeader: React.FC = () => {
       <nav className="container-width px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           <div className="flex items-center">
-            <Link to="/" className="flex items-center space-x-3">
-              <img 
-                src="/logo-icon.svg" 
-                alt="Compazz Logo" 
-                className="w-8 h-8"
-              />
-              <span className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">Compazz</span>
-            </Link>
+            <Logo />
           </div>
           <div className="hidden md:flex items-center space-x-8">
             <button onClick={() => scrollToSection('features')} className="text-muted-foreground hover:text-foreground font-medium transition-colors">Features</button>
