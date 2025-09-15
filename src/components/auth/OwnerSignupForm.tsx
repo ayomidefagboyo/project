@@ -177,21 +177,21 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
               <div className="space-y-3">
                 <div className="bg-primary-foreground/10 rounded-lg p-4">
                   <p className="text-primary-foreground/80 text-sm font-light italic">
-                    "We were losing £3K monthly to inventory shrinkage until Compazz's anomaly detection flagged suspicious patterns. Now our evening staff knows we're watching - shrinkage dropped 80%."
+                    "Managing finances across 12 client projects was chaos. Compazz's AI flagged a £2,400 expense miscategorization that would've killed our quarterly profit margin. Now everything's automated."
                   </p>
-                  <p className="text-primary-foreground/60 text-xs mt-2">- Marcus Chen, Convenience Store Chain (4 locations)</p>
+                  <p className="text-primary-foreground/60 text-xs mt-2">- Sarah Mitchell, Digital Marketing Agency</p>
                 </div>
                 <div className="bg-primary-foreground/10 rounded-lg p-4">
                   <p className="text-primary-foreground/80 text-sm font-light italic">
-                    "My accountant used to take 3 days to reconcile our books. With Compazz, everything's automated - I get real-time insights and caught a supplier double-billing us £800 last month."
+                    "As a CPA firm, we need precision. Compazz caught inconsistencies in our expense tracking that manual reviews missed. It's like having an AI auditor that never sleeps."
                   </p>
-                  <p className="text-primary-foreground/60 text-xs mt-2">- Priya Sharma, Beauty Salon & Spa</p>
+                  <p className="text-primary-foreground/60 text-xs mt-2">- James Rodriguez, Rodriguez & Associates CPA</p>
                 </div>
                 <div className="bg-primary-foreground/10 rounded-lg p-4">
                   <p className="text-primary-foreground/80 text-sm font-light italic">
-                    "The AI told us Tuesday lunch sales were 40% higher when we played jazz vs pop music. Small insight, but it's boosting our weekly revenue by £200+."
+                    "Our SaaS startup burned through £15K in 'mystery expenses' before Compazz. Now I can see exactly where every pound goes and our runway calculations are spot-on."
                   </p>
-                  <p className="text-primary-foreground/60 text-xs mt-2">- David Okafor, Coffee Roastery & Cafe</p>
+                  <p className="text-primary-foreground/60 text-xs mt-2">- Alex Thompson, TechFlow Solutions (YC S23)</p>
                 </div>
               </div>
             </div>
