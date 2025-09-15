@@ -27,6 +27,7 @@ import VendorInvoiceTable from '@/components/invoice/VendorInvoiceTable';
 import { FeatureGate } from '@/components/subscription/FeatureGate';
 import { supabase } from '@/lib/supabase';
 import TrialExpired from '@/components/TrialExpired';
+import { trackUserJourney, trackTrialEvent, trackFeatureUsage, trackDashboardInteraction, trackDeviceInfo } from '@/lib/posthog';
 
 const Dashboard: React.FC = () => {
   const { 
@@ -80,6 +81,23 @@ const Dashboard: React.FC = () => {
         ...prev,
         selectedOutlets
       }));
+
+      // Track dashboard access and device info
+      trackUserJourney('dashboard', {
+        user_id: currentUser.id,
+        accessible_outlets_count: accessibleOutlets.length,
+        can_view_all: canViewAllOutlets(),
+        is_business_owner: isBusinessOwner()
+      });
+
+      // Track device info for analytics
+      trackDeviceInfo();
+
+      // Track dashboard feature viewing
+      trackFeatureUsage('dashboard_overview', 'viewed', {
+        user_id: currentUser.id,
+        outlet_count: accessibleOutlets.length
+      });
 
       // Check trial status
       if (currentUser) {
@@ -316,6 +334,19 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      {/* Trial Expired Modal */}
+      {showTrialExpired && (
+        <TrialExpired
+          currentPlan="business"
+          daysRemaining={trialDaysRemaining}
+          onUpgrade={() => {
+            setShowTrialExpired(false);
+            // Refresh page to reflect new subscription status
+            window.location.reload();
+          }}
+        />
+      )}
+
       {/* Onboarding Popup */}
       {showOnboarding && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">

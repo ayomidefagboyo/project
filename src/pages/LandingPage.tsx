@@ -18,12 +18,22 @@ import {
 import { paymentPlans } from '@/lib/stripe';
 import stripeService from '@/lib/stripeService';
 import { currencyService, type CurrencyInfo } from '@/lib/currencyService';
+import { trackEvent, trackUserJourney } from '@/lib/posthog';
 import LegalModal from '@/components/modals/LegalModal';
 import PublicHeader from '@/components/layout/PublicHeader';
 
 const LandingPage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
+
+  // Track landing page visit
+  useEffect(() => {
+    trackUserJourney('landing', {
+      path: location.pathname,
+      search: location.search,
+      referrer: document.referrer
+    });
+  }, [location]);
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [isAnnual, setIsAnnual] = useState(false);
@@ -36,6 +46,14 @@ const LandingPage: React.FC = () => {
   // Handle subscription checkout
   const handleSubscribe = async (planId: string) => {
     setLoadingPlan(planId);
+
+    // Track CTA click
+    trackEvent('cta_clicked', {
+      plan_id: planId,
+      cta_location: 'pricing_section',
+      is_annual: isAnnual,
+      currency: currency.code
+    });
 
     try {
       // Always go to signup first, then Stripe trial setup after account creation
