@@ -406,16 +406,69 @@ class AuthService {
             // Extract name from user metadata (Google OAuth)
             const fullName = data.user.user_metadata?.full_name || data.user.user_metadata?.name || data.user.email?.split('@')[0] || '';
 
-            // Create user profile for OAuth user
+            // For OAuth users signing up independently, create them as business owners
+            // Create outlet first
+            const outletData = {
+              name: `${fullName}'s Business`,
+              business_type: 'retail',
+              status: 'active',
+              address: {
+                street: '',
+                city: '',
+                state: '',
+                zip: '',
+                country: 'USA',
+              },
+              phone: '',
+              email: data.user.email!,
+              opening_hours: this.getDefaultOpeningHours('retail'),
+              tax_rate: 8.25,
+              currency: 'USD',
+              timezone: 'America/New_York',
+            };
+
+            const { data: outlet, error: outletError } = await supabase
+              .from('outlets')
+              .insert(outletData)
+              .select()
+              .single();
+
+            if (outletError) {
+              console.error('Failed to create outlet for OAuth user:', outletError);
+              throw outletError;
+            }
+
+            // Create business settings
+            const { error: settingsError } = await supabase
+              .from('business_settings')
+              .insert({
+                outlet_id: outlet.id,
+                business_name: `${fullName}'s Business`,
+                business_type: 'retail',
+                tax_number: 'TAX-' + Date.now(),
+                theme: 'auto',
+                language: 'en',
+                date_format: 'MM/DD/YYYY',
+                time_format: '12h',
+                currency: 'USD',
+                timezone: 'America/New_York',
+              });
+
+            if (settingsError) {
+              console.error('Failed to create business settings for OAuth user:', settingsError);
+              throw settingsError;
+            }
+
+            // Create user profile for OAuth user as outlet admin
             const { data: newProfile, error: createError } = await supabase
               .from('users')
               .insert({
                 id: data.user.id,
                 email: data.user.email!,
                 name: fullName,
-                role: 'viewer', // Default role for OAuth users
-                outlet_id: null, // No outlet assigned initially
-                permissions: this.getDefaultPermissions('viewer'),
+                role: 'outlet_admin',
+                outlet_id: outlet.id,
+                permissions: this.getDefaultPermissions('outlet_admin'),
                 is_active: true,
               })
               .select()
@@ -433,7 +486,7 @@ class AuthService {
               role: newProfile.role,
               outletId: newProfile.outlet_id,
               permissions: newProfile.permissions || [],
-              isOwner: false,
+              isOwner: true,
             };
 
             return { user: authUser, error: null };
@@ -516,16 +569,69 @@ class AuthService {
             // Extract name from user metadata (Google OAuth)
             const fullName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || '';
 
-            // Create user profile for OAuth user (they don't have an outlet initially)
+            // For OAuth users signing up independently, create them as business owners
+            // Create outlet first
+            const outletData = {
+              name: `${fullName}'s Business`,
+              business_type: 'retail',
+              status: 'active',
+              address: {
+                street: '',
+                city: '',
+                state: '',
+                zip: '',
+                country: 'USA',
+              },
+              phone: '',
+              email: user.email!,
+              opening_hours: this.getDefaultOpeningHours('retail'),
+              tax_rate: 8.25,
+              currency: 'USD',
+              timezone: 'America/New_York',
+            };
+
+            const { data: outlet, error: outletError } = await supabase
+              .from('outlets')
+              .insert(outletData)
+              .select()
+              .single();
+
+            if (outletError) {
+              console.error('Failed to create outlet for OAuth user:', outletError);
+              throw outletError;
+            }
+
+            // Create business settings
+            const { error: settingsError } = await supabase
+              .from('business_settings')
+              .insert({
+                outlet_id: outlet.id,
+                business_name: `${fullName}'s Business`,
+                business_type: 'retail',
+                tax_number: 'TAX-' + Date.now(),
+                theme: 'auto',
+                language: 'en',
+                date_format: 'MM/DD/YYYY',
+                time_format: '12h',
+                currency: 'USD',
+                timezone: 'America/New_York',
+              });
+
+            if (settingsError) {
+              console.error('Failed to create business settings for OAuth user:', settingsError);
+              throw settingsError;
+            }
+
+            // Create user profile for OAuth user as outlet admin
             const { data: newProfile, error: createError } = await supabase
               .from('users')
               .insert({
                 id: user.id,
                 email: user.email!,
                 name: fullName,
-                role: 'viewer', // Default role for OAuth users
-                outlet_id: null, // No outlet assigned initially
-                permissions: this.getDefaultPermissions('viewer'),
+                role: 'outlet_admin',
+                outlet_id: outlet.id,
+                permissions: this.getDefaultPermissions('outlet_admin'),
                 is_active: true,
               })
               .select()
@@ -543,7 +649,7 @@ class AuthService {
               role: newProfile.role,
               outletId: newProfile.outlet_id,
               permissions: newProfile.permissions || [],
-              isOwner: false,
+              isOwner: true,
             };
 
             return { user: authUser, error: null };
