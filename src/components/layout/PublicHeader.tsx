@@ -18,9 +18,11 @@ const PublicHeader: React.FC = () => {
         <div className="flex justify-between items-center h-16">
           <div className="flex items-center">
             <Link to="/" className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-gradient-to-tr from-gray-900 to-gray-700 rounded-lg flex items-center justify-center">
-                <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
-              </div>
+              <img 
+                src="/logo-icon.svg" 
+                alt="Compazz Logo" 
+                className="w-8 h-8"
+              />
               <span className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">Compazz</span>
             </Link>
           </div>

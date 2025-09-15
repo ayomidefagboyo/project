@@ -38,30 +38,32 @@ const LandingPage: React.FC = () => {
     setLoadingPlan(planId);
 
     try {
-      // Check if we have a backend URL configured
+      // Check environment for trial-first vs Stripe-first approach
+      const useStripeForTrials = import.meta.env.VITE_USE_STRIPE_FOR_TRIALS === 'true';
       const backendUrl = import.meta.env.VITE_API_BASE_URL;
 
-      if (backendUrl && !backendUrl.includes('localhost')) {
-        // Production environment with backend - use Stripe checkout
-        const successUrl = `${window.location.origin}/dashboard?payment=success`;
+      if (useStripeForTrials && backendUrl && !backendUrl.includes('localhost')) {
+        // Production with Stripe trials: Create subscription with trial period
+        const successUrl = `${window.location.origin}/dashboard?payment=success&trial=true`;
         const cancelUrl = `${window.location.origin}/?payment=cancelled`;
 
-        const { sessionId } = await stripeService.createSubscriptionCheckout(
+        // Note: This creates a Stripe subscription with 7-day trial (no payment required during trial)
+        const response = await stripeService.createSubscriptionCheckout(
           planId,
           successUrl,
           cancelUrl,
           7 // 7-day free trial
         );
 
-        await stripeService.redirectToCheckout(sessionId);
+        await stripeService.redirectToCheckout((response as any).sessionId);
       } else {
-        // Development or no backend - redirect to signup
-        navigate(`/auth?mode=signup&plan=${planId}`);
+        // Development or trial-first approach: Direct signup with trial flag
+        navigate(`/auth?mode=signup&plan=${planId}&trial=true`);
       }
     } catch (error) {
-      console.error('Error starting subscription:', error);
-      // Fallback to signup if Stripe checkout fails
-      navigate(`/auth?mode=signup&plan=${planId}`);
+      console.error('Error starting subscription/trial:', error);
+      // Fallback to signup if Stripe fails
+      navigate(`/auth?mode=signup&plan=${planId}&trial=true`);
     } finally {
       setLoadingPlan(null);
     }
@@ -206,21 +208,37 @@ const LandingPage: React.FC = () => {
               
               {/* CTAs */}
               <div className="flex flex-col sm:flex-row gap-4">
-                <button
-                  onClick={() => handleSubscribe('business')}
-                  disabled={loadingPlan === 'business'}
-                  className="btn-primary px-8 py-3.5 text-lg group disabled:opacity-50"
-                >
-                  {loadingPlan === 'business' ? (
-                    <>
-                      <Loader2 className="mr-2 w-5 h-5 animate-spin" />
-                      Starting Trial...
-                    </>
-                  ) : (
-                    'Start Free Trial'
-                  )}
-                  <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
-                </button>
+                <div className="flex flex-col items-center sm:items-start">
+                  <button
+                    onClick={() => handleSubscribe('business')}
+                    disabled={loadingPlan === 'business'}
+                    className="btn-primary px-8 py-3.5 text-lg group disabled:opacity-50"
+                  >
+                    {loadingPlan === 'business' ? (
+                      <>
+                        <Loader2 className="mr-2 w-5 h-5 animate-spin" />
+                        Starting Free Trial...
+                      </>
+                    ) : (
+                      'Start 7-Day Free Trial'
+                    )}
+                    <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
+                  </button>
+                  <div className="flex items-center mt-3 space-x-4 text-sm text-gray-600 dark:text-gray-400">
+                    <span className="flex items-center">
+                      <Check className="w-4 h-4 text-emerald-500 mr-1" />
+                      No credit card
+                    </span>
+                    <span className="flex items-center">
+                      <Check className="w-4 h-4 text-emerald-500 mr-1" />
+                      Cancel anytime
+                    </span>
+                    <span className="flex items-center">
+                      <Check className="w-4 h-4 text-emerald-500 mr-1" />
+                      1,200+ businesses
+                    </span>
+                  </div>
+                </div>
                 <a 
                   href="#features" 
                   className="btn-secondary px-8 py-3.5 text-lg"
@@ -480,7 +498,7 @@ const LandingPage: React.FC = () => {
                 {loadingPlan === 'startup' ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
-                  'Start Free Trial'
+                  'Try Startup Free'
                 )}
               </button>
               <ul className="space-y-4">
@@ -535,7 +553,7 @@ const LandingPage: React.FC = () => {
                 {loadingPlan === 'business' ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
-                  'Start Free Trial'
+                  'Try Business Free'
                 )}
               </button>
               <ul className="space-y-4">
@@ -605,7 +623,7 @@ const LandingPage: React.FC = () => {
                 {loadingPlan === 'enterprise' ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
-                  'Start Free Trial'
+                  'Try Enterprise Free'
                 )}
               </button>
               <ul className="space-y-4">
@@ -852,7 +870,7 @@ const LandingPage: React.FC = () => {
           <p className="text-lg text-primary-foreground/80 mb-12 max-w-2xl mx-auto text-balance">
             Join 1200+ businesses already using Compazz to streamline their finances and make better decisions.
           </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+          <div className="flex flex-col gap-6 justify-center items-center">
             <button
               onClick={() => handleSubscribe('business')}
               disabled={loadingPlan === 'business'}
@@ -861,13 +879,27 @@ const LandingPage: React.FC = () => {
               {loadingPlan === 'business' ? (
                 <>
                   <Loader2 className="mr-2 w-5 h-5 animate-spin" />
-                  Starting Trial...
+                  Starting Free Trial...
                 </>
               ) : (
-                'Start Free Trial'
+                'Get 7 Days Free → No Credit Card'
               )}
               <ArrowRight className="ml-2 h-5 w-5 inline transition-transform group-hover:translate-x-1" />
             </button>
+            <div className="flex items-center space-x-6 text-sm text-primary-foreground/80">
+              <span className="flex items-center">
+                <Check className="w-4 h-4 text-emerald-400 mr-2" />
+                No setup fees
+              </span>
+              <span className="flex items-center">
+                <Check className="w-4 h-4 text-emerald-400 mr-2" />
+                Cancel anytime
+              </span>
+              <span className="flex items-center">
+                <Check className="w-4 h-4 text-emerald-400 mr-2" />
+                30-day money back
+              </span>
+            </div>
             <a 
               href="#how-it-works" 
               className="border-2 border-primary-foreground/20 text-primary-foreground px-8 py-3.5 rounded-lg font-medium text-lg hover:bg-primary-foreground/10 transition-all"

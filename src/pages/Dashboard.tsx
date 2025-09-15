@@ -26,6 +26,7 @@ import { formatCurrency } from '@/lib/utils';
 import VendorInvoiceTable from '@/components/invoice/VendorInvoiceTable';
 import { FeatureGate } from '@/components/subscription/FeatureGate';
 import { supabase } from '@/lib/supabase';
+import TrialExpired from '@/components/TrialExpired';
 
 const Dashboard: React.FC = () => {
   const { 
@@ -51,7 +52,8 @@ const Dashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isOutletSelectorOpen, setIsOutletSelectorOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [onboardingStep, setOnboardingStep] = useState(1);
+  const [showTrialExpired, setShowTrialExpired] = useState(false);
+  const [trialDaysRemaining, setTrialDaysRemaining] = useState(0);
   const [outletName, setOutletName] = useState('');
   const [businessType, setBusinessType] = useState<'supermarket' | 'restaurant' | 'lounge' | 'retail' | 'cafe'>('retail');
   
@@ -78,6 +80,11 @@ const Dashboard: React.FC = () => {
         ...prev,
         selectedOutlets
       }));
+
+      // Check trial status
+      if (currentUser) {
+        checkTrialStatus();
+      }
 
       // Show onboarding for new users with no data
       if (selectedOutlets.length === 0 && isBusinessOwner() && vendorInvoices.length === 0) {
@@ -120,16 +127,44 @@ const Dashboard: React.FC = () => {
     }
   }, [dashboardView.selectedOutlets]);
 
-  // Handle outlet setup
-  const handleOutletSetup = async () => {
-    if (!outletName.trim()) return;
+  // Check trial status
+  const checkTrialStatus = async () => {
+    if (!currentUser?.id) return;
 
+    try {
+      const { data: userProfile, error } = await supabase
+        .from('users')
+        .select('trial_started_at, trial_ends_at')
+        .eq('id', currentUser.id)
+        .single();
+
+      if (error || !userProfile) return;
+
+      if (userProfile.trial_ends_at) {
+        const trialEndDate = new Date(userProfile.trial_ends_at);
+        const now = new Date();
+        const diffTime = trialEndDate.getTime() - now.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+        setTrialDaysRemaining(diffDays);
+
+        // Show trial expired modal if trial has ended
+        if (diffDays <= 0) {
+          setShowTrialExpired(true);
+        }
+      }
+    } catch (error) {
+      console.error('Error checking trial status:', error);
+    }
+  };
+
+  // Handle complete onboarding (combined setup and trial)
+  const handleCompleteOnboarding = async () => {
     try {
       setLoading(true);
 
-      // If user already has an outlet, update it; otherwise create new one
-      if (currentUser?.outletId) {
-        // Update existing outlet
+      // Update outlet if name is provided
+      if (outletName.trim() && currentUser?.outletId) {
         const { error: updateError } = await supabase
           .from('outlets')
           .update({
@@ -139,30 +174,12 @@ const Dashboard: React.FC = () => {
           .eq('id', currentUser.outletId);
 
         if (updateError) throw updateError;
-      } else {
-        // This shouldn't happen with our new OAuth flow, but keeping as fallback
-        console.warn('User has no outlet - this should not happen with new OAuth flow');
       }
 
-      setOnboardingStep(2);
-    } catch (error) {
-      console.error('Error setting up outlet:', error);
-      setError('Failed to setup outlet');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Handle trial activation
-  const handleTrialActivation = async () => {
-    try {
-      setLoading(true);
-
-      // Start free trial - this would integrate with your subscription system
+      // Start free trial
       const trialEndDate = new Date();
       trialEndDate.setDate(trialEndDate.getDate() + 7); // 7-day trial
 
-      // Update user's trial status (you may need to add this to your schema)
       const { error: trialError } = await supabase
         .from('users')
         .update({
@@ -174,13 +191,12 @@ const Dashboard: React.FC = () => {
       if (trialError) throw trialError;
 
       setShowOnboarding(false);
-      setOnboardingStep(1);
 
       // Refresh the page or reload data
       window.location.reload();
     } catch (error) {
-      console.error('Error activating trial:', error);
-      setError('Failed to activate trial');
+      console.error('Error completing onboarding:', error);
+      setError('Failed to complete setup');
     } finally {
       setLoading(false);
     }
@@ -313,22 +329,26 @@ const Dashboard: React.FC = () => {
               </svg>
             </button>
 
-            {onboardingStep === 1 ? (
-              // Step 1: Business Setup
-              <div className="space-y-6">
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-blue-50 dark:bg-blue-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Building2 className="w-8 h-8 text-blue-600 dark:text-blue-400" />
-                  </div>
-                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-                    Welcome to Compazz!
-                  </h2>
-                  <p className="text-gray-600 dark:text-gray-400">
-                    Let's set up your business to get started
-                  </p>
+            {/* Single Step: Combined Setup and Trial */}
+            <div className="space-y-6">
+              <div className="text-center">
+                <div className="w-16 h-16 bg-gradient-to-tr from-blue-500 to-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Building2 className="w-8 h-8 text-white" />
                 </div>
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+                  Welcome to Compazz! 🎉
+                </h2>
+                <p className="text-gray-600 dark:text-gray-400">
+                  Let's get your 7-day free trial started
+                </p>
+              </div>
 
-                <div className="space-y-4">
+              {/* Quick Setup (Optional) */}
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-6 space-y-4">
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+                  Quick Setup (Optional)
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Business Name
@@ -337,11 +357,10 @@ const Dashboard: React.FC = () => {
                       type="text"
                       value={outletName}
                       onChange={(e) => setOutletName(e.target.value)}
-                      placeholder="Enter your business name"
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Your business name (optional)"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Business Type
@@ -349,7 +368,7 @@ const Dashboard: React.FC = () => {
                     <select
                       value={businessType}
                       onChange={(e) => setBusinessType(e.target.value as typeof businessType)}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     >
                       <option value="retail">Retail Store</option>
                       <option value="restaurant">Restaurant</option>
@@ -359,86 +378,61 @@ const Dashboard: React.FC = () => {
                     </select>
                   </div>
                 </div>
-
-                <div className="flex flex-col sm:flex-row gap-3 justify-center pt-4">
-                  <Button
-                    onClick={handleOutletSetup}
-                    disabled={!outletName.trim() || loading}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 disabled:opacity-50"
-                  >
-                    {loading ? 'Setting up...' : 'Continue'}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => setShowOnboarding(false)}
-                    className="px-8 py-3"
-                  >
-                    Skip for now
-                  </Button>
-                </div>
               </div>
-            ) : (
-              // Step 2: Trial Activation
-              <div className="text-center space-y-6">
-                <div className="w-16 h-16 bg-emerald-50 dark:bg-emerald-900/20 rounded-full flex items-center justify-center mx-auto">
-                  <CheckCircle className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
-                </div>
 
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-                    Business Setup Complete!
-                  </h2>
-                  <p className="text-gray-600 dark:text-gray-400">
-                    Start your free 7-day trial to access all features
-                  </p>
-                </div>
-
-                <div className="bg-gradient-to-r from-blue-50 to-emerald-50 dark:from-blue-900/20 dark:to-emerald-900/20 p-6 rounded-xl">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
-                    Your 7-Day Free Trial Includes:
-                  </h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
-                    <div className="flex items-center space-x-3">
-                      <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                      <span className="text-sm text-gray-700 dark:text-gray-300">Smart Receipt Scanning</span>
-                    </div>
-                    <div className="flex items-center space-x-3">
-                      <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                      <span className="text-sm text-gray-700 dark:text-gray-300">Invoice Management</span>
-                    </div>
-                    <div className="flex items-center space-x-3">
-                      <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                      <span className="text-sm text-gray-700 dark:text-gray-300">Financial Reports</span>
-                    </div>
-                    <div className="flex items-center space-x-3">
-                      <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                      <span className="text-sm text-gray-700 dark:text-gray-300">Team Collaboration</span>
-                    </div>
+              {/* Trial Features */}
+              <div className="bg-gradient-to-r from-blue-50 to-emerald-50 dark:from-blue-900/20 dark:to-emerald-900/20 p-6 rounded-xl">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 text-center">
+                  Your 7-Day Free Trial Includes:
+                </h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex items-center space-x-2">
+                    <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Smart Receipt Scanning</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Invoice Management</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Financial Reports</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Team Collaboration</span>
                   </div>
                 </div>
-
-                <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                  <Button
-                    onClick={handleTrialActivation}
-                    disabled={loading}
-                    className="bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white px-8 py-3"
-                  >
-                    {loading ? 'Starting Trial...' : 'Start Free Trial'}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => setShowOnboarding(false)}
-                    className="px-8 py-3"
-                  >
-                    Maybe Later
-                  </Button>
-                </div>
-
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  No credit card required • Cancel anytime • Full access to all features
-                </p>
               </div>
-            )}
+
+              <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
+                <Button
+                  onClick={handleCompleteOnboarding}
+                  disabled={loading}
+                  className="bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white px-8 py-3 text-lg"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="mr-2 w-5 h-5 animate-spin" />
+                      Starting Trial...
+                    </>
+                  ) : (
+                    'Start My Free Trial'
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowOnboarding(false)}
+                  className="px-8 py-3"
+                >
+                  Explore First
+                </Button>
+              </div>
+
+              <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
+                No credit card required • Cancel anytime • Setup can be completed later
+              </p>
+            </div>
           </div>
         </div>
       )}

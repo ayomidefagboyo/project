@@ -10,9 +10,10 @@ interface OwnerSignupFormProps {
   onSuccess?: () => void;
   onSwitchToLogin?: () => void;
   selectedPlan?: string | null;
+  isTrial?: boolean;
 }
 
-const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchToLogin, selectedPlan }) => {
+const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchToLogin, selectedPlan, isTrial }) => {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -207,7 +208,11 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
                     {paymentPlans[selectedPlan as keyof typeof paymentPlans].name} Plan Selected
                   </h3>
                   <p className="text-sm text-blue-700 dark:text-blue-300">
-                    7-day free trial • Then £{paymentPlans[selectedPlan as keyof typeof paymentPlans].priceGBP}/month
+                    {isTrial ? (
+                      '7-day free trial • No credit card required'
+                    ) : (
+                      `7-day free trial • Then £${paymentPlans[selectedPlan as keyof typeof paymentPlans].priceGBP}/month`
+                    )}
                   </p>
                 </div>
                 <div className="flex items-center space-x-1 text-blue-600 dark:text-blue-400">
