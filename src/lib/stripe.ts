@@ -23,7 +23,7 @@ export const paymentPlans = {
     name: 'Startup',
     description: 'Perfect for small businesses with up to 2 outlets',
     price: 29,
-    priceId: 'price_startup_monthly', // TODO: Replace with actual Stripe price ID from dashboard
+    priceId: 'prod_T31wqrROxCTVSg', // TODO: Replace with actual Stripe price ID from dashboard
     features: [
       'Up to 2 outlets',
       'Basic reporting',
@@ -38,7 +38,7 @@ export const paymentPlans = {
     name: 'Business',
     description: 'Ideal for growing businesses with multiple outlets',
     price: 79,
-    priceId: 'price_business_monthly', // TODO: Replace with actual Stripe price ID from dashboard
+    priceId: 'prod_T31y0qQMVpd7Fe', // TODO: Replace with actual Stripe price ID from dashboard
     features: [
       'Everything in Startup plus:',
       'Up to 10 outlets',
@@ -53,7 +53,7 @@ export const paymentPlans = {
     name: 'Enterprise',
     description: 'For established businesses with complex needs',
     price: 149,
-    priceId: 'price_enterprise_monthly', // TODO: Replace with actual Stripe price ID from dashboard
+    priceId: 'prod_T321XIPiSfemlT', // TODO: Replace with actual Stripe price ID from dashboard
     features: [
       'Everything in Business plus:',
       'Unlimited outlets',
@@ -79,18 +79,21 @@ export const createPaymentIntentConfig = (amount: number, currency = 'usd') => (
 });
 
 // Subscription configuration
-export const createSubscriptionConfig = (priceId: string, customerId?: string) => ({
-  price_data: {
-    currency: 'usd',
-    product_data: {
-      name: 'Compazz Subscription',
+export const createSubscriptionConfig = (customerId?: string) => ({
+  line_items: [{
+    price_data: {
+      currency: 'usd',
+      product_data: {
+        name: 'Compazz Subscription',
+      },
+      unit_amount: 0, // Will be set based on plan
+      recurring: {
+        interval: 'month',
+      },
     },
-    unit_amount: 0, // Will be set based on plan
-    recurring: {
-      interval: 'month',
-    },
-  },
-  quantity: 1,
+    quantity: 1,
+  }],
+  mode: 'subscription',
   ...(customerId && { customer: customerId }),
 });
 
