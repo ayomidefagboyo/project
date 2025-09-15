@@ -45,7 +45,7 @@ export class EODService {
         expenses: eodData.expenses,
         total_sales: totalSales,
         notes: eodData.notes || '',
-        status: 'completed',
+        status: 'submitted',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };

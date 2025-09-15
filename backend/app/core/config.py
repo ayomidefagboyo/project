@@ -2,7 +2,7 @@
 Configuration settings for the FastAPI application
 """
 
-from pydantic_settings import BaseSettings
+from pydantic import BaseSettings
 from typing import Optional
 import os
 
