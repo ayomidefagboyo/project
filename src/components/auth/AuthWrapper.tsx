@@ -10,15 +10,22 @@ interface AuthWrapperProps {
 const AuthWrapper: React.FC<AuthWrapperProps> = ({ onAuthSuccess }) => {
   const location = useLocation();
   const [isLogin, setIsLogin] = useState(true); // Default to login
+  const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
 
-  // Check URL parameter to determine initial mode
+  // Check URL parameter to determine initial mode and plan
   useEffect(() => {
     const urlParams = new URLSearchParams(location.search);
     const mode = urlParams.get('mode');
+    const plan = urlParams.get('plan');
+
     if (mode === 'signup') {
       setIsLogin(false);
     } else {
       setIsLogin(true); // Default to login
+    }
+
+    if (plan) {
+      setSelectedPlan(plan);
     }
   }, [location.search]);
 
@@ -42,9 +49,10 @@ const AuthWrapper: React.FC<AuthWrapperProps> = ({ onAuthSuccess }) => {
           onSwitchToSignup={switchToSignup}
         />
       ) : (
-        <OwnerSignupForm 
+        <OwnerSignupForm
           onSuccess={handleAuthSuccess}
           onSwitchToLogin={switchToLogin}
+          selectedPlan={selectedPlan}
         />
       )}
     </div>

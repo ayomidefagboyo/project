@@ -124,7 +124,7 @@ const LandingPage: React.FC = () => {
       try {
         const detectedCurrency = await currencyService.initializeCurrency();
         setCurrency(detectedCurrency);
-      } catch (error) {
+      } catch {
         console.log('Currency detection failed, using default USD');
       }
     };
@@ -206,13 +206,21 @@ const LandingPage: React.FC = () => {
               
               {/* CTAs */}
               <div className="flex flex-col sm:flex-row gap-4">
-                <Link
-                  to="/auth?mode=signup"
-                  className="btn-primary px-8 py-3.5 text-lg group"
+                <button
+                  onClick={() => handleSubscribe('business')}
+                  disabled={loadingPlan === 'business'}
+                  className="btn-primary px-8 py-3.5 text-lg group disabled:opacity-50"
                 >
-                  Start Free Trial
+                  {loadingPlan === 'business' ? (
+                    <>
+                      <Loader2 className="mr-2 w-5 h-5 animate-spin" />
+                      Starting Trial...
+                    </>
+                  ) : (
+                    'Start Free Trial'
+                  )}
                   <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
-                </Link>
+                </button>
                 <a 
                   href="#features" 
                   className="btn-secondary px-8 py-3.5 text-lg"
@@ -845,13 +853,21 @@ const LandingPage: React.FC = () => {
             Join 1200+ businesses already using Compazz to streamline their finances and make better decisions.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-            <Link 
-              to="/auth" 
-              className="bg-primary-foreground text-primary px-8 py-3.5 rounded-lg font-semibold text-lg hover:bg-primary-foreground/90 transition-all group"
+            <button
+              onClick={() => handleSubscribe('business')}
+              disabled={loadingPlan === 'business'}
+              className="bg-primary-foreground text-primary px-8 py-3.5 rounded-lg font-semibold text-lg hover:bg-primary-foreground/90 transition-all group disabled:opacity-50"
             >
-              Start Free Trial
+              {loadingPlan === 'business' ? (
+                <>
+                  <Loader2 className="mr-2 w-5 h-5 animate-spin" />
+                  Starting Trial...
+                </>
+              ) : (
+                'Start Free Trial'
+              )}
               <ArrowRight className="ml-2 h-5 w-5 inline transition-transform group-hover:translate-x-1" />
-            </Link>
+            </button>
             <a 
               href="#how-it-works" 
               className="border-2 border-primary-foreground/20 text-primary-foreground px-8 py-3.5 rounded-lg font-medium text-lg hover:bg-primary-foreground/10 transition-all"
