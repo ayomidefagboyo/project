@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Mail, Lock, User, Building, ChevronDown, Chrome, ArrowRight, Check, Star } from 'lucide-react';
+import { Mail, Lock, User, Chrome, ArrowRight, Check, Star } from 'lucide-react';
 import { paymentPlans } from '@/lib/stripe';
 import { authService } from '@/lib/auth';
 import { useOutlet } from '@/contexts/OutletContext';
-import { BusinessType } from '@/types';
 
 interface OwnerSignupFormProps {
   onSuccess?: () => void;
@@ -20,22 +19,14 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
     password: '',
     confirmPassword: '',
     companyName: '',
-    businessType: 'retail' as BusinessType,
   });
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { setCurrentUser, setUserOutlets, setCurrentOutlet } = useOutlet();
 
-  const businessTypes = [
-    { value: 'retail', label: 'Retail Store' },
-    { value: 'supermarket', label: 'Supermarket' },
-    { value: 'restaurant', label: 'Restaurant' },
-    { value: 'lounge', label: 'Lounge/Bar' },
-    { value: 'cafe', label: 'Cafe' },
-  ];
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
@@ -73,7 +64,6 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
         password: formData.password,
         name: formData.name,
         companyName: formData.companyName,
-        businessType: formData.businessType,
       });
 
       if (authError) {
@@ -182,20 +172,26 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
                 {[1, 2, 3, 4, 5].map((star) => (
                   <Star key={star} className="w-5 h-5 fill-yellow-400 text-yellow-400" />
                 ))}
-                <span className="ml-2 text-primary-foreground/80 font-light">4.9/5</span>
+                <span className="ml-2 text-primary-foreground/80 font-light">4.8/5 from 280+ businesses</span>
               </div>
               <div className="space-y-3">
                 <div className="bg-primary-foreground/10 rounded-lg p-4">
                   <p className="text-primary-foreground/80 text-sm font-light italic">
-                    "Compazz transformed how we manage our restaurant finances. The AI insights are incredible!"
+                    "We were losing £3K monthly to inventory shrinkage until Compazz's anomaly detection flagged suspicious patterns. Now our evening staff knows we're watching - shrinkage dropped 80%."
                   </p>
-                  <p className="text-primary-foreground/60 text-xs mt-2">- Sarah M., Restaurant Owner</p>
+                  <p className="text-primary-foreground/60 text-xs mt-2">- Marcus Chen, Convenience Store Chain (4 locations)</p>
                 </div>
                 <div className="bg-primary-foreground/10 rounded-lg p-4">
                   <p className="text-primary-foreground/80 text-sm font-light italic">
-                    "Setup was so easy and the anomaly detection caught issues we never noticed."
+                    "My accountant used to take 3 days to reconcile our books. With Compazz, everything's automated - I get real-time insights and caught a supplier double-billing us £800 last month."
                   </p>
-                  <p className="text-primary-foreground/60 text-xs mt-2">- James K., Retail Chain</p>
+                  <p className="text-primary-foreground/60 text-xs mt-2">- Priya Sharma, Beauty Salon & Spa</p>
+                </div>
+                <div className="bg-primary-foreground/10 rounded-lg p-4">
+                  <p className="text-primary-foreground/80 text-sm font-light italic">
+                    "The AI told us Tuesday lunch sales were 40% higher when we played jazz vs pop music. Small insight, but it's boosting our weekly revenue by £200+."
+                  </p>
+                  <p className="text-primary-foreground/60 text-xs mt-2">- David Okafor, Coffee Roastery & Cafe</p>
                 </div>
               </div>
             </div>
@@ -319,29 +315,6 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
                   </div>
                 </div>
 
-                <div>
-                  <label htmlFor="businessType" className="block text-sm font-medium text-foreground mb-2">
-                    Business Type
-                  </label>
-                  <div className="relative">
-                    <select
-                      id="businessType"
-                      name="businessType"
-                      value={formData.businessType}
-                      onChange={handleChange}
-                      className="block w-full appearance-none px-4 py-3 border border-border rounded-lg text-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light pr-12"
-                    >
-                      {businessTypes.map((type) => (
-                        <option key={type.value} value={type.value}>
-                          {type.label}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none">
-                      <ChevronDown className="h-5 w-5 text-muted-foreground" />
-                    </div>
-                  </div>
-                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -405,11 +378,11 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
               {isLoading ? (
                 <div className="flex items-center justify-center">
                   <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-foreground mr-3"></div>
-                  Creating your business...
+                  Creating account...
                 </div>
               ) : (
                 <div className="flex items-center justify-center">
-                  Create Business Account
+                  Create Account
                   <ArrowRight className="ml-2 h-5 w-5 transition-transform group-hover:translate-x-1" />
                 </div>
               )}
