@@ -269,7 +269,7 @@ const LandingPage: React.FC = () => {
               </div>
               <h3 className="text-xl font-semibold text-foreground mb-3">Smart Invoice Processing</h3>
               <p className="text-muted-foreground leading-relaxed">
-                Automatically extract data from invoices and receipts. Our AI reads vendor details, amounts, and dates with 95% accuracy, eliminating manual data entry.
+                Transform invoices, receipt photos into expense reports instantly with our AI-powered scanning technology. Eliminate manual data entry and reduce errors by up to 90%.
               </p>
             </div>
             
