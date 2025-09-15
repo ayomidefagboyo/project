@@ -74,37 +74,46 @@ const LandingPage: React.FC = () => {
     setLegalModal({ isOpen: false, type: null });
   };
 
-  // Convert USD prices to local currency (simplified conversion for demo)
-  const convertPrice = (usdPrice: number): number => {
-    // Simple conversion rates for demo - in production you'd use real exchange rates
+  // Convert GBP prices to user's local currency for display
+  const convertFromGBP = (gbpPrice: number): number => {
+    // Conversion rates from GBP to other currencies
     const conversionRates: Record<string, number> = {
-      'USD': 1,
-      'EUR': 0.85,
-      'GBP': 0.73,
-      'CAD': 1.25,
-      'NGN': 460,
-      'KES': 110,
-      'GHS': 12,
-      'ZAR': 18,
-      'AUD': 1.35,
-      'JPY': 110,
-      'INR': 75,
-      'BRL': 5.2,
-      'MXN': 20,
-      'CNY': 6.5,
-      'RUB': 75,
-      'TRY': 8.5,
-      'EGP': 16
+      'GBP': 1,
+      'USD': 1.27,
+      'EUR': 1.17,
+      'CAD': 1.71,
+      'NGN': 2070,
+      'KES': 165,
+      'GHS': 19.2,
+      'ZAR': 23.1,
+      'AUD': 1.91,
+      'JPY': 191,
+      'INR': 106,
+      'BRL': 7.3,
+      'MXN': 25.7,
+      'CNY': 9.2,
+      'RUB': 124,
+      'TRY': 43.2,
+      'EGP': 62.4
     };
 
-    const rate = conversionRates[currency.code] || 1;
-    return Math.round(usdPrice * rate);
+    const rate = conversionRates[currency.code] || conversionRates['USD'];
+    return Math.round(gbpPrice * rate);
   };
 
-  // Format price with currency
-  const formatPrice = (usdPrice: number): string => {
-    const convertedPrice = convertPrice(usdPrice);
-    return currencyService.formatCurrency(convertedPrice, { minimumFractionDigits: 0 });
+  // Format price with currency (converted from GBP)
+  const formatPrice = (planId: string, isAnnual: boolean = false): string => {
+    const plan = paymentPlans[planId as keyof typeof paymentPlans];
+    if (!plan) return '';
+
+    let price = convertFromGBP(plan.priceGBP);
+
+    // Apply annual discount (20% off)
+    if (isAnnual) {
+      price = Math.round(price * 0.8);
+    }
+
+    return currencyService.formatCurrency(price, { minimumFractionDigits: 0 });
   };
 
   // Initialize currency detection on page load
@@ -540,7 +549,7 @@ const LandingPage: React.FC = () => {
               <h3 className="text-2xl font-semibold text-foreground mb-2">Startup</h3>
               <div className="text-4xl font-semibold text-foreground mb-2 transition-all duration-500 ease-in-out">
                 <span className="inline-block transition-all duration-500 ease-in-out transform">
-                  {formatPrice(isAnnual ? 31 : paymentPlans.startup.price).replace(/\.00$/, '')}
+                  {formatPrice('startup', isAnnual).replace(/\.00$/, '')}
                 </span>
                 <span className="text-lg text-muted-foreground transition-all duration-300">
                   /month
@@ -550,7 +559,7 @@ const LandingPage: React.FC = () => {
                 isAnnual ? 'opacity-100 max-h-8 mb-2' : 'opacity-0 max-h-0 mb-0'
               }`}>
                 <p className="text-sm text-emerald-600">
-                  <span className="line-through text-muted-foreground">{formatPrice(paymentPlans.startup.price)}</span> Save 20%/year
+                  <span className="line-through text-muted-foreground">{formatPrice('startup', false)}</span> Save 20%/year
                 </p>
               </div>
               <p className="text-sm text-muted-foreground mb-6">Good for getting started</p>
@@ -597,7 +606,7 @@ const LandingPage: React.FC = () => {
               <h3 className="text-2xl font-semibold text-foreground mb-2 mt-2">Business</h3>
               <div className="flex items-baseline mb-2">
                 <span className="text-5xl font-bold text-foreground transition-all duration-500 ease-in-out transform inline-block">
-                  {formatPrice(isAnnual ? Math.round(paymentPlans.business.price * 0.8) : paymentPlans.business.price).replace(/\.00$/, '')}
+                  {formatPrice('business', isAnnual).replace(/\.00$/, '')}
                 </span>
                 <span className="text-lg text-muted-foreground ml-1 transition-all duration-300">/month</span>
               </div>
@@ -653,13 +662,13 @@ const LandingPage: React.FC = () => {
               <h3 className="text-2xl font-semibold text-foreground mb-2">Enterprise</h3>
               <div className="flex items-baseline mb-2">
                 <span className="text-4xl font-semibold text-foreground transition-all duration-500 ease-in-out transform inline-block">
-                  {formatPrice(isAnnual ? Math.round(paymentPlans.enterprise.price * 0.8) : paymentPlans.enterprise.price).replace(/\.00$/, '')}
+                  {formatPrice('enterprise', isAnnual).replace(/\.00$/, '')}
                 </span>
                 <span className="text-lg text-muted-foreground ml-1 transition-all duration-300">/month</span>
               </div>
               <div className={`transition-all duration-300 ease-in-out ${isAnnual ? 'opacity-100 max-h-8 mb-2' : 'opacity-0 max-h-0 mb-0'}`}>
                 <p className="text-sm text-emerald-600 transform transition-all duration-300 ease-in-out">
-                  <span className="line-through text-muted-foreground">{formatPrice(paymentPlans.enterprise.price)}</span> Save 20%/year
+                  <span className="line-through text-muted-foreground">{formatPrice('enterprise', false)}</span> Save 20%/year
                 </p>
               </div>
               <p className="text-sm text-muted-foreground mb-6">For large operations</p>
