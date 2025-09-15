@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Mail, Lock, User, Building, ChevronDown, Chrome, ArrowRight } from 'lucide-react';
+import { Mail, Lock, User, Building, ChevronDown, Chrome, ArrowRight, Check } from 'lucide-react';
+import { paymentPlans } from '@/lib/stripe';
 import { authService } from '@/lib/auth';
 import { useOutlet } from '@/contexts/OutletContext';
 import { BusinessType } from '@/types';
@@ -8,9 +9,10 @@ import { BusinessType } from '@/types';
 interface OwnerSignupFormProps {
   onSuccess?: () => void;
   onSwitchToLogin?: () => void;
+  selectedPlan?: string | null;
 }
 
-const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchToLogin }) => {
+const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchToLogin, selectedPlan }) => {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -195,6 +197,26 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
               Set up your company and start managing finances like never before
             </p>
           </div>
+
+          {/* Selected Plan Display */}
+          {selectedPlan && paymentPlans[selectedPlan as keyof typeof paymentPlans] && (
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold text-blue-900 dark:text-blue-100">
+                    {paymentPlans[selectedPlan as keyof typeof paymentPlans].name} Plan Selected
+                  </h3>
+                  <p className="text-sm text-blue-700 dark:text-blue-300">
+                    7-day free trial • Then £{paymentPlans[selectedPlan as keyof typeof paymentPlans].priceGBP}/month
+                  </p>
+                </div>
+                <div className="flex items-center space-x-1 text-blue-600 dark:text-blue-400">
+                  <Check className="w-5 h-5" />
+                  <span className="font-medium">Selected</span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Google Sign Up */}
           <button
