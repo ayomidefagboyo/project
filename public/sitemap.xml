@@ -30,7 +30,7 @@
     <priority>0.9</priority>
   </url>
   
-  <!-- Blog Articles -->
+  <!-- Blog Articles - All 20 Posts -->
   <url>
     <loc>https://compazz.app/blog/ai-revolutionizing-finance</loc>
     <lastmod>2025-09-15</lastmod>
@@ -39,14 +39,14 @@
   </url>
   
   <url>
-    <loc>https://compazz.app/blog/automated-invoice-processing-roi</loc>
+    <loc>https://compazz.app/blog/streamline-multi-location-finance</loc>
     <lastmod>2025-09-15</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   
   <url>
-    <loc>https://compazz.app/blog/streamline-multi-location-finance</loc>
+    <loc>https://compazz.app/blog/automated-invoice-processing-roi</loc>
     <lastmod>2025-09-15</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
@@ -82,6 +82,90 @@
   
   <url>
     <loc>https://compazz.app/blog/roi-calculator-guide</loc>
+    <lastmod>2025-09-15</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  
+  <url>
+    <loc>https://compazz.app/blog/break-even-analysis-calculator-guide</loc>
+    <lastmod>2025-09-15</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  
+  <url>
+    <loc>https://compazz.app/blog/cash-flow-calculator-business-guide</loc>
+    <lastmod>2025-09-15</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  
+  <url>
+    <loc>https://compazz.app/blog/profit-margin-calculator-guide</loc>
+    <lastmod>2025-09-15</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  
+  <url>
+    <loc>https://compazz.app/blog/inventory-turnover-calculator-guide</loc>
+    <lastmod>2025-09-15</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  
+  <url>
+    <loc>https://compazz.app/blog/top-10-financial-kpis-business-owners</loc>
+    <lastmod>2025-09-15</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  
+  <url>
+    <loc>https://compazz.app/blog/top-10-financial-mistakes-small-businesses</loc>
+    <lastmod>2025-09-15</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  
+  <url>
+    <loc>https://compazz.app/blog/top-10-financial-management-tools-small-business</loc>
+    <lastmod>2025-09-15</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  
+  <url>
+    <loc>https://compazz.app/blog/compazz-vs-quickbooks-multi-location-comparison</loc>
+    <lastmod>2025-09-15</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  
+  <url>
+    <loc>https://compazz.app/blog/compazz-vs-xero-ai-powered-accounting-comparison</loc>
+    <lastmod>2025-09-15</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  
+  <url>
+    <loc>https://compazz.app/blog/best-restaurant-pos-financial-management-integration</loc>
+    <lastmod>2025-09-15</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  
+  <url>
+    <loc>https://compazz.app/blog/complete-restaurant-financial-management-guide-2024</loc>
+    <lastmod>2025-09-15</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  
+  <url>
+    <loc>https://compazz.app/blog/automate-business-finances-step-by-step-guide</loc>
     <lastmod>2025-09-15</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
