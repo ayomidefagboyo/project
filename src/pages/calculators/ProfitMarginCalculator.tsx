@@ -129,6 +129,8 @@ const ProfitMarginCalculator: React.FC = () => {
     <CalculatorLayout
       title="Profit Margin Calculator"
       description="Calculate gross, operating, and net profit margins to understand your business profitability. Optimize pricing strategies and identify cost-cutting opportunities."
+      keywords="profit margin calculator, gross profit margin, net profit margin, operating margin, profitability calculator, business margins"
+      canonical="/calculators/profit-margin"
       results={calculations ? {
         title: 'Profit Margin Analysis',
         value: `${calculations.netMargin.toFixed(1)}%`,

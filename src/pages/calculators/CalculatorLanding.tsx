@@ -13,6 +13,7 @@ import {
   Target
 } from 'lucide-react';
 import PublicHeader from '@/components/layout/PublicHeader';
+import SEOHead from '@/components/seo/SEOHead';
 
 const CalculatorLanding: React.FC = () => {
   const calculators = [
@@ -68,8 +69,42 @@ const CalculatorLanding: React.FC = () => {
     }
   ];
 
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "Free Financial Calculators by Compazz",
+    "description": "Professional business financial calculators for ROI, break-even analysis, cash flow, profit margins, and inventory turnover. Free tools to make data-driven financial decisions.",
+    "url": "https://compazz.app/calculators",
+    "applicationCategory": "BusinessApplication",
+    "operatingSystem": "Web Browser",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "publisher": {
+      "@type": "Organization",
+      "name": "Compazz",
+      "url": "https://compazz.app"
+    },
+    "featureList": [
+      "ROI Calculator",
+      "Break-Even Calculator",
+      "Cash Flow Calculator",
+      "Profit Margin Calculator",
+      "Inventory Turnover Calculator"
+    ]
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground">
+      <SEOHead
+        title="Free Financial Calculators"
+        description="Professional business financial calculators for ROI, break-even analysis, cash flow, profit margins, and inventory turnover. Free tools to make data-driven financial decisions for small businesses."
+        keywords="financial calculators, ROI calculator, break-even calculator, cash flow calculator, profit margin calculator, inventory turnover calculator, business financial tools, free calculators"
+        canonical="/calculators"
+        structuredData={structuredData}
+      />
       <PublicHeader />
 
       {/* Hero Section */}
