@@ -578,15 +578,15 @@ const LandingPage: React.FC = () => {
               <ul className="space-y-4">
                 <li className="flex items-center text-muted-foreground">
                   <Check className="w-5 h-5 text-emerald-500 mr-3 flex-shrink-0" />
-                  Up to 2 outlets
+                  For single outlet businesses
                 </li>
                 <li className="flex items-center text-muted-foreground">
                   <Check className="w-5 h-5 text-emerald-500 mr-3 flex-shrink-0" />
-                  Basic reporting
+                  Basic reporting and analytics
                 </li>
                 <li className="flex items-center text-muted-foreground">
                   <Check className="w-5 h-5 text-emerald-500 mr-3 flex-shrink-0" />
-                  Mobile app access
+                  automated financial insights
                 </li>
                 <li className="flex items-center text-muted-foreground">
                   <Check className="w-5 h-5 text-emerald-500 mr-3 flex-shrink-0" />
@@ -633,11 +633,11 @@ const LandingPage: React.FC = () => {
               <ul className="space-y-4">
                 <li className="flex items-center text-foreground font-medium">
                   <Check className="w-5 h-5 text-emerald-500 mr-3 flex-shrink-0" />
-                  Everything in Basic plus:
+                  Everything in Startup plus:
                 </li>
                 <li className="flex items-center text-muted-foreground">
                   <Check className="w-5 h-5 text-emerald-500 mr-3 flex-shrink-0" />
-                  Up to 10 outlets
+                  Up to 5 outlets
                 </li>
                 <li className="flex items-center text-muted-foreground">
                   <Check className="w-5 h-5 text-emerald-500 mr-3 flex-shrink-0" />
@@ -645,7 +645,7 @@ const LandingPage: React.FC = () => {
                 </li>
                 <li className="flex items-center text-muted-foreground">
                   <Check className="w-5 h-5 text-emerald-500 mr-3 flex-shrink-0" />
-                  Priority support
+                Auto audit of end of day reports and invoices
                 </li>
                 <li className="flex items-center text-muted-foreground">
                   <Check className="w-5 h-5 text-emerald-500 mr-3 flex-shrink-0" />
@@ -687,7 +687,7 @@ const LandingPage: React.FC = () => {
               <ul className="space-y-4">
                 <li className="flex items-center text-muted-foreground">
                   <Check className="w-5 h-5 text-emerald-500 mr-3 flex-shrink-0" />
-                  Everything in Pro plus:
+                  Everything in Business plus:
                 </li>
                 <li className="flex items-center text-muted-foreground">
                   <Check className="w-5 h-5 text-emerald-500 mr-3 flex-shrink-0" />
