@@ -222,12 +222,6 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
               <div className="space-y-3">
                 <div className="bg-primary-foreground/10 rounded-lg p-4">
                   <p className="text-primary-foreground/80 text-sm font-light italic">
-                    "Managing finances across 12 client projects was chaos. Compazz's AI flagged a £2,400 expense miscategorization that would've killed our quarterly profit margin. Now everything's automated."
-                  </p>
-                  <p className="text-primary-foreground/60 text-xs mt-2">- Sarah Mitchell, Digital Marketing Agency</p>
-                </div>
-                <div className="bg-primary-foreground/10 rounded-lg p-4">
-                  <p className="text-primary-foreground/80 text-sm font-light italic">
                     "As a CPA firm, we need precision. Compazz caught inconsistencies in our expense tracking that manual reviews missed. It's like having an AI auditor that never sleeps."
                   </p>
                   <p className="text-primary-foreground/60 text-xs mt-2">- James Rodriguez, Rodriguez & Associates CPA</p>
