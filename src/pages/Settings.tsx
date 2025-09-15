@@ -1,21 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Users, Building2, Shield, Bell, Palette, CreditCard, ChevronRight } from 'lucide-react';
+import { Settings as SettingsIcon, Users, Building2, Bell, CreditCard, ChevronRight, ExternalLink, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useOutlet } from '@/contexts/OutletContext';
 import InviteTeamMember from '@/components/auth/InviteTeamMember';
 import EditBusinessInfoModal from '@/components/modals/EditBusinessInfoModal';
+import SubscriptionManager from '@/components/payments/SubscriptionManager';
 import Toast from '@/components/ui/Toast';
 import { currencyService, CurrencyInfo } from '@/lib/currencyService';
 import { dataService } from '@/lib/services';
+import stripeService, { Subscription } from '@/lib/stripeService';
+import { paymentPlans } from '@/lib/stripe';
 import { Outlet as OutletType } from '@/types';
 
 const Settings: React.FC = () => {
   const { currentOutlet, currentUser, hasPermission, setCurrentOutlet, userOutlets, setUserOutlets } = useOutlet();
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showEditBusinessModal, setShowEditBusinessModal] = useState(false);
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
   const [currentCurrency, setCurrentCurrency] = useState<CurrencyInfo>(currencyService.getCurrentCurrency());
   const [availableCurrencies, setAvailableCurrencies] = useState<CurrencyInfo[]>([]);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [loadingSubscription, setLoadingSubscription] = useState(false);
+  const [stripeCustomerId, setStripeCustomerId] = useState<string | null>(null);
   const [toast, setToast] = useState<{
     message: string;
     type: 'success' | 'error' | 'warning' | 'info';
@@ -42,11 +49,34 @@ const Settings: React.FC = () => {
 
   useEffect(() => {
     loadCurrencies();
-  }, []);
+    if (isOwner && currentUser?.id) {
+      loadSubscriptionData();
+    }
+  }, [isOwner, currentUser?.id]);
 
   const loadCurrencies = () => {
     const currencies = currencyService.getAllCurrencies();
     setAvailableCurrencies(currencies);
+  };
+
+  const loadSubscriptionData = async () => {
+    if (!currentUser?.id) return;
+    
+    try {
+      setLoadingSubscription(true);
+      // Try to get existing customer and subscription data
+      const customerData = await stripeService.getCustomer(currentUser.id);
+      setStripeCustomerId(customerData.id);
+      
+      if (customerData.subscriptions && customerData.subscriptions.length > 0) {
+        setSubscription(customerData.subscriptions[0]);
+      }
+    } catch (error) {
+      console.log('No existing subscription found');
+      // This is expected for users without subscriptions
+    } finally {
+      setLoadingSubscription(false);
+    }
   };
 
   const handleCurrencyChange = (currencyCode: string) => {
@@ -54,12 +84,85 @@ const Settings: React.FC = () => {
     setCurrentCurrency(currencyService.getCurrentCurrency());
   };
 
-  const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
-    setToast({
-      message,
-      type,
-      isVisible: true
-    });
+  const handleUpgrade = async () => {
+    try {
+      const successUrl = `${window.location.origin}/settings?payment=success`;
+      const cancelUrl = `${window.location.origin}/settings?payment=cancelled`;
+
+      // Start with business plan as default upgrade
+      const { sessionId } = await stripeService.createSubscriptionCheckout(
+        'business',
+        successUrl,
+        cancelUrl,
+        7 // 7-day free trial
+      );
+
+      await stripeService.redirectToCheckout(sessionId);
+    } catch (error) {
+      console.error('Error starting upgrade:', error);
+      showToast('Failed to start upgrade process. Please try again.', 'error');
+    }
+  };
+
+  const handleManageSubscription = () => {
+    setShowSubscriptionModal(true);
+  };
+
+  const handleSubscriptionChange = (newSubscription: Subscription | null) => {
+    setSubscription(newSubscription);
+    if (newSubscription) {
+      showToast('Subscription updated successfully!', 'success');
+    }
+  };
+
+  const getCurrentPlan = () => {
+    if (!subscription) return { name: 'Free Plan', description: 'Perfect for getting started' };
+    
+    // Find the plan based on subscription price
+    const planEntry = Object.entries(paymentPlans).find(([key, plan]) => 
+      plan.priceId === subscription.plan.id
+    );
+    
+    if (planEntry) {
+      const [key, plan] = planEntry;
+      return { name: plan.name, description: plan.description };
+    }
+    
+    return { name: 'Custom Plan', description: 'Active subscription' };
+  };
+
+  const getNextBillingDate = () => {
+    if (!subscription) return 'Never';
+    
+    if (subscription.is_trial && subscription.trial_end) {
+      return new Date(subscription.trial_end * 1000).toLocaleDateString();
+    }
+    
+    return new Date(subscription.current_period_end * 1000).toLocaleDateString();
+  };
+
+  const getSubscriptionStatus = () => {
+    if (!subscription) return null;
+    
+    if (subscription.is_trial) {
+      const daysLeft = Math.ceil((subscription.trial_end! - Date.now() / 1000) / (24 * 60 * 60));
+      return {
+        text: `${daysLeft} days left in trial`,
+        type: 'trial' as const
+      };
+    }
+    
+    if (subscription.cancel_at_period_end) {
+      return {
+        text: 'Cancels at period end',
+        type: 'warning' as const
+      };
+    }
+    
+    return {
+      text: subscription.status === 'active' ? 'Active' : subscription.status,
+      type: 'active' as const
+    };
   };
 
   const hideToast = () => {
@@ -228,37 +331,6 @@ const Settings: React.FC = () => {
           </div>
         </div>
 
-        {/* Security */}
-        <div className="card p-8">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 rounded-lg flex items-center justify-center">
-                <Shield className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-              </div>
-              <h2 className="text-xl font-semibold text-foreground">Security</h2>
-            </div>
-            <button className="btn-secondary px-4 py-2 text-sm">
-              Configure
-            </button>
-          </div>
-
-          <div className="space-y-6">
-            <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">Two-Factor Authentication</label>
-              <div className="flex items-center justify-between">
-                <p className="text-foreground font-medium">Not enabled</p>
-                <span className="inline-flex items-center px-3 py-1 text-xs font-medium rounded-full bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
-                  Recommended
-                </span>
-              </div>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">Last Login</label>
-              <p className="text-foreground font-medium">Today</p>
-            </div>
-          </div>
-        </div>
 
         {/* Notifications */}
         <div className="card p-8">
@@ -297,33 +369,6 @@ const Settings: React.FC = () => {
           </div>
         </div>
 
-        {/* Appearance */}
-        <div className="card p-8">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-pink-50 to-pink-100 dark:from-pink-900/20 dark:to-pink-800/20 rounded-lg flex items-center justify-center">
-                <Palette className="w-5 h-5 text-pink-600 dark:text-pink-400" />
-              </div>
-              <h2 className="text-xl font-semibold text-foreground">Appearance</h2>
-            </div>
-            <button className="btn-secondary px-4 py-2 text-sm">
-              Customize
-            </button>
-          </div>
-
-          <div className="space-y-6">
-            <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">Theme</label>
-              <p className="text-foreground font-medium">Auto</p>
-              <p className="text-xs text-muted-foreground mt-1">Follows your system preference</p>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">Language</label>
-              <p className="text-foreground font-medium">English</p>
-            </div>
-          </div>
-        </div>
 
         {/* Billing */}
         {isOwner && (
@@ -335,23 +380,70 @@ const Settings: React.FC = () => {
                 </div>
                 <h2 className="text-xl font-semibold text-foreground">Billing</h2>
               </div>
-              <button className="btn-secondary px-4 py-2 text-sm">
-                Upgrade
-              </button>
+              <div className="flex items-center space-x-2">
+                {subscription ? (
+                  <button 
+                    onClick={handleManageSubscription}
+                    className="btn-secondary px-4 py-2 text-sm flex items-center space-x-1"
+                  >
+                    <span>Manage</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </button>
+                ) : (
+                  <button 
+                    onClick={handleUpgrade}
+                    className="btn-primary px-4 py-2 text-sm"
+                  >
+                    Upgrade
+                  </button>
+                )}
+              </div>
             </div>
 
-            <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-2">Current Plan</label>
-                <p className="text-foreground font-medium">Free Plan</p>
-                <p className="text-xs text-muted-foreground mt-1">Perfect for getting started</p>
+            {loadingSubscription ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
               </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-2">Next Billing Date</label>
-                <p className="text-foreground font-medium">Never</p>
+            ) : (
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2">Current Plan</label>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-foreground font-medium">{getCurrentPlan().name}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{getCurrentPlan().description}</p>
+                    </div>
+                    {getSubscriptionStatus() && (
+                      <span className={`inline-flex items-center px-3 py-1 text-xs font-medium rounded-full ${
+                        getSubscriptionStatus()?.type === 'trial' 
+                          ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400'
+                          : getSubscriptionStatus()?.type === 'warning'
+                          ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400'
+                          : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400'
+                      }`}>
+                        {getSubscriptionStatus()?.text}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2">
+                    {subscription?.is_trial ? 'Trial Ends' : 'Next Billing Date'}
+                  </label>
+                  <p className="text-foreground font-medium">{getNextBillingDate()}</p>
+                </div>
+
+                {subscription && (
+                  <div>
+                    <label className="block text-sm font-medium text-muted-foreground mb-2">Amount</label>
+                    <p className="text-foreground font-medium">
+                      £{(subscription.plan.amount / 100).toFixed(2)} / {subscription.plan.interval}
+                    </p>
+                  </div>
+                )}
               </div>
-            </div>
+            )}
           </div>
         )}
       </div>
@@ -370,6 +462,31 @@ const Settings: React.FC = () => {
           onSave={handleBusinessInfoSave}
           isLoading={isUpdating}
         />
+      )}
+
+      {/* Subscription Management Modal */}
+      {showSubscriptionModal && stripeCustomerId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-background rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-border">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-foreground">Manage Subscription</h2>
+                <button
+                  onClick={() => setShowSubscriptionModal(false)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+            <div className="p-6">
+              <SubscriptionManager
+                customerId={stripeCustomerId}
+                onSubscriptionChange={handleSubscriptionChange}
+              />
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Toast Notification */}
