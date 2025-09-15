@@ -1,9 +1,9 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { 
-  Target, 
-  Users, 
-  Lightbulb, 
+import {
+  Target,
+  Users,
+  Lightbulb,
   Award,
   Heart,
   MapPin,
@@ -15,6 +15,7 @@ import {
   TrendingUp,
   Shield
 } from 'lucide-react';
+import PublicHeader from '@/components/layout/PublicHeader';
 
 const About: React.FC = () => {
   const values = [
@@ -119,32 +120,7 @@ const About: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Navbar */}
-      <header className="fixed top-0 left-0 right-0 bg-background/95 backdrop-blur-md border-b border-border z-50">
-        <nav className="container-width px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
-              <Link to="/" className="flex items-center">
-                <img src="/logo.svg" alt="Compazz" className="h-8" />
-              </Link>
-            </div>
-            <div className="hidden md:flex items-center space-x-8">
-              <Link to="/#features" className="text-muted-foreground hover:text-foreground font-medium transition-colors">Features</Link>
-              <Link to="/#pricing" className="text-muted-foreground hover:text-foreground font-medium transition-colors">Pricing</Link>
-              <Link to="/about" className="text-foreground font-medium transition-colors">About</Link>
-              <Link to="/blog" className="text-muted-foreground hover:text-foreground font-medium transition-colors">Blog</Link>
-            </div>
-            <div className="flex items-center space-x-4">
-              <Link to="/auth" className="text-muted-foreground hover:text-foreground font-medium transition-colors">
-                Sign In
-              </Link>
-              <Link to="/dashboard" className="btn-primary px-6 py-2.5">
-                Get Started
-              </Link>
-            </div>
-          </div>
-        </nav>
-      </header>
+      <PublicHeader />
 
       {/* Hero Section */}
       <section className="pt-24 section-padding bg-gradient-to-br from-accent/30 to-secondary/50">

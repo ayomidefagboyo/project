@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Calendar, Clock, ArrowRight, User, Filter, Search } from 'lucide-react';
 import { blogPosts, blogCategories, getFeaturedPost, getPostsByCategory } from '../data/blogPosts';
 import { Helmet } from 'react-helmet-async';
+import PublicHeader from '@/components/layout/PublicHeader';
 
 const Blog: React.FC = () => {
   const [activeCategory, setActiveCategory] = useState('all');
@@ -78,45 +79,9 @@ const Blog: React.FC = () => {
       </Helmet>
 
       <div className="min-h-screen bg-gray-50">
-        {/* Header */}
-        <header className="fixed top-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-b border-gray-100 z-50">
-          <nav className="max-w-7xl mx-auto px-6 lg:px-8">
-            <div className="flex justify-between items-center h-20">
-              <div className="flex items-center">
-                <Link to="/" className="flex items-center">
-                  <span className="text-2xl font-medium text-gray-900 tracking-tight">Compazz</span>
-                </Link>
-              </div>
-              <div className="hidden md:flex items-center space-x-12">
-                <Link to="/#features" className="text-gray-500 hover:text-gray-900 font-medium text-sm transition-colors">Features</Link>
-                <Link to="/#pricing" className="text-gray-500 hover:text-gray-900 font-medium text-sm transition-colors">Pricing</Link>
-                <Link to="/calculators" className="text-gray-500 hover:text-gray-900 font-medium text-sm transition-colors">Calculators</Link>
-                <Link to="/about" className="text-gray-500 hover:text-gray-900 font-medium text-sm transition-colors">About</Link>
-                <Link to="/blog" className="text-gray-900 font-medium text-sm">Blog</Link>
-              </div>
-              <div className="flex items-center space-x-4">
-                <Link to="/auth" className="text-gray-500 hover:text-gray-900 font-medium text-sm transition-colors">Sign In</Link>
-                <Link to="/dashboard" className="bg-gray-900 text-white px-6 py-2.5 rounded-xl font-medium text-sm hover:bg-gray-800 transition-all duration-200">
-                  Get Started
-                </Link>
-              </div>
-            </div>
-          </nav>
-        </header>
+        <PublicHeader />
 
-        {/* Hero Section */}
-        <section className="pt-32 pb-20">
-          <div className="max-w-4xl mx-auto px-6 lg:px-8 text-center">
-            <h1 className="text-6xl lg:text-7xl font-light text-gray-900 mb-8 tracking-tight leading-none">
-              Financial Insights
-            </h1>
-            <p className="text-xl text-gray-600 font-light leading-relaxed max-w-2xl mx-auto">
-              Expert insights on financial management, AI automation, calculators, and business growth strategies to help you succeed.
-            </p>
-          </div>
-        </section>
-
-        <div className="max-w-7xl mx-auto px-6 lg:px-8 pb-24">
+        <div className="max-w-7xl mx-auto px-6 lg:px-8 pt-24 pb-24">
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-16">
             {/* Sidebar */}
             <div className="lg:col-span-1">
@@ -244,26 +209,16 @@ const Blog: React.FC = () => {
                 </article>
               )}
 
-              {/* Results Info */}
-              <div className="flex items-center justify-between mb-8">
-                <p className="text-gray-600 text-sm">
-                  Showing {startIndex + 1}-{Math.min(startIndex + postsPerPage, filteredPosts.length)} of {filteredPosts.length} articles
-                  {activeCategory !== 'all' && (
-                    <span className="ml-2 text-gray-400">
-                      in {blogCategories.find(cat => cat.id === activeCategory)?.name}
-                    </span>
-                  )}
-                </p>
-
-                {searchTerm && (
+              {searchTerm && (
+                <div className="flex justify-end mb-8">
                   <button
                     onClick={() => setSearchTerm('')}
                     className="text-sm text-gray-500 hover:text-gray-700"
                   >
                     Clear search
                   </button>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* Posts Grid */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-16">
@@ -350,6 +305,18 @@ const Blog: React.FC = () => {
                   </button>
                 </div>
               )}
+
+              {/* Results Info - moved to bottom */}
+              <div className="mt-8 text-center">
+                <p className="text-gray-600 text-sm">
+                  Showing {startIndex + 1}-{Math.min(startIndex + postsPerPage, filteredPosts.length)} of {filteredPosts.length} articles
+                  {activeCategory !== 'all' && (
+                    <span className="ml-2 text-gray-400">
+                      in {blogCategories.find(cat => cat.id === activeCategory)?.name}
+                    </span>
+                  )}
+                </p>
+              </div>
             </div>
           </div>
         </div>
