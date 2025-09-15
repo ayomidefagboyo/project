@@ -355,98 +355,6 @@ const LandingPage: React.FC = () => {
         </div>
       </section>
 
-      {/* Financial Calculators Section */}
-      <section className="section-padding bg-background">
-        <div className="container-width">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-semibold text-foreground mb-6 text-balance">
-              Free Financial Calculators
-            </h2>
-            <p className="text-lg text-muted-foreground max-w-2xl mx-auto text-balance">
-              Make data-driven financial decisions with our suite of professional calculators.
-              Get instant insights for ROI, cash flow, break-even analysis, and more.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-12">
-            {/* ROI Calculator */}
-            <div className="card p-6 hover:shadow-lg transition-all group">
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center">
-                  <TrendingUp className="h-6 w-6 text-emerald-600" />
-                </div>
-                <span className="text-xs text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1 rounded-full">
-                  12K+ searches/mo
-                </span>
-              </div>
-              <h3 className="text-lg font-semibold text-foreground mb-2">ROI Calculator</h3>
-              <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
-                Calculate return on investment with annualized returns and performance benchmarks.
-              </p>
-              <Link
-                to="/calculators/roi"
-                className="inline-flex items-center text-sm font-medium text-primary hover:text-primary/80 transition-colors group-hover:translate-x-1 transform"
-              >
-                Try Calculator <ArrowRight className="ml-1 h-4 w-4" />
-              </Link>
-            </div>
-
-            {/* Break-Even Calculator */}
-            <div className="card p-6 hover:shadow-lg transition-all group">
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center">
-                  <BarChart3 className="h-6 w-6 text-blue-600" />
-                </div>
-                <span className="text-xs text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded-full">
-                  8K+ searches/mo
-                </span>
-              </div>
-              <h3 className="text-lg font-semibold text-foreground mb-2">Break-Even Calculator</h3>
-              <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
-                Determine units needed to break even and analyze contribution margins.
-              </p>
-              <Link
-                to="/calculators/break-even"
-                className="inline-flex items-center text-sm font-medium text-primary hover:text-primary/80 transition-colors group-hover:translate-x-1 transform"
-              >
-                Try Calculator <ArrowRight className="ml-1 h-4 w-4" />
-              </Link>
-            </div>
-
-            {/* Cash Flow Calculator */}
-            <div className="card p-6 hover:shadow-lg transition-all group">
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-12 h-12 bg-purple-100 dark:bg-purple-900/30 rounded-lg flex items-center justify-center">
-                  <DollarSign className="h-6 w-6 text-purple-600" />
-                </div>
-                <span className="text-xs text-purple-600 bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded-full">
-                  6K+ searches/mo
-                </span>
-              </div>
-              <h3 className="text-lg font-semibold text-foreground mb-2">Cash Flow Calculator</h3>
-              <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
-                Project monthly cash flows and identify potential shortfalls in advance.
-              </p>
-              <Link
-                to="/calculators/cash-flow"
-                className="inline-flex items-center text-sm font-medium text-primary hover:text-primary/80 transition-colors group-hover:translate-x-1 transform"
-              >
-                Try Calculator <ArrowRight className="ml-1 h-4 w-4" />
-              </Link>
-            </div>
-          </div>
-
-          <div className="text-center">
-            <Link
-              to="/calculators"
-              className="btn-secondary inline-flex items-center space-x-2 px-6 py-3"
-            >
-              <span>View All Calculators</span>
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          </div>
-        </div>
-      </section>
 
       {/* How it works Section */}
       <section id="how-it-works" className="section-padding bg-background">
@@ -830,6 +738,99 @@ const LandingPage: React.FC = () => {
                 )}
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Financial Calculators Section */}
+      <section className="section-padding bg-background">
+        <div className="container-width">
+          <div className="text-center mb-16">
+            <h2 className="text-3xl md:text-4xl font-semibold text-foreground mb-6 text-balance">
+              Free Financial Calculators
+            </h2>
+            <p className="text-lg text-muted-foreground max-w-2xl mx-auto text-balance">
+              Make data-driven financial decisions with our suite of professional calculators.
+              Get instant insights for ROI, cash flow, break-even analysis, and more.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-12">
+            {/* ROI Calculator */}
+            <div className="card p-6 hover:shadow-lg transition-all group">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center">
+                  <TrendingUp className="h-6 w-6 text-emerald-600" />
+                </div>
+                <span className="text-xs text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1 rounded-full">
+                  12K+ searches/mo
+                </span>
+              </div>
+              <h3 className="text-lg font-semibold text-foreground mb-2">ROI Calculator</h3>
+              <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
+                Calculate return on investment with annualized returns and performance benchmarks.
+              </p>
+              <Link
+                to="/calculators/roi"
+                className="inline-flex items-center text-sm font-medium text-primary hover:text-primary/80 transition-colors group-hover:translate-x-1 transform"
+              >
+                Try Calculator <ArrowRight className="ml-1 h-4 w-4" />
+              </Link>
+            </div>
+
+            {/* Break-Even Calculator */}
+            <div className="card p-6 hover:shadow-lg transition-all group">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center">
+                  <BarChart3 className="h-6 w-6 text-blue-600" />
+                </div>
+                <span className="text-xs text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded-full">
+                  8K+ searches/mo
+                </span>
+              </div>
+              <h3 className="text-lg font-semibold text-foreground mb-2">Break-Even Calculator</h3>
+              <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
+                Determine units needed to break even and analyze contribution margins.
+              </p>
+              <Link
+                to="/calculators/break-even"
+                className="inline-flex items-center text-sm font-medium text-primary hover:text-primary/80 transition-colors group-hover:translate-x-1 transform"
+              >
+                Try Calculator <ArrowRight className="ml-1 h-4 w-4" />
+              </Link>
+            </div>
+
+            {/* Cash Flow Calculator */}
+            <div className="card p-6 hover:shadow-lg transition-all group">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 bg-purple-100 dark:bg-purple-900/30 rounded-lg flex items-center justify-center">
+                  <DollarSign className="h-6 w-6 text-purple-600" />
+                </div>
+                <span className="text-xs text-purple-600 bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded-full">
+                  6K+ searches/mo
+                </span>
+              </div>
+              <h3 className="text-lg font-semibold text-foreground mb-2">Cash Flow Calculator</h3>
+              <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
+                Project monthly cash flows and identify potential shortfalls in advance.
+              </p>
+              <Link
+                to="/calculators/cash-flow"
+                className="inline-flex items-center text-sm font-medium text-primary hover:text-primary/80 transition-colors group-hover:translate-x-1 transform"
+              >
+                Try Calculator <ArrowRight className="ml-1 h-4 w-4" />
+              </Link>
+            </div>
+          </div>
+
+          <div className="text-center">
+            <Link
+              to="/calculators"
+              className="btn-secondary inline-flex items-center space-x-2 px-6 py-3"
+            >
+              <span>View All Calculators</span>
+              <ArrowRight className="h-4 w-4" />
+            </Link>
           </div>
         </div>
       </section>
