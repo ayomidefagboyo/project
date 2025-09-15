@@ -2,18 +2,25 @@
 Main FastAPI application for Compazz Financial Management Platform
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 import logging
+import traceback
 
 # Import API routes
 from app.api.v1.api import api_router
 from app.core.database import init_db
 from app.core.config import settings
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging based on environment
+log_level = logging.DEBUG if settings.DEBUG else logging.INFO
+logging.basicConfig(
+    level=log_level,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 
@@ -40,10 +47,62 @@ app = FastAPI(
     title="Compazz Financial Management API",
     description="Comprehensive financial management platform for small to medium businesses",
     version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if settings.DEBUG else None,  # Hide docs in production
+    redoc_url="/redoc" if settings.DEBUG else None,  # Hide redoc in production
     lifespan=lifespan
 )
+
+
+# Global exception handler for production
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle all unhandled exceptions"""
+    # Log detailed error for developers
+    logger.error(f"Unhandled exception on {request.method} {request.url}")
+    logger.error(f"Exception type: {type(exc).__name__}")
+    logger.error(f"Exception message: {str(exc)}")
+    logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    # Return generic error to users in production
+    if settings.ENVIRONMENT == "production":
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": "Internal server error"}
+        )
+    else:
+        # Show detailed error in development
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": str(exc), "type": type(exc).__name__}
+        )
+
+
+# Handle validation errors
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle request validation errors"""
+    # Log validation error for developers
+    logger.warning(f"Validation error on {request.method} {request.url}: {exc.errors()}")
+    
+    # Return user-friendly validation error
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": "Invalid request data", "errors": exc.errors()}
+    )
+
+
+# Handle HTTP exceptions
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle HTTP exceptions"""
+    # Log HTTP exception for developers
+    logger.info(f"HTTP {exc.status_code} on {request.method} {request.url}: {exc.detail}")
+    
+    # Return the HTTP exception as-is (these are usually intentional)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail}
+    )
 
 # Configure CORS
 cors_origins = settings.BACKEND_CORS_ORIGINS.split(",") if settings.BACKEND_CORS_ORIGINS else ["http://localhost:5173"]
