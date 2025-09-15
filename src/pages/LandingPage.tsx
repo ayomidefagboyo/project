@@ -20,7 +20,6 @@ import { paymentPlans } from '@/lib/stripe';
 import { currencyService, type CurrencyInfo } from '@/lib/currencyService';
 import { trackEvent, trackUserJourney } from '@/lib/posthog';
 import LegalModal from '@/components/modals/LegalModal';
-import OCRDemoWidget from '@/components/demo/OCRDemoWidget';
 import PublicHeader from '@/components/layout/PublicHeader';
 
 const LandingPage: React.FC = () => {
@@ -304,10 +303,11 @@ const LandingPage: React.FC = () => {
                   
                   {/* Try Demo Button */}
                   <button 
-                    onClick={() => scrollToSection('ocr-demo')}
-                    className="w-full bg-gradient-to-r from-emerald-600 to-blue-600 hover:from-emerald-700 hover:to-blue-700 text-white py-2.5 px-4 rounded-lg font-medium text-sm transition-all duration-300 transform hover:scale-105"
+                    onClick={() => handleSubscribe('business')}
+                    disabled={loadingPlan === 'business'}
+                    className="w-full bg-gradient-to-r from-emerald-600 to-blue-600 hover:from-emerald-700 hover:to-blue-700 text-white py-2.5 px-4 rounded-lg font-medium text-sm transition-all duration-300 transform hover:scale-105 disabled:opacity-50"
                   >
-                    Try Live Demo Below
+                    {loadingPlan === 'business' ? 'Starting Trial...' : 'Start Free Trial'}
                   </button>
                 </div>
               </div>
@@ -405,56 +405,6 @@ const LandingPage: React.FC = () => {
         </div>
       </section>
 
-      {/* OCR Demo Section */}
-      <section id="ocr-demo" className="section-padding bg-background">
-        <div className="container-width">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-semibold text-foreground mb-6 text-balance">
-              Live Receipt Scanner
-            </h2>
-            <p className="text-lg text-muted-foreground max-w-3xl mx-auto text-balance">
-              Stop wasting 12 minutes manually entering each receipt. Our AI scans and processes invoices in under 30 seconds with 95% accuracy.
-            </p>
-          </div>
-          
-          <div className="max-w-4xl mx-auto">
-            <OCRDemoWidget />
-          </div>
-          
-          {/* Benefits Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-16">
-            <div className="text-center">
-              <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/50 rounded-xl flex items-center justify-center mx-auto mb-4">
-                <Clock className="w-8 h-8 text-blue-600 dark:text-blue-400" />
-              </div>
-              <h3 className="text-xl font-semibold text-foreground mb-2">Save 12 Minutes Per Receipt</h3>
-              <p className="text-muted-foreground">
-                Eliminate manual data entry that typically takes 12+ minutes per invoice
-              </p>
-            </div>
-            
-            <div className="text-center">
-              <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/50 rounded-xl flex items-center justify-center mx-auto mb-4">
-                <TrendingUp className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
-              </div>
-              <h3 className="text-xl font-semibold text-foreground mb-2">95% Accuracy Rate</h3>
-              <p className="text-muted-foreground">
-                Reduce errors by up to 90% compared to manual entry that costs £53 per mistake
-              </p>
-            </div>
-            
-            <div className="text-center">
-              <div className="w-16 h-16 bg-purple-100 dark:bg-purple-900/50 rounded-xl flex items-center justify-center mx-auto mb-4">
-                <DollarSign className="w-8 h-8 text-purple-600 dark:text-purple-400" />
-              </div>
-              <h3 className="text-xl font-semibold text-foreground mb-2">Cut Costs by 60-80%</h3>
-              <p className="text-muted-foreground">
-                Reduce processing costs from £10-18 per invoice to just £2-5 with automation
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
 
       {/* How it works Section */}
       <section id="how-it-works" className="section-padding bg-background">
