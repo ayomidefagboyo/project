@@ -226,22 +226,95 @@ const LandingPage: React.FC = () => {
               </div>
             </div>
             
-            {/* Right side - Product Screenshot */}
+            {/* Right side - Live Receipt Scanner */}
             <div className="relative">
-              <div className="card p-8 shadow-xl">
-                <div className="bg-muted/50 rounded-lg h-80 flex items-center justify-center">
-                  <div className="text-center">
-                    <div className="w-16 h-16 bg-accent rounded-xl flex items-center justify-center mx-auto mb-4">
-                      <Receipt className="h-8 w-8 text-accent-foreground" />
-                    </div>
-                    <h3 className="text-lg font-semibold text-foreground mb-2">OCR AI Technology</h3>
-                    <p className="text-muted-foreground">Instant document intelligence</p>
+              <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 shadow-2xl border border-gray-200/50 dark:border-gray-800/50">
+                <div className="text-center mb-6">
+                  <div className="inline-flex items-center space-x-2 bg-emerald-100 dark:bg-emerald-900/50 px-3 py-1 rounded-full text-emerald-700 dark:text-emerald-300 text-sm font-medium mb-3">
+                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                    <span>Live Receipt Scanner</span>
                   </div>
+                  <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+                    Turn Photos Into Data
+                  </h3>
+                  <p className="text-gray-600 dark:text-gray-400 text-sm">
+                    Upload any receipt and watch AI extract data instantly
+                  </p>
+                </div>
+                
+                {/* Compact OCR Demo */}
+                <div className="space-y-4">
+                  {/* Upload Area */}
+                  <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 text-center hover:border-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10 transition-all duration-300 cursor-pointer group">
+                    <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/50 rounded-xl flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform duration-300">
+                      <Receipt className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
+                    </div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white mb-1">
+                      Drop receipt here or click to upload
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      JPG, PNG up to 10MB
+                    </p>
+                  </div>
+                  
+                  {/* Sample Results Preview */}
+                  <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                    <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400 mb-2">
+                      <span>Extracted Data</span>
+                      <div className="flex items-center space-x-1">
+                        <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
+                        <span>95% confidence</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">Vendor:</span>
+                        <span className="font-medium text-gray-900 dark:text-white">Tesco Express</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">Amount:</span>
+                        <span className="font-medium text-gray-900 dark:text-white">£47.85</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">Date:</span>
+                        <span className="font-medium text-gray-900 dark:text-white">Today</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Time Saved Indicator */}
+                  <div className="bg-gradient-to-r from-blue-50 to-emerald-50 dark:from-blue-900/20 dark:to-emerald-900/20 rounded-lg p-3 border border-blue-200/50 dark:border-blue-800/50">
+                    <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center space-x-2">
+                        <Clock className="w-4 h-4 text-gray-500" />
+                        <span className="text-gray-600 dark:text-gray-400">Manual Entry:</span>
+                      </div>
+                      <span className="text-gray-900 dark:text-white font-medium">12 minutes</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm mt-1">
+                      <div className="flex items-center space-x-2">
+                        <div className="w-4 h-4 bg-emerald-500 rounded-full flex items-center justify-center">
+                          <div className="w-2 h-2 bg-white rounded-full"></div>
+                        </div>
+                        <span className="text-emerald-600 dark:text-emerald-400">AI Processing:</span>
+                      </div>
+                      <span className="text-emerald-600 dark:text-emerald-400 font-bold">30 seconds</span>
+                    </div>
+                  </div>
+                  
+                  {/* Try Demo Button */}
+                  <button 
+                    onClick={() => scrollToSection('ocr-demo')}
+                    className="w-full bg-gradient-to-r from-emerald-600 to-blue-600 hover:from-emerald-700 hover:to-blue-700 text-white py-2.5 px-4 rounded-lg font-medium text-sm transition-all duration-300 transform hover:scale-105"
+                  >
+                    Try Live Demo Below
+                  </button>
                 </div>
               </div>
+              
               {/* Subtle floating elements */}
-              <div className="absolute -top-4 -right-4 w-20 h-20 bg-accent rounded-full opacity-60"></div>
-              <div className="absolute -bottom-4 -left-4 w-16 h-16 bg-secondary rounded-full opacity-60"></div>
+              <div className="absolute -top-4 -right-4 w-20 h-20 bg-emerald-500/20 rounded-full opacity-60 animate-pulse"></div>
+              <div className="absolute -bottom-4 -left-4 w-16 h-16 bg-blue-500/20 rounded-full opacity-60 animate-pulse delay-1000"></div>
             </div>
           </div>
         </div>
@@ -333,11 +406,11 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* OCR Demo Section */}
-      <section className="section-padding bg-background">
+      <section id="ocr-demo" className="section-padding bg-background">
         <div className="container-width">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-semibold text-foreground mb-6 text-balance">
-              See OCR in Action
+              Live Receipt Scanner
             </h2>
             <p className="text-lg text-muted-foreground max-w-3xl mx-auto text-balance">
               Stop wasting 12 minutes manually entering each receipt. Our AI scans and processes invoices in under 30 seconds with 95% accuracy.
