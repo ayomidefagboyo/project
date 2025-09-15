@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import {
-  BarChart3,
-  Building2,
-  Smartphone,
-  Receipt,
-  TrendingUp,
-  Shield,
-  Check,
-  Star,
+import { 
+  BarChart3, 
+  Building2, 
+  Smartphone, 
+  Receipt, 
+  TrendingUp, 
+  Shield, 
+  Check, 
+  Star, 
   ArrowRight,
   ChevronDown,
   Loader2,
@@ -47,12 +47,12 @@ const LandingPage: React.FC = () => {
         const successUrl = `${window.location.origin}/dashboard?payment=success&trial=true`;
         const cancelUrl = `${window.location.origin}/?payment=cancelled`;
 
-        // Note: This creates a Stripe subscription with 7-day trial (no payment required during trial)
+        // Note: This redirects to the dashboard for app access
         const response = await stripeService.createSubscriptionCheckout(
           planId,
           successUrl,
           cancelUrl,
-          7 // 7-day free trial
+          0 // No trial period
         );
 
         await stripeService.redirectToCheckout((response as any).sessionId);
@@ -168,8 +168,8 @@ const LandingPage: React.FC = () => {
       answer: "Yes, you can cancel your subscription at any time. There are no long-term contracts or cancellation fees. You'll continue to have access to your data even after cancellation."
     },
     {
-      question: "Is there a free trial available?",
-      answer: "Yes! We offer a 7-day free trial with full access to all features. You can cancel anytime during the trial period."
+      question: "How do I get started?",
+      answer: "Simply launch the app and create your account. You can start using Compazz immediately to manage your business finances."
     },
     {
       question: "How secure is my financial data?",
@@ -193,7 +193,7 @@ const LandingPage: React.FC = () => {
               {/* Social Proof */}
               <div className="inline-flex items-center px-4 py-2 bg-accent border border-border rounded-full text-sm font-medium mb-8">
                 <div className="w-2 h-2 bg-emerald-500 rounded-full mr-2"></div>
-                1200+ active businesses trust Compazz
+                Trusted by businesses worldwide
               </div>
               
               {/* Main Heading */}
@@ -207,44 +207,14 @@ const LandingPage: React.FC = () => {
               </p>
               
               {/* CTAs */}
-              <div className="flex flex-col sm:flex-row gap-4">
-                <div className="flex flex-col items-center sm:items-start">
-                  <button
-                    onClick={() => handleSubscribe('business')}
-                    disabled={loadingPlan === 'business'}
-                    className="btn-primary px-8 py-3.5 text-lg group disabled:opacity-50"
-                  >
-                    {loadingPlan === 'business' ? (
-                      <>
-                        <Loader2 className="mr-2 w-5 h-5 animate-spin" />
-                        Starting Free Trial...
-                      </>
-                    ) : (
-                      'Start 7-Day Free Trial'
-                    )}
-                    <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
-                  </button>
-                  <div className="flex items-center mt-3 space-x-4 text-sm text-gray-600 dark:text-gray-400">
-                    <span className="flex items-center">
-                      <Check className="w-4 h-4 text-emerald-500 mr-1" />
-                      No credit card
-                    </span>
-                    <span className="flex items-center">
-                      <Check className="w-4 h-4 text-emerald-500 mr-1" />
-                      Cancel anytime
-                    </span>
-                    <span className="flex items-center">
-                      <Check className="w-4 h-4 text-emerald-500 mr-1" />
-                      1,200+ businesses
-                    </span>
-                  </div>
-                </div>
-                <a 
-                  href="#features" 
-                  className="btn-secondary px-8 py-3.5 text-lg"
+              <div className="flex justify-center sm:justify-start">
+                <button
+                  onClick={() => navigate('/dashboard')}
+                  className="btn-primary px-8 py-3.5 text-lg group"
                 >
-                  See How It Works
-                </a>
+                  Launch App
+                  <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
+                </button>
               </div>
             </div>
             
@@ -436,7 +406,7 @@ const LandingPage: React.FC = () => {
               Simple, transparent pricing
             </h2>
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto text-balance mb-8">
-              Start with a 7-day free trial. Choose the plan that fits your business needs.
+              Choose the plan that fits your business needs.
             </p>
             
             {/* Billing Toggle */}
@@ -538,7 +508,7 @@ const LandingPage: React.FC = () => {
                 <span className="text-lg text-muted-foreground ml-1 transition-all duration-300">/month</span>
               </div>
               <div className="flex items-center mb-6 min-h-[32px]">
-                <span className="text-sm text-emerald-600 font-medium bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1 rounded-full mr-2">7-day free trial</span>
+                <span className="text-sm text-emerald-600 font-medium bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1 rounded-full mr-2">Most popular</span>
                 <div className={`transition-all duration-300 ease-in-out ${
                   isAnnual ? 'opacity-100 scale-100 translate-x-0' : 'opacity-0 scale-95 translate-x-2'
                 }`}>
@@ -778,9 +748,9 @@ const LandingPage: React.FC = () => {
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto text-balance">
               Make data-driven financial decisions with our suite of professional calculators.
               Get instant insights for ROI, cash flow, break-even analysis, and more.
-            </p>
-          </div>
-
+              </p>
+            </div>
+            
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-12">
             {/* ROI Calculator */}
             <div className="card p-6 hover:shadow-lg transition-all group">
@@ -803,7 +773,7 @@ const LandingPage: React.FC = () => {
                 Try Calculator <ArrowRight className="ml-1 h-4 w-4" />
               </Link>
             </div>
-
+            
             {/* Break-Even Calculator */}
             <div className="card p-6 hover:shadow-lg transition-all group">
               <div className="flex items-center justify-between mb-4">
@@ -825,7 +795,7 @@ const LandingPage: React.FC = () => {
                 Try Calculator <ArrowRight className="ml-1 h-4 w-4" />
               </Link>
             </div>
-
+            
             {/* Cash Flow Calculator */}
             <div className="card p-6 hover:shadow-lg transition-all group">
               <div className="flex items-center justify-between mb-4">
@@ -868,7 +838,7 @@ const LandingPage: React.FC = () => {
             Ready to stop losing money to poor financial tracking?
           </h2>
           <p className="text-lg text-primary-foreground/80 mb-12 max-w-2xl mx-auto text-balance">
-            Join 1200+ businesses already using Compazz to streamline their finances and make better decisions.
+            Join businesses worldwide already using Compazz to streamline their finances and make better decisions.
           </p>
           <div className="flex flex-col gap-6 justify-center items-center">
             <button
@@ -879,33 +849,27 @@ const LandingPage: React.FC = () => {
               {loadingPlan === 'business' ? (
                 <>
                   <Loader2 className="mr-2 w-5 h-5 animate-spin" />
-                  Starting Free Trial...
+                  Launching App...
                 </>
               ) : (
-                'Get 7 Days Free → No Credit Card'
+                'Launch App'
               )}
               <ArrowRight className="ml-2 h-5 w-5 inline transition-transform group-hover:translate-x-1" />
             </button>
             <div className="flex items-center space-x-6 text-sm text-primary-foreground/80">
               <span className="flex items-center">
                 <Check className="w-4 h-4 text-emerald-400 mr-2" />
-                No setup fees
+                Setup in minutes
               </span>
               <span className="flex items-center">
                 <Check className="w-4 h-4 text-emerald-400 mr-2" />
-                Cancel anytime
+                Professional grade
               </span>
               <span className="flex items-center">
                 <Check className="w-4 h-4 text-emerald-400 mr-2" />
-                30-day money back
+                Trusted worldwide
               </span>
             </div>
-            <a 
-              href="#how-it-works" 
-              className="border-2 border-primary-foreground/20 text-primary-foreground px-8 py-3.5 rounded-lg font-medium text-lg hover:bg-primary-foreground/10 transition-all"
-            >
-              See How It Works
-            </a>
           </div>
         </div>
       </section>
