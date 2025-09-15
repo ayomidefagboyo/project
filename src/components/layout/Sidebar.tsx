@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import Logo from '@/components/ui/Logo';
 import { 
   LayoutDashboard, 
   FileText, 
@@ -161,16 +162,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
         {/* Header */}
         <div className={`flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-800 ${isCollapsed ? 'px-4' : ''}`}>
           {!isCollapsed && (
-            <Link to="/" className="flex items-center space-x-3">
-              <img 
-                src="/logo-icon.svg" 
-                alt="Compazz Logo" 
-                className="w-8 h-8"
-              />
-              <span className="text-xl font-semibold text-gray-900 dark:text-white tracking-tight">
-                Compazz
-              </span>
-            </Link>
+            <Logo size="md" />
           )}
 
           <div className="flex items-center space-x-2">
