@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { paymentPlans } from '@/lib/stripe';
 import stripeService from '@/lib/stripeService';
+import { currencyService, type CurrencyInfo } from '@/lib/currencyService';
 import LegalModal from '@/components/modals/LegalModal';
 
 const LandingPage: React.FC = () => {
@@ -25,6 +26,7 @@ const LandingPage: React.FC = () => {
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [isAnnual, setIsAnnual] = useState(false);
+  const [currency, setCurrency] = useState<CurrencyInfo>(currencyService.getCurrentCurrency());
   const [legalModal, setLegalModal] = useState<{ isOpen: boolean; type: 'privacy' | 'terms' | 'cookies' | null }>({
     isOpen: false,
     type: null
@@ -71,6 +73,53 @@ const LandingPage: React.FC = () => {
   const closeLegalModal = () => {
     setLegalModal({ isOpen: false, type: null });
   };
+
+  // Convert USD prices to local currency (simplified conversion for demo)
+  const convertPrice = (usdPrice: number): number => {
+    // Simple conversion rates for demo - in production you'd use real exchange rates
+    const conversionRates: Record<string, number> = {
+      'USD': 1,
+      'EUR': 0.85,
+      'GBP': 0.73,
+      'CAD': 1.25,
+      'NGN': 460,
+      'KES': 110,
+      'GHS': 12,
+      'ZAR': 18,
+      'AUD': 1.35,
+      'JPY': 110,
+      'INR': 75,
+      'BRL': 5.2,
+      'MXN': 20,
+      'CNY': 6.5,
+      'RUB': 75,
+      'TRY': 8.5,
+      'EGP': 16
+    };
+
+    const rate = conversionRates[currency.code] || 1;
+    return Math.round(usdPrice * rate);
+  };
+
+  // Format price with currency
+  const formatPrice = (usdPrice: number): string => {
+    const convertedPrice = convertPrice(usdPrice);
+    return currencyService.formatCurrency(convertedPrice, { minimumFractionDigits: 0 });
+  };
+
+  // Initialize currency detection on page load
+  useEffect(() => {
+    const initializeCurrency = async () => {
+      try {
+        const detectedCurrency = await currencyService.initializeCurrency();
+        setCurrency(detectedCurrency);
+      } catch (error) {
+        console.log('Currency detection failed, using default USD');
+      }
+    };
+
+    initializeCurrency();
+  }, []);
 
   // Scroll to top when navigating to landing page
   useEffect(() => {
@@ -488,20 +537,20 @@ const LandingPage: React.FC = () => {
           <div className="flex flex-col md:flex-row justify-center items-end md:items-stretch gap-8 max-w-5xl mx-auto">
             {/* Basic Plan - Decoy */}
             <div className="card p-8 hover:shadow-lg transition-all duration-300 md:w-80 opacity-90">
-              <h3 className="text-2xl font-semibold text-foreground mb-2">Basic</h3>
+              <h3 className="text-2xl font-semibold text-foreground mb-2">Startup</h3>
               <div className="text-4xl font-semibold text-foreground mb-2 transition-all duration-500 ease-in-out">
                 <span className="inline-block transition-all duration-500 ease-in-out transform">
-                  ${isAnnual ? '31' : '39'}
+                  {formatPrice(isAnnual ? 31 : paymentPlans.startup.price).replace(/\.00$/, '')}
                 </span>
                 <span className="text-lg text-muted-foreground transition-all duration-300">
-                  /{isAnnual ? 'month' : 'month'}
+                  /month
                 </span>
               </div>
               <div className={`transition-all duration-300 ease-in-out ${
                 isAnnual ? 'opacity-100 max-h-8 mb-2' : 'opacity-0 max-h-0 mb-0'
               }`}>
                 <p className="text-sm text-emerald-600">
-                  <span className="line-through text-muted-foreground">$39</span> Save $96/year
+                  <span className="line-through text-muted-foreground">{formatPrice(paymentPlans.startup.price)}</span> Save 20%/year
                 </p>
               </div>
               <p className="text-sm text-muted-foreground mb-6">Good for getting started</p>
@@ -545,10 +594,10 @@ const LandingPage: React.FC = () => {
               </div>
               <div className="absolute -top-2 -left-2 -right-2 -bottom-2 bg-gradient-to-br from-primary/20 to-emerald-500/20 rounded-xl -z-10 transition-all duration-300"></div>
               
-              <h3 className="text-2xl font-semibold text-foreground mb-2 mt-2">Pro</h3>
+              <h3 className="text-2xl font-semibold text-foreground mb-2 mt-2">Business</h3>
               <div className="flex items-baseline mb-2">
                 <span className="text-5xl font-bold text-foreground transition-all duration-500 ease-in-out transform inline-block">
-                  ${isAnnual ? '39' : '49'}
+                  {formatPrice(isAnnual ? Math.round(paymentPlans.business.price * 0.8) : paymentPlans.business.price).replace(/\.00$/, '')}
                 </span>
                 <span className="text-lg text-muted-foreground ml-1 transition-all duration-300">/month</span>
               </div>
@@ -604,22 +653,22 @@ const LandingPage: React.FC = () => {
               <h3 className="text-2xl font-semibold text-foreground mb-2">Enterprise</h3>
               <div className="flex items-baseline mb-2">
                 <span className="text-4xl font-semibold text-foreground transition-all duration-500 ease-in-out transform inline-block">
-                  ${isAnnual ? '159' : '199'}
+                  {formatPrice(isAnnual ? Math.round(paymentPlans.enterprise.price * 0.8) : paymentPlans.enterprise.price).replace(/\.00$/, '')}
                 </span>
                 <span className="text-lg text-muted-foreground ml-1 transition-all duration-300">/month</span>
               </div>
               <div className={`transition-all duration-300 ease-in-out ${isAnnual ? 'opacity-100 max-h-8 mb-2' : 'opacity-0 max-h-0 mb-0'}`}>
                 <p className="text-sm text-emerald-600 transform transition-all duration-300 ease-in-out">
-                  <span className="line-through text-muted-foreground">$199</span> Save $480/year
+                  <span className="line-through text-muted-foreground">{formatPrice(paymentPlans.enterprise.price)}</span> Save 20%/year
                 </p>
               </div>
               <p className="text-sm text-muted-foreground mb-6">For large operations</p>
               <button
-                onClick={() => handleSubscribe('advanced')}
-                disabled={loadingPlan === 'advanced'}
+                onClick={() => handleSubscribe('enterprise')}
+                disabled={loadingPlan === 'enterprise'}
                 className="btn-secondary w-full py-3 mb-8 flex items-center justify-center"
               >
-                {loadingPlan === 'advanced' ? (
+                {loadingPlan === 'enterprise' ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
                   'Start Free Trial'
