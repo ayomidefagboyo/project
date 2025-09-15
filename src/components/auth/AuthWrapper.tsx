@@ -11,12 +11,14 @@ const AuthWrapper: React.FC<AuthWrapperProps> = ({ onAuthSuccess }) => {
   const location = useLocation();
   const [isLogin, setIsLogin] = useState(true); // Default to login
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
+  const [isTrial, setIsTrial] = useState(false);
 
   // Check URL parameter to determine initial mode and plan
   useEffect(() => {
     const urlParams = new URLSearchParams(location.search);
     const mode = urlParams.get('mode');
     const plan = urlParams.get('plan');
+    const trial = urlParams.get('trial');
 
     if (mode === 'signup') {
       setIsLogin(false);
@@ -26,6 +28,10 @@ const AuthWrapper: React.FC<AuthWrapperProps> = ({ onAuthSuccess }) => {
 
     if (plan) {
       setSelectedPlan(plan);
+    }
+
+    if (trial === 'true') {
+      setIsTrial(true);
     }
   }, [location.search]);
 
@@ -53,6 +59,7 @@ const AuthWrapper: React.FC<AuthWrapperProps> = ({ onAuthSuccess }) => {
           onSuccess={handleAuthSuccess}
           onSwitchToLogin={switchToLogin}
           selectedPlan={selectedPlan}
+          isTrial={isTrial}
         />
       )}
     </div>

@@ -162,9 +162,11 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
         <div className={`flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-800 ${isCollapsed ? 'px-4' : ''}`}>
           {!isCollapsed && (
             <Link to="/" className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-gradient-to-tr from-gray-900 to-gray-700 dark:from-white dark:to-gray-200 rounded-lg flex items-center justify-center">
-                <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
-              </div>
+              <img 
+                src="/logo-icon.svg" 
+                alt="Compazz Logo" 
+                className="w-8 h-8"
+              />
               <span className="text-xl font-semibold text-gray-900 dark:text-white tracking-tight">
                 Compazz
               </span>
