@@ -14,6 +14,7 @@ import MobileFirstFinancialManagement from '@/pages/blog/MobileFirstFinancialMan
 import FinancialAnalyticsRestaurants from '@/pages/blog/FinancialAnalyticsRestaurants';
 import FinancialDataSecurity from '@/pages/blog/FinancialDataSecurity';
 import FutureEODReporting from '@/pages/blog/FutureEODReporting';
+import ROICalculatorGuide from '@/pages/blog/ROICalculatorGuide';
 import Dashboard from '@/pages/Dashboard';
 import Invoices from '@/pages/invoices/Invoices';
 import CreateInvoice from '@/pages/invoices/CreateInvoice';
@@ -77,6 +78,9 @@ const AppRoutes = () => {
       <Route path="/blog/financial-analytics-restaurants" element={<FinancialAnalyticsRestaurants />} />
       <Route path="/blog/financial-data-security" element={<FinancialDataSecurity />} />
       <Route path="/blog/future-eod-reporting" element={<FutureEODReporting />} />
+
+      {/* Calculator-focused blog articles */}
+      <Route path="/blog/roi-calculator-guide" element={<ROICalculatorGuide />} />
 
       {/* Calculator routes - public access for SEO */}
       <Route path="/calculators" element={<CalculatorLanding />} />

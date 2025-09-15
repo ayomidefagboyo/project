@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, TABLES } from './supabase';
 import { SubscriptionPlan, Subscription, SubscriptionFeatures, PlanConfig } from '@/types';
 
 export class SubscriptionService {
@@ -133,7 +133,7 @@ export class SubscriptionService {
   async getUserSubscription(userId: string): Promise<Subscription | null> {
     try {
       const { data, error } = await supabase
-        .from('subscriptions')
+        .from(TABLES.SUBSCRIPTIONS)
         .select('*')
         .eq('user_id', userId)
         .single();
@@ -190,7 +190,7 @@ export class SubscriptionService {
     try {
       // Query users table to find outlets associated with this user
       const { data, error } = await supabase
-        .from('users')
+        .from(TABLES.USERS)
         .select('outlet_id')
         .eq('id', userId)
         .not('outlet_id', 'is', null);
