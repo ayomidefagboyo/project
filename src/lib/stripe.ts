@@ -16,14 +16,14 @@ export const stripeConfig = {
   apiVersion: '2023-10-16' as const,
 };
 
-// Payment plans configuration - matching Stripe dashboard (startup, business, enterprise)
+// Payment plans configuration - Stripe prices in GBP, frontend shows converted prices
 export const paymentPlans = {
   startup: {
     id: 'startup',
     name: 'Startup',
     description: 'Perfect for small businesses with up to 2 outlets',
-    price: 29,
-    priceId: 'prod_T31wqrROxCTVSg', // TODO: Replace with actual Stripe price ID from dashboard
+    priceGBP: 25, // Actual Stripe price in GBP
+    priceId: 'price_startup_gbp_monthly', // Your actual Stripe price ID for £25
     features: [
       'Up to 2 outlets',
       'Basic reporting',
@@ -37,8 +37,8 @@ export const paymentPlans = {
     id: 'business',
     name: 'Business',
     description: 'Ideal for growing businesses with multiple outlets',
-    price: 79,
-    priceId: 'prod_T31y0qQMVpd7Fe', // TODO: Replace with actual Stripe price ID from dashboard
+    priceGBP: 69, // Actual Stripe price in GBP
+    priceId: 'price_business_gbp_monthly', // Your actual Stripe price ID for £69
     features: [
       'Everything in Startup plus:',
       'Up to 10 outlets',
@@ -52,8 +52,8 @@ export const paymentPlans = {
     id: 'enterprise',
     name: 'Enterprise',
     description: 'For established businesses with complex needs',
-    price: 149,
-    priceId: 'prod_T321XIPiSfemlT', // TODO: Replace with actual Stripe price ID from dashboard
+    priceGBP: 159, // Actual Stripe price in GBP
+    priceId: 'price_enterprise_gbp_monthly', // Your actual Stripe price ID for £159
     features: [
       'Everything in Business plus:',
       'Unlimited outlets',
