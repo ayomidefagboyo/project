@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   BarChart3,
   Building2,
@@ -16,11 +16,11 @@ import {
   DollarSign
 } from 'lucide-react';
 import { paymentPlans } from '@/lib/stripe';
-import stripeService from '@/lib/stripeService';
 import LegalModal from '@/components/modals/LegalModal';
 
 const LandingPage: React.FC = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [isAnnual, setIsAnnual] = useState(false);
@@ -29,26 +29,16 @@ const LandingPage: React.FC = () => {
     type: null
   });
 
-  // Handle subscription checkout
+  // Handle subscription - redirect to signup with plan info
   const handleSubscribe = async (planId: string) => {
     setLoadingPlan(planId);
-    try {
-      const successUrl = `${window.location.origin}/dashboard?payment=success`;
-      const cancelUrl = `${window.location.origin}/?payment=cancelled`;
-      
-      const { sessionId } = await stripeService.createSubscriptionCheckout(
-        planId,
-        successUrl,
-        cancelUrl
-      );
-      
-      await stripeService.redirectToCheckout(sessionId);
-    } catch (error) {
-      console.error('Error starting subscription:', error);
-      alert('Failed to start subscription. Please try again.');
-    } finally {
+
+    // For now, redirect to signup with plan selection
+    // This can be replaced with actual Stripe integration when backend is ready
+    setTimeout(() => {
+      navigate(`/auth?mode=signup&plan=${planId}`);
       setLoadingPlan(null);
-    }
+    }, 500);
   };
 
   // Handle legal modal opening
@@ -169,8 +159,8 @@ const LandingPage: React.FC = () => {
               
               {/* CTAs */}
               <div className="flex flex-col sm:flex-row gap-4">
-                <Link 
-                  to="/auth" 
+                <Link
+                  to="/auth?mode=signup"
                   className="btn-primary px-8 py-3.5 text-lg group"
                 >
                   Start Free Trial
@@ -494,11 +484,11 @@ const LandingPage: React.FC = () => {
               </div>
               <p className="text-sm text-muted-foreground mb-6">Good for getting started</p>
               <button
-                onClick={() => handleSubscribe('basic')}
-                disabled={loadingPlan === 'basic'}
+                onClick={() => handleSubscribe('starter')}
+                disabled={loadingPlan === 'starter'}
                 className="btn-secondary w-full py-3 mb-8 flex items-center justify-center"
               >
-                {loadingPlan === 'basic' ? (
+                {loadingPlan === 'starter' ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
                   'Start Free Trial'
@@ -603,11 +593,11 @@ const LandingPage: React.FC = () => {
               </div>
               <p className="text-sm text-muted-foreground mb-6">For large operations</p>
               <button
-                onClick={() => handleSubscribe('enterprise')}
-                disabled={loadingPlan === 'enterprise'}
+                onClick={() => handleSubscribe('advanced')}
+                disabled={loadingPlan === 'advanced'}
                 className="btn-secondary w-full py-3 mb-8 flex items-center justify-center"
               >
-                {loadingPlan === 'enterprise' ? (
+                {loadingPlan === 'advanced' ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
                   'Start Free Trial'
