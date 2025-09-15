@@ -6,6 +6,7 @@ from supabase import create_client, Client
 from app.core.config import settings
 from typing import Optional
 import logging
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ async def init_db() -> None:
 
     except Exception as e:
         logger.error(f"❌ Failed to initialize database: {e}")
+        logger.error(f"Database error traceback: {traceback.format_exc()}")
         logger.error("💡 Make sure SUPABASE_URL, SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY are set in environment variables")
         raise
 
