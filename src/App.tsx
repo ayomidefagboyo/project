@@ -1,7 +1,8 @@
-
+import { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
 import { OutletProvider, useOutlet } from '@/contexts/OutletContext';
+import { initPostHog, trackNavigation, trackSessionEvent } from '@/lib/posthog';
 import Layout from '@/components/layout/Layout';
 import ScrollToTop from '@/components/ScrollToTop';
 import LandingPage from '@/pages/LandingPage';
@@ -121,6 +122,37 @@ const AppRoutes = () => {
 
 // Main App Component
 const App = () => {
+  // Initialize PostHog analytics
+  useEffect(() => {
+    initPostHog();
+
+    // Track session start
+    trackSessionEvent('session_start');
+
+    // Track page visibility changes
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        trackSessionEvent('focus_gained');
+      } else {
+        trackSessionEvent('focus_lost');
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Track session end on beforeunload
+    const handleBeforeUnload = () => {
+      trackSessionEvent('session_end');
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []);
+
   return (
     <HelmetProvider>
       <OutletProvider>

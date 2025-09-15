@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button';
 import { paymentPlans } from '@/lib/stripe';
 import stripeService from '@/lib/stripeService';
 import { useNavigate } from 'react-router-dom';
+import { trackEvent, trackTrialEvent, trackSubscriptionEvent } from '@/lib/posthog';
 
 interface TrialExpiredProps {
   currentPlan?: string;
@@ -22,6 +23,14 @@ const TrialExpired: React.FC<TrialExpiredProps> = ({
   const handleUpgrade = async (planId: string) => {
     setLoadingPlan(planId);
 
+    // Track upgrade attempt
+    trackEvent('upgrade_attempt', {
+      plan_id: planId,
+      days_remaining: daysRemaining,
+      is_expired: isExpired,
+      current_plan: currentPlan
+    });
+
     try {
       const backendUrl = import.meta.env.VITE_API_BASE_URL;
 
@@ -30,14 +39,18 @@ const TrialExpired: React.FC<TrialExpiredProps> = ({
         const successUrl = `${window.location.origin}/dashboard?payment=success&upgrade=true`;
         const cancelUrl = `${window.location.origin}/dashboard?payment=cancelled`;
 
-        const { sessionId } = await stripeService.createSubscriptionCheckout(
+        const response = await stripeService.createSubscriptionCheckout(
           planId,
           successUrl,
           cancelUrl,
           0 // No trial for upgrades
         );
 
-        await stripeService.redirectToCheckout(sessionId);
+        // Track successful upgrade initiation
+        trackSubscriptionEvent('created', planId);
+        trackTrialEvent('upgraded', planId, daysRemaining);
+
+        await stripeService.redirectToCheckout((response as any).sessionId);
       } else {
         // Development: Simulate upgrade success
         onUpgrade?.();

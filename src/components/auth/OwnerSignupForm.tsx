@@ -6,6 +6,7 @@ import { authService } from '@/lib/auth';
 import { useOutlet } from '@/contexts/OutletContext';
 import stripeService from '@/lib/stripeService';
 import LegalModal from '@/components/modals/LegalModal';
+import { trackEvent, trackUserJourney, trackTrialEvent, identifyUser, trackFormInteraction, trackError, trackPerformance } from '@/lib/posthog';
 
 interface OwnerSignupFormProps {
   onSuccess?: () => void;
@@ -52,10 +53,26 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
     setIsLoading(true);
     setError(null);
 
+    // Track form submission start
+    const startTime = Date.now();
+    trackFormInteraction('owner_signup', 'started', 6, {
+      has_trial: isTrial,
+      selected_plan: selectedPlan
+    });
+
     // Validation
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
       setIsLoading(false);
+      // Track validation error
+      trackError('validation', 'Password mismatch', {
+        form: 'owner_signup',
+        field: 'confirmPassword'
+      });
+      trackFormInteraction('owner_signup', 'abandoned', 6, {
+        error_type: 'validation',
+        error_field: 'password_confirmation'
+      });
       return;
     }
 
@@ -87,12 +104,38 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
       if (user) {
         setCurrentUser(user);
         
+        // Track successful signup
+        trackEvent('user_signup', {
+          user_id: user.id,
+          company_name: formData.companyName,
+          has_trial: isTrial,
+          selected_plan: selectedPlan,
+          signup_method: 'email'
+        });
+
+        // Identify user in PostHog
+        identifyUser(user.id, {
+          name: formData.name,
+          email: formData.email,
+          company_name: formData.companyName,
+          signup_date: new Date().toISOString(),
+          is_trial: isTrial,
+          plan_id: selectedPlan
+        });
+
+        // Track user journey progression
+        trackUserJourney('signup', {
+          user_id: user.id,
+          is_trial: isTrial,
+          plan_id: selectedPlan
+        });
+
         // Get user's outlets (should be just the one they created)
         const { data: outlets, error: outletsError } = await authService.getUserOutlets(user.id);
-        
+
         if (outlets && !outletsError) {
           setUserOutlets(outlets);
-          
+
           // Set the created outlet as current
           if (outlets.length > 0) {
             setCurrentOutlet(outlets[0]);
@@ -105,27 +148,66 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
           const cancelUrl = `${window.location.origin}/dashboard?payment=cancelled`;
 
           try {
-            const { sessionId } = await stripeService.createSubscriptionCheckout(
+            // Track trial start
+            trackTrialEvent('started', selectedPlan);
+
+            const response = await stripeService.createSubscriptionCheckout(
               selectedPlan,
               successUrl,
               cancelUrl,
               7 // 7-day free trial
             );
 
-            await stripeService.redirectToCheckout(sessionId);
+            await stripeService.redirectToCheckout((response as any).sessionId);
             return; // Don't call onSuccess, let Stripe handle the redirect
           } catch (error) {
             console.error('Error creating Stripe trial:', error);
+            // Track trial start failure
+            trackEvent('trial_start_failed', {
+              user_id: user.id,
+              plan_id: selectedPlan,
+              error: error instanceof Error ? error.message : 'Unknown error'
+            });
             // Fallback to dashboard without Stripe trial
             onSuccess?.();
           }
         } else {
           onSuccess?.();
         }
+
+        // Track successful form completion and performance
+        const endTime = Date.now();
+        const duration = endTime - startTime;
+        trackFormInteraction('owner_signup', 'completed', 6, {
+          user_id: user.id,
+          duration_ms: duration,
+          has_trial: isTrial
+        });
+        trackPerformance('user_signup', duration, true, {
+          user_id: user.id,
+          plan_id: selectedPlan,
+          has_trial: isTrial
+        });
       }
     } catch (err) {
+      const endTime = Date.now();
+      const duration = endTime - startTime;
+
       setError('An unexpected error occurred');
       console.error('Owner signup error:', err);
+
+      // Track signup error and performance
+      trackError('auth', 'Signup failed', {
+        error: err instanceof Error ? err.message : 'Unknown error',
+        duration_ms: duration
+      });
+      trackPerformance('user_signup', duration, false, {
+        error: err instanceof Error ? err.message : 'Unknown error'
+      });
+      trackFormInteraction('owner_signup', 'abandoned', 6, {
+        error_type: 'api',
+        duration_ms: duration
+      });
     } finally {
       setIsLoading(false);
     }
@@ -164,17 +246,26 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
           const cancelUrl = `${window.location.origin}/dashboard?payment=cancelled`;
 
           try {
-            const { sessionId } = await stripeService.createSubscriptionCheckout(
+            // Track trial start
+            trackTrialEvent('started', selectedPlan);
+
+            const response = await stripeService.createSubscriptionCheckout(
               selectedPlan,
               successUrl,
               cancelUrl,
               7 // 7-day free trial
             );
 
-            await stripeService.redirectToCheckout(sessionId);
+            await stripeService.redirectToCheckout((response as any).sessionId);
             return; // Don't call onSuccess, let Stripe handle the redirect
           } catch (error) {
             console.error('Error creating Stripe trial:', error);
+            // Track trial start failure
+            trackEvent('trial_start_failed', {
+              user_id: user.id,
+              plan_id: selectedPlan,
+              error: error instanceof Error ? error.message : 'Unknown error'
+            });
             // Fallback to dashboard without Stripe trial
             onSuccess?.();
           }
