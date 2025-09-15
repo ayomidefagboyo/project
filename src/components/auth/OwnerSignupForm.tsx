@@ -4,6 +4,7 @@ import { Mail, Lock, User, Building, Chrome, ArrowRight, Check, Star } from 'luc
 import { paymentPlans } from '@/lib/stripe';
 import { authService } from '@/lib/auth';
 import { useOutlet } from '@/contexts/OutletContext';
+import stripeService from '@/lib/stripeService';
 
 interface OwnerSignupFormProps {
   onSuccess?: () => void;
@@ -86,7 +87,29 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
           }
         }
 
-        onSuccess?.();
+        // If trial signup, redirect to Stripe trial setup
+        if (isTrial && selectedPlan) {
+          const successUrl = `${window.location.origin}/dashboard?payment=success&trial=true`;
+          const cancelUrl = `${window.location.origin}/dashboard?payment=cancelled`;
+
+          try {
+            const { sessionId } = await stripeService.createSubscriptionCheckout(
+              selectedPlan,
+              successUrl,
+              cancelUrl,
+              7 // 7-day free trial
+            );
+
+            await stripeService.redirectToCheckout(sessionId);
+            return; // Don't call onSuccess, let Stripe handle the redirect
+          } catch (error) {
+            console.error('Error creating Stripe trial:', error);
+            // Fallback to dashboard without Stripe trial
+            onSuccess?.();
+          }
+        } else {
+          onSuccess?.();
+        }
       }
     } catch (err) {
       setError('An unexpected error occurred');
@@ -123,7 +146,29 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
           }
         }
 
-        onSuccess?.();
+        // If trial signup, redirect to Stripe trial setup
+        if (isTrial && selectedPlan) {
+          const successUrl = `${window.location.origin}/dashboard?payment=success&trial=true`;
+          const cancelUrl = `${window.location.origin}/dashboard?payment=cancelled`;
+
+          try {
+            const { sessionId } = await stripeService.createSubscriptionCheckout(
+              selectedPlan,
+              successUrl,
+              cancelUrl,
+              7 // 7-day free trial
+            );
+
+            await stripeService.redirectToCheckout(sessionId);
+            return; // Don't call onSuccess, let Stripe handle the redirect
+          } catch (error) {
+            console.error('Error creating Stripe trial:', error);
+            // Fallback to dashboard without Stripe trial
+            onSuccess?.();
+          }
+        } else {
+          onSuccess?.();
+        }
       }
     } catch (err) {
       setError('Google sign-up failed');

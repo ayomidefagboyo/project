@@ -38,31 +38,10 @@ const LandingPage: React.FC = () => {
     setLoadingPlan(planId);
 
     try {
-      // Check environment for trial-first vs Stripe-first approach
-      const useStripeForTrials = import.meta.env.VITE_USE_STRIPE_FOR_TRIALS === 'true';
-      const backendUrl = import.meta.env.VITE_API_BASE_URL;
-
-      if (useStripeForTrials && backendUrl && !backendUrl.includes('localhost')) {
-        // Production with Stripe trials: Create subscription with trial period
-        const successUrl = `${window.location.origin}/dashboard?payment=success&trial=true`;
-        const cancelUrl = `${window.location.origin}/?payment=cancelled`;
-
-        // Note: This creates a Stripe subscription with 7-day trial (no payment required during trial)
-        const response = await stripeService.createSubscriptionCheckout(
-          planId,
-          successUrl,
-          cancelUrl,
-          7 // 7-day free trial
-        );
-
-        await stripeService.redirectToCheckout((response as any).sessionId);
-      } else {
-        // Development or trial-first approach: Direct signup with trial flag
-        navigate(`/auth?mode=signup&plan=${planId}&trial=true`);
-      }
+      // Always go to signup first, then Stripe trial setup after account creation
+      navigate(`/auth?mode=signup&plan=${planId}&trial=true`);
     } catch (error) {
-      console.error('Error starting subscription/trial:', error);
-      // Fallback to signup if Stripe fails
+      console.error('Error navigating to signup:', error);
       navigate(`/auth?mode=signup&plan=${planId}&trial=true`);
     } finally {
       setLoadingPlan(null);
