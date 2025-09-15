@@ -244,8 +244,8 @@ class AuthService {
           console.warn('Could not fetch inviter details for email:', inviterError);
         }
 
-        // Generate invitation link (in production, this would be your app's URL)
-        const invitationLink = `${window.location.origin}/accept-invitation?token=${invite.token}`;
+        // Generate invitation link
+        const invitationLink = `${import.meta.env.VITE_APP_URL || window.location.origin}/accept-invitation?token=${invite.token}`;
 
         // Send the invitation email
         const emailResult = await emailService.sendInvitationEmail({
@@ -362,7 +362,7 @@ class AuthService {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/dashboard`
+          redirectTo: `${import.meta.env.VITE_APP_URL || window.location.origin}/dashboard`
         }
       });
 
@@ -514,7 +514,7 @@ class AuthService {
   async resetPassword(email: string): Promise<{ error: string | null }> {
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
+        redirectTo: `${import.meta.env.VITE_APP_URL || window.location.origin}/reset-password`,
       });
       if (error) throw error;
       return { error: null };
