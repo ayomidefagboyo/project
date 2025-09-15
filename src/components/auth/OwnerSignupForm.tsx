@@ -5,6 +5,7 @@ import { paymentPlans } from '@/lib/stripe';
 import { authService } from '@/lib/auth';
 import { useOutlet } from '@/contexts/OutletContext';
 import stripeService from '@/lib/stripeService';
+import LegalModal from '@/components/modals/LegalModal';
 
 interface OwnerSignupFormProps {
   onSuccess?: () => void;
@@ -24,8 +25,19 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [legalModal, setLegalModal] = useState<{ isOpen: boolean; type: 'privacy' | 'terms' | null }>({
+    isOpen: false,
+    type: null
+  });
   const { setCurrentUser, setUserOutlets, setCurrentOutlet } = useOutlet();
 
+  const openLegalModal = (type: 'privacy' | 'terms') => {
+    setLegalModal({ isOpen: true, type });
+  };
+
+  const closeLegalModal = () => {
+    setLegalModal({ isOpen: false, type: null });
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -441,16 +453,31 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
           {/* Footer */}
           <div className="text-center text-xs text-muted-foreground font-light">
             By creating an account, you agree to our{' '}
-            <Link to="/terms" className="text-primary hover:text-primary/80">
+            <button 
+              type="button"
+              onClick={() => openLegalModal('terms')}
+              className="text-primary hover:text-primary/80 underline"
+            >
               Terms of Service
-            </Link>{' '}
+            </button>{' '}
             and{' '}
-            <Link to="/privacy" className="text-primary hover:text-primary/80">
+            <button 
+              type="button"
+              onClick={() => openLegalModal('privacy')}
+              className="text-primary hover:text-primary/80 underline"
+            >
               Privacy Policy
-            </Link>
+            </button>
           </div>
         </div>
       </div>
+
+      {/* Legal Modal */}
+      <LegalModal
+        isOpen={legalModal.isOpen}
+        onClose={closeLegalModal}
+        type={legalModal.type || 'privacy'}
+      />
     </div>
   );
 };
