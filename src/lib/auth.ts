@@ -398,7 +398,49 @@ class AuthService {
           .eq('id', data.user.id)
           .single();
 
-        if (profileError) throw profileError;
+        if (profileError) {
+          // If user doesn't exist in users table (OAuth user), create profile
+          if (profileError.details === 'The result contains 0 rows') {
+            console.log('Creating profile for OAuth user during sign in:', data.user.id);
+
+            // Extract name from user metadata (Google OAuth)
+            const fullName = data.user.user_metadata?.full_name || data.user.user_metadata?.name || data.user.email?.split('@')[0] || '';
+
+            // Create user profile for OAuth user
+            const { data: newProfile, error: createError } = await supabase
+              .from('users')
+              .insert({
+                id: data.user.id,
+                email: data.user.email!,
+                name: fullName,
+                role: 'viewer', // Default role for OAuth users
+                outlet_id: null, // No outlet assigned initially
+                permissions: this.getDefaultPermissions('viewer'),
+                is_active: true,
+              })
+              .select()
+              .single();
+
+            if (createError) {
+              console.error('Failed to create OAuth user profile during sign in:', createError);
+              throw createError;
+            }
+
+            const authUser: AuthUser = {
+              id: newProfile.id,
+              email: newProfile.email,
+              name: newProfile.name,
+              role: newProfile.role,
+              outletId: newProfile.outlet_id,
+              permissions: newProfile.permissions || [],
+              isOwner: false,
+            };
+
+            return { user: authUser, error: null };
+          }
+
+          throw profileError;
+        }
 
         const authUser: AuthUser = {
           id: profile.id,
@@ -466,7 +508,49 @@ class AuthService {
           .eq('id', user.id)
           .single();
 
-        if (profileError) throw profileError;
+        if (profileError) {
+          // If user doesn't exist in users table (OAuth signup), create profile
+          if (profileError.details === 'The result contains 0 rows') {
+            console.log('Creating profile for OAuth user:', user.id);
+
+            // Extract name from user metadata (Google OAuth)
+            const fullName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || '';
+
+            // Create user profile for OAuth user (they don't have an outlet initially)
+            const { data: newProfile, error: createError } = await supabase
+              .from('users')
+              .insert({
+                id: user.id,
+                email: user.email!,
+                name: fullName,
+                role: 'viewer', // Default role for OAuth users
+                outlet_id: null, // No outlet assigned initially
+                permissions: this.getDefaultPermissions('viewer'),
+                is_active: true,
+              })
+              .select()
+              .single();
+
+            if (createError) {
+              console.error('Failed to create OAuth user profile:', createError);
+              throw createError;
+            }
+
+            const authUser: AuthUser = {
+              id: newProfile.id,
+              email: newProfile.email,
+              name: newProfile.name,
+              role: newProfile.role,
+              outletId: newProfile.outlet_id,
+              permissions: newProfile.permissions || [],
+              isOwner: false,
+            };
+
+            return { user: authUser, error: null };
+          }
+
+          throw profileError;
+        }
 
         const authUser: AuthUser = {
           id: profile.id,
