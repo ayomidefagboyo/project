@@ -16,14 +16,14 @@ export const stripeConfig = {
   apiVersion: '2023-10-16' as const,
 };
 
-// Payment plans configuration - matching existing pricing structure
+// Payment plans configuration - matching Stripe dashboard (startup, business, enterprise)
 export const paymentPlans = {
-  starter: {
-    id: 'starter',
-    name: 'Starter',
+  startup: {
+    id: 'startup',
+    name: 'Startup',
     description: 'Perfect for small businesses with up to 2 outlets',
     price: 29,
-    priceId: 'price_starter_monthly', // Replace with actual Stripe price ID
+    priceId: 'price_startup_monthly', // TODO: Replace with actual Stripe price ID from dashboard
     features: [
       'Up to 2 outlets',
       'Basic reporting',
@@ -33,14 +33,14 @@ export const paymentPlans = {
     ],
     popular: false
   },
-  pro: {
-    id: 'pro',
-    name: 'Pro',
+  business: {
+    id: 'business',
+    name: 'Business',
     description: 'Ideal for growing businesses with multiple outlets',
     price: 79,
-    priceId: 'price_pro_monthly', // Replace with actual Stripe price ID
+    priceId: 'price_business_monthly', // TODO: Replace with actual Stripe price ID from dashboard
     features: [
-      'Everything in Starter plus:',
+      'Everything in Startup plus:',
       'Up to 10 outlets',
       'Advanced analytics',
       'Priority support',
@@ -48,14 +48,14 @@ export const paymentPlans = {
     ],
     popular: true
   },
-  advanced: {
-    id: 'advanced',
-    name: 'Advanced',
+  enterprise: {
+    id: 'enterprise',
+    name: 'Enterprise',
     description: 'For established businesses with complex needs',
     price: 149,
-    priceId: 'price_advanced_monthly', // Replace with actual Stripe price ID
+    priceId: 'price_enterprise_monthly', // TODO: Replace with actual Stripe price ID from dashboard
     features: [
-      'Everything in Pro plus:',
+      'Everything in Business plus:',
       'Unlimited outlets',
       'White-label solution',
       'Dedicated support',
