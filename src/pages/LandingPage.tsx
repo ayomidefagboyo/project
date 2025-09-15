@@ -1,19 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import {
-  BarChart3,
-  Building2,
-  Smartphone,
-  Receipt,
-  TrendingUp,
-  Shield,
-  Check,
-  Star,
+import { 
+  BarChart3, 
+  Building2, 
+  Smartphone, 
+  Receipt, 
+  TrendingUp, 
+  Shield, 
+  Check, 
+  Star, 
   ArrowRight,
   ChevronDown,
   Loader2,
   TrendingDown,
-  DollarSign
+  DollarSign,
+  FileText
 } from 'lucide-react';
 import { paymentPlans } from '@/lib/stripe';
 import stripeService from '@/lib/stripeService';
@@ -219,7 +220,7 @@ const LandingPage: React.FC = () => {
                     ) : (
                       'Launch App'
                     )}
-                    <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
+                  <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
                   </button>
                 </div>
               </div>
@@ -250,111 +251,84 @@ const LandingPage: React.FC = () => {
       {/* Benefits Section */}
       <section id="features" className="section-padding bg-muted/30">
         <div className="container-width">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-semibold text-foreground mb-6 text-balance">
+          <div className="text-center mb-8">
+            <h2 className="text-3xl md:text-4xl font-semibold text-foreground mb-4 text-balance">
               Everything you need to manage your finances
             </h2>
-            <p className="text-lg text-muted-foreground max-w-2xl mx-auto text-balance">
+            <p className="text-lg text-muted-foreground max-w-3xl mx-auto text-balance">
               Comprehensive tools for invoice management, expense tracking, and financial reporting.
             </p>
           </div>
           
-          {/* Bento Box Layout */}
+          {/* Feature Cards Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {/* Large card - top left */}
-            <div className="lg:col-span-2 card p-8">
-              <div className="w-16 h-16 bg-accent rounded-xl flex items-center justify-center mb-6">
-                <BarChart3 className="h-8 w-8 text-accent-foreground" />
+            {/* Invoice Management */}
+            <div className="card p-6 border-2 border-accent/20 bg-gradient-to-br from-accent/5 to-accent/10 hover:shadow-lg transition-all duration-300">
+              <div className="w-12 h-12 bg-gradient-to-br from-accent to-accent/80 rounded-xl flex items-center justify-center mb-4">
+                <Receipt className="h-6 w-6 text-accent-foreground" />
               </div>
-              <h3 className="text-2xl font-semibold text-foreground mb-4">Real-time Financial Insights</h3>
-              <p className="text-muted-foreground text-lg leading-relaxed">
-                See exactly where your money is going with beautiful dashboards that update in real-time. 
-                Make informed decisions based on actual data, not guesswork.
-              </p>
-            </div>
-            
-            {/* Medium card - top right */}
-            <div className="card p-8">
-              <div className="w-16 h-16 bg-accent rounded-xl flex items-center justify-center mb-6">
-                <Building2 className="h-8 w-8 text-accent-foreground" />
-              </div>
-              <h3 className="text-xl font-semibold text-foreground mb-4">Multi-Outlet Management</h3>
+              <h3 className="text-xl font-semibold text-foreground mb-3">Smart Invoice Processing</h3>
               <p className="text-muted-foreground leading-relaxed">
-                Manage all your business locations from one dashboard. Compare performance and consolidate reporting.
+                Automatically extract data from invoices and receipts. Our AI reads vendor details, amounts, and dates with 95% accuracy, eliminating manual data entry.
               </p>
             </div>
             
-            {/* Medium card - middle left */}
-            <div className="card p-8">
-              <div className="w-16 h-16 bg-accent rounded-xl flex items-center justify-center mb-6">
-                <Smartphone className="h-8 w-8 text-accent-foreground" />
+            {/* Expense Tracking */}
+            <div className="card p-6 border border-blue-200/30 hover:shadow-lg transition-all duration-300">
+              <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center mb-4">
+                <BarChart3 className="h-6 w-6 text-white" />
               </div>
-              <h3 className="text-xl font-semibold text-foreground mb-4">Mobile-First Design</h3>
+              <h3 className="text-xl font-semibold text-foreground mb-3">Expense Tracking</h3>
               <p className="text-muted-foreground leading-relaxed">
-                Your team can manage finances anywhere with our intuitive mobile interface.
+                Track every expense across all your business locations. Categorize spending automatically and see where your money goes in real-time.
               </p>
             </div>
             
-            {/* Large card - middle right */}
-            <div className="lg:col-span-2 card p-8">
-              <div className="w-16 h-16 bg-accent rounded-xl flex items-center justify-center mb-6">
-                <Receipt className="h-8 w-8 text-accent-foreground" />
+            {/* Financial Reporting */}
+            <div className="card p-6 border border-emerald-200/30 hover:shadow-lg transition-all duration-300">
+              <div className="w-12 h-12 bg-emerald-600 rounded-xl flex items-center justify-center mb-4">
+                <FileText className="h-6 w-6 text-white" />
               </div>
-              <h3 className="text-2xl font-semibold text-foreground mb-4">Smart Receipt Scanning</h3>
-              <p className="text-muted-foreground text-lg leading-relaxed mb-4">
-                Transform receipt photos into expense reports instantly with our AI-powered scanning technology.
-                Eliminate manual data entry and reduce errors by up to 90%.
-              </p>
-              <ul className="text-muted-foreground space-y-2">
-                <li className="flex items-start">
-                  <div className="w-1.5 h-1.5 bg-accent-foreground rounded-full mt-2 mr-3 flex-shrink-0"></div>
-                  Advanced photo scanning with 95%+ accuracy
-                </li>
-                <li className="flex items-start">
-                  <div className="w-1.5 h-1.5 bg-accent-foreground rounded-full mt-2 mr-3 flex-shrink-0"></div>
-                  Real-time receipt scanning with confidence scoring
-                </li>
-                <li className="flex items-start">
-                  <div className="w-1.5 h-1.5 bg-accent-foreground rounded-full mt-2 mr-3 flex-shrink-0"></div>
-                  Automatic data extraction: vendor name, amount, date, description
-                </li>
-                <li className="flex items-start">
-                  <div className="w-1.5 h-1.5 bg-accent-foreground rounded-full mt-2 mr-3 flex-shrink-0"></div>
-                  Multi-format support with 10MB file limit
-                </li>
-                <li className="flex items-start">
-                  <div className="w-1.5 h-1.5 bg-accent-foreground rounded-full mt-2 mr-3 flex-shrink-0"></div>
-                  Smart categorization and expense validation
-                </li>
-                <li className="flex items-start">
-                  <div className="w-1.5 h-1.5 bg-accent-foreground rounded-full mt-2 mr-3 flex-shrink-0"></div>
-                  Mobile-first experience with camera integration
-                </li>
-              </ul>
-            </div>
-            
-            {/* Medium card - bottom left */}
-            <div className="card p-8">
-              <div className="w-16 h-16 bg-accent rounded-xl flex items-center justify-center mb-6">
-                <TrendingUp className="h-8 w-8 text-accent-foreground" />
-              </div>
-              <h3 className="text-xl font-semibold text-foreground mb-4">End-of-Day Reports</h3>
+              <h3 className="text-xl font-semibold text-foreground mb-3">Financial Reporting</h3>
               <p className="text-muted-foreground leading-relaxed">
-                Generate comprehensive daily reports with photo attachments and comments.
+                Generate comprehensive financial reports automatically. Get profit & loss statements, cash flow reports, and tax-ready summaries.
               </p>
             </div>
             
-            {/* Medium card - bottom right */}
-            <div className="card p-8">
-              <div className="w-16 h-16 bg-accent rounded-xl flex items-center justify-center mb-6">
-                <Shield className="h-8 w-8 text-accent-foreground" />
+            {/* Multi-Location Management */}
+            <div className="card p-6 border border-purple-200/30 hover:shadow-lg transition-all duration-300">
+              <div className="w-12 h-12 bg-purple-600 rounded-xl flex items-center justify-center mb-4">
+                <Building2 className="h-6 w-6 text-white" />
               </div>
-              <h3 className="text-xl font-semibold text-foreground mb-4">Enterprise Security</h3>
+              <h3 className="text-xl font-semibold text-foreground mb-3">Multi-Location Management</h3>
               <p className="text-muted-foreground leading-relaxed">
-                Bank-level security with role-based access control and data encryption.
+                Manage finances across multiple business locations from one dashboard. Compare performance and optimize operations efficiently.
+              </p>
+            </div>
+            
+            {/* AI-Powered Insights */}
+            <div className="card p-6 border border-indigo-200/30 hover:shadow-lg transition-all duration-300">
+              <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center mb-4">
+                <TrendingUp className="h-6 w-6 text-white" />
+              </div>
+              <h3 className="text-xl font-semibold text-foreground mb-3">AI-Powered Insights</h3>
+              <p className="text-muted-foreground leading-relaxed">
+                Get intelligent business recommendations and trend analysis. Our AI identifies opportunities to reduce costs and increase revenue.
+              </p>
+            </div>
+            
+            {/* Security & Compliance */}
+            <div className="card p-6 border border-red-200/30 hover:shadow-lg transition-all duration-300">
+              <div className="w-12 h-12 bg-red-600 rounded-xl flex items-center justify-center mb-4">
+                <Shield className="h-6 w-6 text-white" />
+              </div>
+              <h3 className="text-xl font-semibold text-foreground mb-3">Security & Compliance</h3>
+              <p className="text-muted-foreground leading-relaxed">
+                Bank-level security protects your financial data. Stay compliant with automated audit trails and secure data encryption.
               </p>
             </div>
           </div>
+
         </div>
       </section>
 
@@ -755,9 +729,9 @@ const LandingPage: React.FC = () => {
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto text-balance">
               Make data-driven financial decisions with our suite of professional calculators.
               Get instant insights for ROI, cash flow, break-even analysis, and more.
-            </p>
-          </div>
-
+              </p>
+            </div>
+            
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-12">
             {/* ROI Calculator */}
             <div className="card p-6 hover:shadow-lg transition-all group">
@@ -780,7 +754,7 @@ const LandingPage: React.FC = () => {
                 Try Calculator <ArrowRight className="ml-1 h-4 w-4" />
               </Link>
             </div>
-
+            
             {/* Break-Even Calculator */}
             <div className="card p-6 hover:shadow-lg transition-all group">
               <div className="flex items-center justify-between mb-4">
@@ -802,7 +776,7 @@ const LandingPage: React.FC = () => {
                 Try Calculator <ArrowRight className="ml-1 h-4 w-4" />
               </Link>
             </div>
-
+            
             {/* Cash Flow Calculator */}
             <div className="card p-6 hover:shadow-lg transition-all group">
               <div className="flex items-center justify-between mb-4">
