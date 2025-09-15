@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Mail, Lock, User, Building, ChevronDown, Chrome, ArrowRight, Check } from 'lucide-react';
+import { Mail, Lock, User, Building, ChevronDown, Chrome, ArrowRight, Check, Star } from 'lucide-react';
 import { paymentPlans } from '@/lib/stripe';
 import { authService } from '@/lib/auth';
 import { useOutlet } from '@/contexts/OutletContext';
@@ -144,11 +144,11 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
   };
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-screen overflow-hidden">
       {/* Left side - Brand/Marketing */}
       <div className="hidden lg:flex lg:w-1/2 bg-primary relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-primary to-primary/80"></div>
-        <div className="relative z-10 flex flex-col justify-center px-16 py-24">
+        <div className="relative z-10 flex flex-col justify-center px-12 py-8">
           <div className="mb-12">
             <Link to="/" className="text-3xl font-light text-primary-foreground tracking-tight">
               Compazz
@@ -161,7 +161,7 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
             <p className="text-lg text-primary-foreground/80 font-light leading-relaxed mb-8">
               Join thousands of businesses streamlining their finances with AI-powered management.
             </p>
-            <div className="space-y-4">
+            <div className="space-y-4 mb-8">
               <div className="flex items-center text-primary-foreground/60">
                 <div className="w-2 h-2 bg-primary-foreground/40 rounded-full mr-4"></div>
                 <span className="font-light">Free 14-day trial</span>
@@ -175,13 +175,37 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
                 <span className="font-light">Setup in under 5 minutes</span>
               </div>
             </div>
+
+            {/* Reviews Section */}
+            <div className="space-y-4">
+              <div className="flex items-center space-x-1">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <Star key={star} className="w-5 h-5 fill-yellow-400 text-yellow-400" />
+                ))}
+                <span className="ml-2 text-primary-foreground/80 font-light">4.9/5</span>
+              </div>
+              <div className="space-y-3">
+                <div className="bg-primary-foreground/10 rounded-lg p-4">
+                  <p className="text-primary-foreground/80 text-sm font-light italic">
+                    "Compazz transformed how we manage our restaurant finances. The AI insights are incredible!"
+                  </p>
+                  <p className="text-primary-foreground/60 text-xs mt-2">- Sarah M., Restaurant Owner</p>
+                </div>
+                <div className="bg-primary-foreground/10 rounded-lg p-4">
+                  <p className="text-primary-foreground/80 text-sm font-light italic">
+                    "Setup was so easy and the anomaly detection caught issues we never noticed."
+                  </p>
+                  <p className="text-primary-foreground/60 text-xs mt-2">- James K., Retail Chain</p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Right side - Signup Form */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center px-6 py-24">
-        <div className="w-full max-w-lg space-y-8">
+      <div className="w-full lg:w-1/2 flex items-center justify-center px-6 py-8 overflow-y-auto">
+        <div className="w-full max-w-lg space-y-6">
           {/* Mobile logo */}
           <div className="lg:hidden text-center">
             <Link to="/" className="text-3xl font-light text-foreground tracking-tight">
@@ -191,44 +215,21 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
 
           {/* Header */}
           <div className="text-center lg:text-left">
-            <h2 className="text-3xl lg:text-4xl font-light text-foreground mb-3 tracking-tight">
+            <h2 className="text-2xl lg:text-3xl font-light text-foreground mb-2 tracking-tight">
               Create your business account
             </h2>
-            <p className="text-muted-foreground font-light">
+            <p className="text-muted-foreground font-light text-sm">
               Set up your company and start managing finances like never before
             </p>
           </div>
 
-          {/* Selected Plan Display */}
-          {selectedPlan && paymentPlans[selectedPlan as keyof typeof paymentPlans] && (
-            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-semibold text-blue-900 dark:text-blue-100">
-                    {paymentPlans[selectedPlan as keyof typeof paymentPlans].name} Plan Selected
-                  </h3>
-                  <p className="text-sm text-blue-700 dark:text-blue-300">
-                    {isTrial ? (
-                      '7-day free trial • No credit card required'
-                    ) : (
-                      `7-day free trial • Then £${paymentPlans[selectedPlan as keyof typeof paymentPlans].priceGBP}/month`
-                    )}
-                  </p>
-                </div>
-                <div className="flex items-center space-x-1 text-blue-600 dark:text-blue-400">
-                  <Check className="w-5 h-5" />
-                  <span className="font-medium">Selected</span>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Google Sign Up */}
           <button
             type="button"
             onClick={handleGoogleSignUp}
             disabled={isGoogleLoading || isLoading}
-            className="w-full flex items-center justify-center gap-3 px-6 py-4 border border-border rounded-lg text-foreground bg-background hover:bg-accent transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full flex items-center justify-center gap-3 px-6 py-3 border border-border rounded-lg text-foreground bg-background hover:bg-accent transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isGoogleLoading ? (
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-foreground"></div>
@@ -249,12 +250,12 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
           </div>
 
           {/* Email Form */}
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="name" className="block text-sm font-medium text-foreground mb-2">
-                    Full Name
+                    Name
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -267,7 +268,7 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
                       required
                       value={formData.name}
                       onChange={handleChange}
-                      className="block w-full pl-12 pr-4 py-4 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
+                      className="block w-full pl-12 pr-4 py-3 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
                       placeholder="Your full name"
                     />
                   </div>
@@ -289,7 +290,7 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
                       required
                       value={formData.email}
                       onChange={handleChange}
-                      className="block w-full pl-12 pr-4 py-4 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
+                      className="block w-full pl-12 pr-4 py-3 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
                       placeholder="your@email.com"
                     />
                   </div>
@@ -312,7 +313,7 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
                       required
                       value={formData.companyName}
                       onChange={handleChange}
-                      className="block w-full pl-12 pr-4 py-4 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
+                      className="block w-full pl-12 pr-4 py-3 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
                       placeholder="Your company"
                     />
                   </div>
@@ -328,7 +329,7 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
                       name="businessType"
                       value={formData.businessType}
                       onChange={handleChange}
-                      className="block w-full appearance-none px-4 py-4 border border-border rounded-lg text-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light pr-12"
+                      className="block w-full appearance-none px-4 py-3 border border-border rounded-lg text-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light pr-12"
                     >
                       {businessTypes.map((type) => (
                         <option key={type.value} value={type.value}>
@@ -360,7 +361,7 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
                       required
                       value={formData.password}
                       onChange={handleChange}
-                      className="block w-full pl-12 pr-4 py-4 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
+                      className="block w-full pl-12 pr-4 py-3 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
                       placeholder="Create password"
                     />
                   </div>
@@ -382,7 +383,7 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
                       required
                       value={formData.confirmPassword}
                       onChange={handleChange}
-                      className="block w-full pl-12 pr-4 py-4 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
+                      className="block w-full pl-12 pr-4 py-3 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
                       placeholder="Confirm password"
                     />
                   </div>
@@ -399,7 +400,7 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
             <button
               type="submit"
               disabled={isLoading || isGoogleLoading}
-              className="w-full btn-primary py-4 text-lg font-medium group disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full btn-primary py-3 text-lg font-medium group disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? (
                 <div className="flex items-center justify-center">
