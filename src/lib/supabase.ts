@@ -32,7 +32,8 @@ export const TABLES = {
   VENDOR_INVOICES: 'vendor_invoices',
   CUSTOMERS: 'customers',
   AUDIT_ENTRIES: 'audit_entries',
-  BUSINESS_SETTINGS: 'business_settings'
+  BUSINESS_SETTINGS: 'business_settings',
+  SUBSCRIPTIONS: 'subscriptions'
 } as const;
 
 // RLS (Row Level Security) policies will be set up in Supabase dashboard
