@@ -507,76 +507,45 @@ const Dashboard: React.FC = () => {
               </svg>
             </button>
 
-            {/* Single Step: Combined Setup and Trial */}
-            <div className="space-y-6">
+            {/* Single Step: Trial Setup */}
+            <div className="space-y-8">
               <div className="text-center">
-                <h2 className="text-2xl font-bold text-foreground mb-2">
-                  Welcome to Compazz!
+                <h2 className="text-3xl font-bold text-foreground mb-3">
+                  🚀 Welcome to Compazz!
                 </h2>
-                <p className="text-muted-foreground">
-                  Let's get your 7-day free trial started
+                <p className="text-lg text-muted-foreground">
+                  Start your 7-day free trial and transform your business finances
                 </p>
               </div>
 
-              {/* Quick Setup (Optional) */}
-              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-6 space-y-4">
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-                  Quick Setup (Optional)
+              {/* Trial Features */}
+              <div className="bg-gradient-to-r from-blue-50 to-emerald-50 dark:from-blue-900/20 dark:to-emerald-900/20 p-8 rounded-xl">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 text-center">
+                  ✨ Your Free Trial Includes Everything:
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Business Name
-                    </label>
-                    <input
-                      type="text"
-                      value={outletName}
-                      onChange={(e) => setOutletName(e.target.value)}
-                      placeholder="Your business name (optional)"
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
+                  <div className="flex items-center space-x-3">
+                    <CheckCircle className="w-6 h-6 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                    <span className="text-base font-medium text-gray-700 dark:text-gray-300">AI-Powered Receipt Scanning</span>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Business Type
-                    </label>
-                    <select
-                      value={businessType}
-                      onChange={(e) => setBusinessType(e.target.value as typeof businessType)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    >
-                      <option value="retail">Retail Store</option>
-                      <option value="restaurant">Restaurant</option>
-                      <option value="cafe">Cafe</option>
-                      <option value="supermarket">Supermarket</option>
-                      <option value="lounge">Lounge/Bar</option>
-                    </select>
+                  <div className="flex items-center space-x-3">
+                    <CheckCircle className="w-6 h-6 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                    <span className="text-base font-medium text-gray-700 dark:text-gray-300">Smart Invoice Management</span>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <CheckCircle className="w-6 h-6 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                    <span className="text-base font-medium text-gray-700 dark:text-gray-300">Real-Time Financial Reports</span>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <CheckCircle className="w-6 h-6 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                    <span className="text-base font-medium text-gray-700 dark:text-gray-300">Multi-User Collaboration</span>
                   </div>
                 </div>
-              </div>
 
-              {/* Trial Features */}
-              <div className="bg-gradient-to-r from-blue-50 to-emerald-50 dark:from-blue-900/20 dark:to-emerald-900/20 p-6 rounded-xl">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 text-center">
-                  Your 7-Day Free Trial Includes:
-                </h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="flex items-center space-x-2">
-                    <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">Smart Receipt Scanning</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">Invoice Management</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">Financial Reports</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">Team Collaboration</span>
-                  </div>
+                <div className="mt-6 text-center">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    💳 <strong>No charges during trial</strong> • Cancel anytime • Full access to all features
+                  </p>
                 </div>
               </div>
 
