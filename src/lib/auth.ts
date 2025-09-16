@@ -717,10 +717,20 @@ class AuthService {
   // Get user's outlets
   async getUserOutlets(userId: string): Promise<{ data: any[] | null; error: string | null }> {
     try {
+      // First get the user's outlet_id
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('outlet_id')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (userError) throw userError;
+      if (!userData?.outlet_id) return { data: [], error: null };
+
       const { data, error } = await supabase
         .from('outlets')
         .select('*')
-        .eq('id', (await supabase.from('users').select('outlet_id').eq('id', userId).single()).data?.outlet_id);
+        .eq('id', userData.outlet_id);
 
       if (error) throw error;
       return { data: data || [], error: null };

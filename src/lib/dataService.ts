@@ -149,9 +149,10 @@ export class DataService {
         .from(TABLES.USERS)
         .select('outlet_id, role')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
 
       if (userError) throw userError;
+      if (!user) return { data: [], error: null };
 
       if (user.role === 'super_admin') {
         // Super admin can see all outlets
