@@ -48,12 +48,17 @@ class AuthService:
     
     def verify_token(self, token: str) -> Dict[str, Any]:
         """Verify and decode a JWT token (Supabase or custom)"""
+        print(f"🔍 Attempting to verify token: {token[:20]}...")
+
         try:
             # First try to verify as Supabase token
+            print("📍 Trying Supabase token validation...")
             supabase = get_supabase_admin()
             user_response = supabase.auth.get_user(token)
+            print(f"📍 Supabase response: {user_response}")
 
             if user_response.user:
+                print(f"✅ Supabase token valid for user: {user_response.user.id}")
                 # Return payload in expected format for Supabase tokens
                 return {
                     "sub": user_response.user.id,
@@ -61,12 +66,17 @@ class AuthService:
                     "aud": user_response.user.aud,
                 }
             else:
+                print("📍 Supabase validation failed, trying custom JWT...")
                 # Fallback to custom JWT validation
                 payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
+                print(f"✅ Custom JWT valid: {payload}")
                 return payload
 
         except Exception as e:
             print(f"❌ Token verification failed: {str(e)}")
+            print(f"❌ Error type: {type(e).__name__}")
+            import traceback
+            print(f"❌ Traceback: {traceback.format_exc()}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials",
