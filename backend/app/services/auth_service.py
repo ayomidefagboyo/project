@@ -275,21 +275,30 @@ class AuthService:
         """Get current user from token"""
         payload = self.verify_token(token)
         user_id = payload.get("sub")
-        
+
         if user_id is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token"
             )
-        
+
         supabase = get_supabase_admin()
         user_response = supabase.table(Tables.USERS).select("*").eq("id", user_id).execute()
-        
+
         if not user_response.data:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found"
-            )
+            # For OAuth users who haven't completed onboarding yet,
+            # create a minimal user object from the token payload
+            print(f"📍 User not found in users table, creating minimal OAuth user: {user_id}")
+
+            return {
+                "id": user_id,
+                "email": payload.get("email", ""),
+                "name": payload.get("name", ""),
+                "role": "business_owner",  # Default role for new OAuth users
+                "outlet_id": None,  # No outlet until onboarding complete
+                "permissions": ["view_dashboard"],  # Minimal permissions for Stripe checkout
+                "is_active": True
+            }
         
         profile = user_response.data[0]
         
