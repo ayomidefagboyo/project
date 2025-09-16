@@ -574,59 +574,10 @@ class AuthService {
             // Extract name from user metadata (Google OAuth)
             const fullName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || '';
 
-            // For OAuth users signing up independently, create them as business owners
-            // Create outlet first
-            const outletData = {
-              name: `${fullName}'s Business`,
-              business_type: 'retail',
-              status: 'active',
-              address: {
-                street: '',
-                city: '',
-                state: '',
-                zip: '',
-                country: 'USA',
-              },
-              phone: '',
-              email: user.email!,
-              opening_hours: this.getDefaultOpeningHours('retail'),
-              tax_rate: 8.25,
-              currency: 'USD',
-              timezone: 'America/New_York',
-            };
+            // For OAuth users, create minimal profile without outlet
+            // They will go through trial onboarding to create outlets
 
-            const { data: outlet, error: outletError } = await supabase
-              .from('outlets')
-              .insert(outletData)
-              .select()
-              .single();
-
-            if (outletError) {
-              console.error('Outlet creation error during getCurrentUser:', outletError);
-              throw outletError;
-            }
-
-            // Create business settings with all required fields
-            const { error: settingsError } = await supabase
-              .from('business_settings')
-              .insert({
-                outlet_id: outlet.id,
-                business_name: `${fullName}'s Business`,
-                business_type: 'retail',
-                theme: 'light',
-                language: 'en',
-                date_format: 'MM/DD/YYYY',
-                time_format: '12h',
-                currency: 'USD',
-                timezone: 'America/New_York'
-              });
-
-            if (settingsError) {
-              console.error('Business settings creation error during getCurrentUser:', settingsError);
-              throw settingsError;
-            }
-
-            // Create user profile
+            // Create user profile without outlet
             const { data: newProfile, error: createError } = await supabase
               .from('users')
               .insert({
@@ -634,7 +585,7 @@ class AuthService {
                 email: user.email!,
                 name: fullName,
                 role: 'business_owner',
-                outlet_id: outlet.id,
+                outlet_id: null, // No outlet yet - will be created during trial setup
                 permissions: this.getDefaultPermissions('business_owner'),
                 is_active: true,
               })
@@ -651,7 +602,7 @@ class AuthService {
               email: user.email!,
               name: fullName,
               role: 'business_owner',
-              outletId: newProfile.outlet_id,
+              outletId: null, // No outlet - user will go through trial onboarding
               permissions: newProfile.permissions || [],
               isOwner: true,
             };
