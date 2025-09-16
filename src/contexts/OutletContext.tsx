@@ -45,7 +45,19 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
     const initializeAuth = async () => {
       try {
         setIsLoading(true);
-        
+
+        // Handle OAuth callback if present
+        if (window.location.hash.includes('access_token')) {
+          try {
+            const { data, error } = await authService.handleOAuthCallback();
+            if (error) {
+              console.error('OAuth callback error:', error);
+            }
+          } catch (error) {
+            console.error('Error processing OAuth callback:', error);
+          }
+        }
+
         // Check if user is already authenticated
         const { session } = await authService.getCurrentSession();
         

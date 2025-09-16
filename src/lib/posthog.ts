@@ -6,8 +6,14 @@ export const initPostHog = () => {
   const posthogHost = import.meta.env.VITE_POSTHOG_HOST || 'https://app.posthog.com';
 
   if (posthogApiKey) {
-    posthog.init(posthogApiKey, {
-      api_host: posthogHost,
+    try {
+      posthog.init(posthogApiKey, {
+        api_host: posthogHost,
+        loaded: (posthog) => {
+          if (import.meta.env.DEV) {
+            console.log('PostHog loaded successfully');
+          }
+        },
       // Enable session recordings for better user insights
       session_recording: {
         // Record only on production to avoid dev noise
@@ -41,9 +47,12 @@ export const initPostHog = () => {
       }
     });
 
-    // Enable debug mode in development
-    if (import.meta.env.DEV) {
-      posthog.debug(true);
+      // Enable debug mode in development
+      if (import.meta.env.DEV) {
+        posthog.debug(true);
+      }
+    } catch (error) {
+      console.error('Failed to initialize PostHog:', error);
     }
   } else if (import.meta.env.DEV) {
     console.warn('PostHog API key not found. Analytics tracking is disabled.');
