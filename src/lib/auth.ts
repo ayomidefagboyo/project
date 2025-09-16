@@ -567,43 +567,22 @@ class AuthService {
           throw profileError;
         }
 
-        // If user doesn't exist in users table (OAuth signup), create profile
+        // If user doesn't exist in users table (OAuth signup), return minimal user info
+        // Profile will be created during onboarding flow
         if (!profile) {
-            console.log('Creating profile for OAuth user:', user.id);
+            console.log('No profile found for OAuth user:', user.id, '- user needs onboarding');
 
             // Extract name from user metadata (Google OAuth)
             const fullName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || '';
 
-            // For OAuth users, create minimal profile without outlet
-            // They will go through trial onboarding to create outlets
-
-            // Create user profile without outlet
-            const { data: newProfile, error: createError } = await supabase
-              .from('users')
-              .insert({
-                id: user.id,
-                email: user.email!,
-                name: fullName,
-                role: 'business_owner',
-                outlet_id: null, // No outlet yet - will be created during trial setup
-                permissions: this.getDefaultPermissions('business_owner'),
-                is_active: true,
-              })
-              .select()
-              .single();
-
-            if (createError) {
-              console.error('User profile creation error during getCurrentUser:', createError);
-              throw createError;
-            }
-
+            // Return minimal user info - they'll complete profile during onboarding
             const authUser: AuthUser = {
               id: user.id,
               email: user.email!,
               name: fullName,
               role: 'business_owner',
               outletId: null, // No outlet - user will go through trial onboarding
-              permissions: newProfile.permissions || [],
+              permissions: this.getDefaultPermissions('business_owner'),
               isOwner: true,
             };
 
@@ -735,6 +714,45 @@ class AuthService {
         };
       default:
         return defaultHours;
+    }
+  }
+
+  // Create user profile for OAuth users during onboarding
+  async createUserProfile(userData: {
+    name: string;
+    role: 'outlet_admin' | 'business_owner';
+    outletId: string;
+  }): Promise<{ error: string | null }> {
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError || !user) {
+        return { error: 'Not authenticated' };
+      }
+
+      // Create user profile
+      const { error: profileError } = await supabase
+        .from('users')
+        .insert({
+          id: user.id,
+          email: user.email!,
+          name: userData.name,
+          role: userData.role,
+          outlet_id: userData.outletId,
+          permissions: this.getDefaultPermissions(userData.role),
+          is_active: true,
+        });
+
+      if (profileError) {
+        console.error('User profile creation error:', profileError);
+        return { error: profileError.message };
+      }
+
+      return { error: null };
+    } catch (error) {
+      console.error('Error creating user profile:', error);
+      return {
+        error: error instanceof Error ? error.message : 'Failed to create user profile'
+      };
     }
   }
 
