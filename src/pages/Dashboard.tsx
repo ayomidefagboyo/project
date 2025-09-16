@@ -105,8 +105,8 @@ const Dashboard: React.FC = () => {
         checkSubscriptionStatus();
       }
 
-      // Show onboarding for new users with no data
-      if (selectedOutlets.length === 0 && isBusinessOwner() && vendorInvoices.length === 0) {
+      // Show onboarding immediately for new users without outlets
+      if (!currentUser?.outletId && isBusinessOwner()) {
         setShowOnboarding(true);
       }
       setLoading(false);

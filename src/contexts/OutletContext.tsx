@@ -19,6 +19,7 @@ interface OutletContextType {
   isBusinessOwner: boolean;
   isLoading: boolean;
   refreshData: () => Promise<void>;
+  loadOutletData: () => Promise<void>;
   // Multi-store helpers
   canViewAllOutlets: () => boolean;
   canCreateGlobalVendors: () => boolean;
@@ -67,21 +68,25 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
           
           if (user && !error) {
             setCurrentUser(user);
-            
-            // Get user's outlets
-            const { data: outlets, error: outletsError } = await dataService.getUserOutlets(user.id);
-            
-            if (outlets && !outletsError) {
-              setUserOutlets(outlets);
-              
-              // Set first outlet as current if none selected
-              if (outlets.length > 0 && !currentOutlet) {
-                setCurrentOutlet(outlets[0]);
-                
-                // Load business settings for the outlet
-                const { data: settings, error: settingsError } = await dataService.getBusinessSettings(outlets[0].id);
-                if (settings && !settingsError) {
-                  setBusinessSettings(settings);
+
+            // Only load outlets and business data if user has completed onboarding
+            // This prevents loading issues for new users who haven't set up their trial yet
+            if (user.outletId) {
+              // Get user's outlets
+              const { data: outlets, error: outletsError } = await dataService.getUserOutlets(user.id);
+
+              if (outlets && !outletsError) {
+                setUserOutlets(outlets);
+
+                // Set first outlet as current if none selected
+                if (outlets.length > 0 && !currentOutlet) {
+                  setCurrentOutlet(outlets[0]);
+
+                  // Load business settings for the outlet
+                  const { data: settings, error: settingsError } = await dataService.getBusinessSettings(outlets[0].id);
+                  if (settings && !settingsError) {
+                    setBusinessSettings(settings);
+                  }
                 }
               }
             }
@@ -172,21 +177,47 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
   const isSuperAdmin = currentUser?.role === 'super_admin';
   const isBusinessOwner = currentUser?.role === 'business_owner';
 
+  const loadOutletData = async () => {
+    if (currentUser) {
+      try {
+        // Load user outlets after trial setup
+        const { data: outlets, error: outletsError } = await dataService.getUserOutlets(currentUser.id);
+
+        if (outlets && !outletsError) {
+          setUserOutlets(outlets);
+
+          // Set first outlet as current
+          if (outlets.length > 0) {
+            setCurrentOutlet(outlets[0]);
+
+            // Load business settings for the outlet
+            const { data: settings, error: settingsError } = await dataService.getBusinessSettings(outlets[0].id);
+            if (settings && !settingsError) {
+              setBusinessSettings(settings);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error loading outlet data:', error);
+      }
+    }
+  };
+
   const refreshData = async () => {
     if (currentUser) {
       try {
         // Refresh user outlets
         const { data: outlets, error: outletsError } = await dataService.getUserOutlets(currentUser.id);
-        
+
         if (outlets && !outletsError) {
           setUserOutlets(outlets);
-          
+
           // Update current outlet if it still exists
           if (currentOutlet && !outlets.find(o => o.id === currentOutlet.id)) {
             setCurrentOutlet(outlets[0] || null);
           }
         }
-        
+
         // Refresh business settings if outlet exists
         if (currentOutlet) {
           const { data: settings, error: settingsError } = await dataService.getBusinessSettings(currentOutlet.id);
@@ -216,6 +247,7 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
     isBusinessOwner,
     isLoading,
     refreshData,
+    loadOutletData,
     // Multi-store helpers
     canViewAllOutlets,
     canCreateGlobalVendors,
