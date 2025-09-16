@@ -373,38 +373,9 @@ class AuthService {
       return { user: null, error: null };
     } catch (error) {
       console.error('Google sign-in error:', error);
-      return {
-        user: null,
-        error: error instanceof Error ? error.message : 'Google sign-in failed'
-      };
-    }
-  }
-
-  // Handle OAuth callback
-  async handleOAuthCallback(): Promise<{ data: any; error: string | null }> {
-    try {
-      const { data, error } = await supabase.auth.getSession();
-
-      if (error) {
-        console.error('OAuth session error:', error);
-        return { data: null, error: error.message };
-      }
-
-      if (data.session) {
-        // Clean the URL hash
-        if (window.location.hash) {
-          window.history.replaceState(null, '', window.location.pathname);
-        }
-
-        return { data: data.session, error: null };
-      }
-
-      return { data: null, error: 'No session found' };
-    } catch (error) {
-      console.error('Error handling OAuth callback:', error);
-      return {
-        data: null,
-        error: error instanceof Error ? error.message : 'OAuth callback failed'
+      return { 
+        user: null, 
+        error: error instanceof Error ? error.message : 'Google sign-in failed' 
       };
     }
   }
@@ -425,15 +396,11 @@ class AuthService {
           .from('users')
           .select('*')
           .eq('id', data.user.id)
-          .maybeSingle();
+          .single();
 
         if (profileError) {
-          console.error('Error fetching user profile:', profileError);
-          throw profileError;
-        }
-
-        // If user doesn't exist in users table (OAuth user), create profile
-        if (!profile) {
+          // If user doesn't exist in users table (OAuth user), create profile
+          if (profileError.details === 'The result contains 0 rows') {
             console.log('Creating profile for OAuth user during sign in:', data.user.id);
 
             // Extract name from user metadata (Google OAuth)
@@ -721,20 +688,10 @@ class AuthService {
   // Get user's outlets
   async getUserOutlets(userId: string): Promise<{ data: any[] | null; error: string | null }> {
     try {
-      // First get the user's outlet_id
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('outlet_id')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (userError) throw userError;
-      if (!userData?.outlet_id) return { data: [], error: null };
-
       const { data, error } = await supabase
         .from('outlets')
         .select('*')
-        .eq('id', userData.outlet_id);
+        .eq('id', (await supabase.from('users').select('outlet_id').eq('id', userId).single()).data?.outlet_id);
 
       if (error) throw error;
       return { data: data || [], error: null };
