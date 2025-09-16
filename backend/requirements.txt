@@ -1,18 +1,41 @@
+# Core FastAPI and server
 fastapi==0.104.1
 uvicorn==0.24.0
 python-multipart==0.0.6
-supabase==2.8.0
+
+# Supabase and database - Updated for compatibility
+supabase==2.9.1
 sqlalchemy==2.0.23
 psycopg2-binary==2.9.9
+
+# Data validation
 pydantic==2.8.2
 pydantic[email]==2.8.2
 pydantic-settings==2.0.3
 email-validator==2.1.0
-httpx==0.24.1
+
+# HTTP client - Updated for Supabase compatibility
+httpx==0.27.0
+
+# File handling
 aiofiles==23.2.1
+
+# AI/ML services
 openai==1.3.5
+
+# Environment and configuration
 python-dotenv==1.0.0
+
+# Payment processing
 stripe==7.8.0
+
+# Authentication and security
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
+
+# Force clean install - Updated packages
+gotrue>=2.4.2,<3.0.0
+postgrest>=0.16.1,<1.0.0
+storage3>=0.7.4,<1.0.0
+realtime>=2.0.2,<3.0.0
