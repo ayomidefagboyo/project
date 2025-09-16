@@ -457,6 +457,11 @@ export class DataService {
   // Business Settings operations
   async getBusinessSettings(outletId: string): Promise<{ data: BusinessSettings | null; error: string | null }> {
     try {
+      // Check if outletId is provided
+      if (!outletId) {
+        return { data: null, error: null };
+      }
+
       const { data, error } = await supabase
         .from(TABLES.BUSINESS_SETTINGS)
         .select('*')
@@ -467,9 +472,9 @@ export class DataService {
       return { data: data as BusinessSettings, error: null };
     } catch (error) {
       console.error('Get business settings error:', error);
-      return { 
-        data: null, 
-        error: error instanceof Error ? error.message : 'Failed to get business settings' 
+      return {
+        data: null,
+        error: error instanceof Error ? error.message : 'Failed to get business settings'
       };
     }
   }
