@@ -83,9 +83,11 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
                   setCurrentOutlet(outlets[0]);
 
                   // Load business settings for the outlet
-                  const { data: settings, error: settingsError } = await dataService.getBusinessSettings(outlets[0].id);
-                  if (settings && !settingsError) {
-                    setBusinessSettings(settings);
+                  if (outlets[0]?.id) {
+                    const { data: settings, error: settingsError } = await dataService.getBusinessSettings(outlets[0].id);
+                    if (settings && !settingsError) {
+                      setBusinessSettings(settings);
+                    }
                   }
                 }
               }
@@ -105,7 +107,7 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
   // Load business settings when outlet changes
   useEffect(() => {
     const loadBusinessSettings = async () => {
-      if (currentOutlet) {
+      if (currentOutlet?.id) {
         try {
           const { data: settings, error } = await dataService.getBusinessSettings(currentOutlet.id);
           if (settings && !error) {
@@ -191,9 +193,11 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
             setCurrentOutlet(outlets[0]);
 
             // Load business settings for the outlet
-            const { data: settings, error: settingsError } = await dataService.getBusinessSettings(outlets[0].id);
-            if (settings && !settingsError) {
-              setBusinessSettings(settings);
+            if (outlets[0]?.id) {
+              const { data: settings, error: settingsError } = await dataService.getBusinessSettings(outlets[0].id);
+              if (settings && !settingsError) {
+                setBusinessSettings(settings);
+              }
             }
           }
         }
@@ -219,7 +223,7 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
         }
 
         // Refresh business settings if outlet exists
-        if (currentOutlet) {
+        if (currentOutlet?.id) {
           const { data: settings, error: settingsError } = await dataService.getBusinessSettings(currentOutlet.id);
           if (settings && !settingsError) {
             setBusinessSettings(settings);
