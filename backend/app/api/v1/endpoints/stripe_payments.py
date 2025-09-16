@@ -10,7 +10,11 @@ from pydantic import BaseModel
 from app.core.security import require_auth, get_user_outlet_id
 
 # Initialize Stripe
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+stripe_key = os.getenv("STRIPE_SECRET_KEY")
+print(f"🔑 Stripe key loaded: {'✅ Yes' if stripe_key else '❌ No'}")
+if stripe_key:
+    print(f"🔑 Stripe key starts with: {stripe_key[:7]}...")
+stripe.api_key = stripe_key
 
 router = APIRouter()
 
@@ -92,8 +96,13 @@ async def create_subscription_checkout(
     Create a Stripe checkout session for subscriptions
     """
     try:
+        print(f"🚀 Creating subscription checkout for user: {current_user.get('id')}")
+        print(f"🎯 Price ID: {request.priceId}")
+        print(f"⏰ Trial days: {request.trialDays}")
+
         # Create or get customer
         customer_id = await get_or_create_stripe_customer(current_user)
+        print(f"👤 Customer ID: {customer_id}")
         
         # Prepare subscription data with trial
         subscription_data = {
@@ -142,14 +151,20 @@ async def create_subscription_checkout(
             'url': session.url
         }
     except stripe.error.StripeError as e:
+        print(f"❌ Stripe error: {str(e)}")
+        print(f"❌ Stripe error type: {type(e).__name__}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Stripe error: {str(e)}"
         )
     except Exception as e:
+        print(f"💥 Unexpected error: {str(e)}")
+        print(f"💥 Error type: {type(e).__name__}")
+        import traceback
+        print(f"💥 Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create checkout session"
+            detail=f"Failed to create checkout session: {str(e)}"
         )
 
 @router.post("/create-subscription")
