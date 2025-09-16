@@ -85,8 +85,8 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, onSwitchToSignup }) =>
         onSuccess?.();
       }
     } catch (err) {
-      setError('Google sign-in failed');
-      console.error('Google sign-in error:', err);
+      setError('Google authentication failed');
+      console.error('Google authentication error:', err);
     } finally {
       setIsGoogleLoading(false);
     }
@@ -160,7 +160,7 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, onSwitchToSignup }) =>
             ) : (
               <Chrome className="w-5 h-5" />
             )}
-            {isGoogleLoading ? 'Signing in...' : 'Continue with Google'}
+            {isGoogleLoading ? 'Authenticating...' : 'Continue with Google'}
           </button>
 
           {/* Divider */}
