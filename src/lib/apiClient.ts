@@ -21,7 +21,16 @@ class ApiClient {
   private token: string | null = null;
 
   constructor() {
-    this.baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
+    // Use localhost in development if no backend URL is set
+    const envUrl = import.meta.env.VITE_API_BASE_URL;
+    const defaultUrl = window.location.hostname === 'localhost'
+      ? 'http://localhost:8000/api/v1'
+      : 'https://compazz-backend.onrender.com/api/v1';
+
+    this.baseUrl = envUrl || defaultUrl;
+    console.log('ApiClient initialized with baseUrl:', this.baseUrl);
+    console.log('Environment VITE_API_BASE_URL:', envUrl);
+    console.log('Current hostname:', window.location.hostname);
   }
 
   /**
