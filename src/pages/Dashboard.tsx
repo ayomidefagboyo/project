@@ -99,9 +99,9 @@ const Dashboard: React.FC = () => {
         outlet_count: accessibleOutlets.length
       });
 
-      // Check trial status
+      // Check subscription status
       if (currentUser) {
-        checkTrialStatus();
+        checkSubscriptionStatus();
       }
 
       // Show onboarding for new users with no data
@@ -145,21 +145,28 @@ const Dashboard: React.FC = () => {
     }
   }, [dashboardView.selectedOutlets]);
 
-  // Check trial status
-  const checkTrialStatus = async () => {
+  // Check subscription status (Stripe-managed)
+  const checkSubscriptionStatus = async () => {
     if (!currentUser?.id) return;
 
     try {
-      const { data: userProfile, error } = await supabase
-        .from('users')
-        .select('trial_started_at, trial_ends_at')
-        .eq('id', currentUser.id)
+      const { data: subscription, error } = await supabase
+        .from('subscriptions')
+        .select('status, trial_end, plan_id')
+        .eq('user_id', currentUser.id)
         .single();
 
-      if (error || !userProfile) return;
+      if (error || !subscription) {
+        // No subscription yet - show onboarding
+        if (isBusinessOwner() && vendorInvoices.length === 0) {
+          setShowOnboarding(true);
+        }
+        return;
+      }
 
-      if (userProfile.trial_ends_at) {
-        const trialEndDate = new Date(userProfile.trial_ends_at);
+      // Handle trial status
+      if (subscription.status === 'trialing' && subscription.trial_end) {
+        const trialEndDate = new Date(subscription.trial_end);
         const now = new Date();
         const diffTime = trialEndDate.getTime() - now.getTime();
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -170,13 +177,16 @@ const Dashboard: React.FC = () => {
         if (diffDays <= 0) {
           setShowTrialExpired(true);
         }
+      } else if (subscription.status === 'past_due' || subscription.status === 'unpaid') {
+        // Show trial expired for payment issues
+        setShowTrialExpired(true);
       }
     } catch (error) {
-      console.error('Error checking trial status:', error);
+      console.error('Error checking subscription status:', error);
     }
   };
 
-  // Handle complete onboarding (combined setup and trial)
+  // Handle complete onboarding with Stripe trial
   const handleCompleteOnboarding = async () => {
     try {
       setLoading(true);
@@ -194,27 +204,26 @@ const Dashboard: React.FC = () => {
         if (updateError) throw updateError;
       }
 
-      // Start free trial
-      const trialEndDate = new Date();
-      trialEndDate.setDate(trialEndDate.getDate() + 7); // 7-day trial
+      // Start Stripe-managed trial with payment method collection
+      const successUrl = `${window.location.origin}/dashboard?trial=started&onboarding=complete`;
+      const cancelUrl = `${window.location.origin}/dashboard?trial=cancelled`;
 
-      const { error: trialError } = await supabase
-        .from('users')
-        .update({
-          trial_started_at: new Date().toISOString(),
-          trial_ends_at: trialEndDate.toISOString(),
-        })
-        .eq('id', currentUser?.id);
+      // Track trial start attempt
+      trackTrialEvent('started', 'startup', 7);
 
-      if (trialError) throw trialError;
+      // Create Stripe subscription with trial (default to startup plan)
+      const response = await stripeService.createSubscriptionCheckout(
+        'startup', // Default plan for trial
+        successUrl,
+        cancelUrl,
+        7 // 7-day trial
+      );
 
-      setShowOnboarding(false);
-
-      // Refresh the page or reload data
-      window.location.reload();
+      // Redirect to Stripe checkout
+      await stripeService.redirectToCheckout((response as any).sessionId);
     } catch (error) {
-      console.error('Error completing onboarding:', error);
-      setError('Failed to complete setup');
+      console.error('Error starting trial:', error);
+      setError('Failed to start trial. Please try again.');
     } finally {
       setLoading(false);
     }
