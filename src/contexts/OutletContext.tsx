@@ -63,9 +63,9 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
         const { session } = await authService.getCurrentSession();
         
         if (session?.user) {
-          // Get current user profile
+          // Get current user profile (this handles OAuth user creation)
           const { user, error } = await authService.getCurrentUser();
-          
+
           if (user && !error) {
             setCurrentUser(user);
 
@@ -90,8 +90,12 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
                     }
                   }
                 }
+              } else if (outletsError) {
+                console.error('Error loading outlets:', outletsError);
               }
             }
+          } else if (error) {
+            console.error('Error getting current user:', error);
           }
         }
       } catch (error) {
