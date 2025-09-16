@@ -32,19 +32,6 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, onSwitchToSignup }) =>
 
       if (user) {
         setCurrentUser(user);
-        
-        // Get user's outlets
-        const { data: outlets, error: outletsError } = await authService.getUserOutlets(user.id);
-        
-        if (outlets && !outletsError) {
-          setUserOutlets(outlets);
-          
-          // Set first outlet as current
-          if (outlets.length > 0) {
-            setCurrentOutlet(outlets[0]);
-          }
-        }
-
         onSuccess?.();
       }
     } catch (err) {
@@ -69,19 +56,6 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, onSwitchToSignup }) =>
 
       if (user) {
         setCurrentUser(user);
-        
-        // Get user's outlets
-        const { data: outlets, error: outletsError } = await authService.getUserOutlets(user.id);
-        
-        if (outlets && !outletsError) {
-          setUserOutlets(outlets);
-          
-          // Set first outlet as current
-          if (outlets.length > 0) {
-            setCurrentOutlet(outlets[0]);
-          }
-        }
-
         onSuccess?.();
       }
     } catch (err) {
