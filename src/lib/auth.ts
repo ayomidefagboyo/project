@@ -373,9 +373,38 @@ class AuthService {
       return { user: null, error: null };
     } catch (error) {
       console.error('Google sign-in error:', error);
-      return { 
-        user: null, 
-        error: error instanceof Error ? error.message : 'Google sign-in failed' 
+      return {
+        user: null,
+        error: error instanceof Error ? error.message : 'Google sign-in failed'
+      };
+    }
+  }
+
+  // Handle OAuth callback
+  async handleOAuthCallback(): Promise<{ data: any; error: string | null }> {
+    try {
+      const { data, error } = await supabase.auth.getSession();
+
+      if (error) {
+        console.error('OAuth session error:', error);
+        return { data: null, error: error.message };
+      }
+
+      if (data.session) {
+        // Clean the URL hash
+        if (window.location.hash) {
+          window.history.replaceState(null, '', window.location.pathname);
+        }
+
+        return { data: data.session, error: null };
+      }
+
+      return { data: null, error: 'No session found' };
+    } catch (error) {
+      console.error('Error handling OAuth callback:', error);
+      return {
+        data: null,
+        error: error instanceof Error ? error.message : 'OAuth callback failed'
       };
     }
   }
