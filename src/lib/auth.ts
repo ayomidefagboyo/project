@@ -134,20 +134,19 @@ class AuthService {
 
         console.log('Outlet created successfully:', outlet.id);
 
-        // Create business settings
+        // Create business settings with all required fields
         const { error: settingsError } = await supabase
           .from('business_settings')
           .insert({
             outlet_id: outlet.id,
             business_name: credentials.companyName,
             business_type: credentials.businessType,
-            default_currency: 'USD',
-            default_tax_rate: 8.25,
-            fiscal_year_end: '12-31',
-            accounting_method: 'accrual',
-            invoice_numbering: 'auto',
-            expense_approval_required: false,
-            multi_location_enabled: false,
+            theme: 'light',
+            language: 'en',
+            date_format: 'MM/DD/YYYY',
+            time_format: '12h',
+            currency: 'USD',
+            timezone: 'America/New_York'
           });
 
         if (settingsError) {
@@ -430,20 +429,19 @@ class AuthService {
               throw outletError;
             }
 
-            // Create business settings
+            // Create business settings with all required fields
             const { error: settingsError } = await supabase
               .from('business_settings')
               .insert({
                 outlet_id: outlet.id,
                 business_name: `${fullName}'s Business`,
                 business_type: 'retail',
-                default_currency: 'USD',
-                default_tax_rate: 8.25,
-                fiscal_year_end: '12-31',
-                accounting_method: 'accrual',
-                invoice_numbering: 'auto',
-                expense_approval_required: false,
-                multi_location_enabled: false,
+                theme: 'light',
+                language: 'en',
+                date_format: 'MM/DD/YYYY',
+                time_format: '12h',
+                currency: 'USD',
+                timezone: 'America/New_York'
               });
 
             if (settingsError) {
@@ -608,20 +606,19 @@ class AuthService {
               throw outletError;
             }
 
-            // Create business settings
+            // Create business settings with all required fields
             const { error: settingsError } = await supabase
               .from('business_settings')
               .insert({
                 outlet_id: outlet.id,
                 business_name: `${fullName}'s Business`,
                 business_type: 'retail',
-                default_currency: 'USD',
-                default_tax_rate: 8.25,
-                fiscal_year_end: '12-31',
-                accounting_method: 'accrual',
-                invoice_numbering: 'auto',
-                expense_approval_required: false,
-                multi_location_enabled: false,
+                theme: 'light',
+                language: 'en',
+                date_format: 'MM/DD/YYYY',
+                time_format: '12h',
+                currency: 'USD',
+                timezone: 'America/New_York'
               });
 
             if (settingsError) {
