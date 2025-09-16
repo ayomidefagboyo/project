@@ -1,5 +1,13 @@
 import { supabase } from './supabase';
-import { LoginCredentials, OwnerSignupCredentials, AuthResponse, User, Outlet, Permission, UserInvitation, AuthUser } from '@/types';
+import { LoginCredentials, AuthResponse, User, Outlet, Permission, UserInvitation, AuthUser } from '@/types';
+
+// Minimal signup - name, email, password + optional company
+export interface OwnerSignupCredentials {
+  name: string;
+  email: string;
+  password: string;
+  companyName?: string; // Optional
+}
 
 export interface InviteCredentials {
   email: string;
@@ -80,10 +88,16 @@ class AuthService {
         console.log('Starting owner signup process');
       }
 
-      // Create auth user
+      // Create auth user with minimal metadata
       const { data, error } = await supabase.auth.signUp({
         email: credentials.email,
         password: credentials.password,
+        options: {
+          data: {
+            name: credentials.name,
+            company_name: credentials.companyName || '' // Optional company name
+          }
+        }
       });
 
       if (error) {
@@ -94,99 +108,37 @@ class AuthService {
       console.log('Auth user created successfully:', data.user?.id);
 
       if (data.user) {
-        // Create outlet first
-        const outletData = {
-          name: credentials.companyName,
-          business_type: credentials.businessType,
-          status: 'active',
-          address: {
-            street: credentials.address.street,
-            city: credentials.address.city,
-            state: credentials.address.state,
-            zip: credentials.address.zip,
-            country: credentials.address.country || 'USA',
-          },
-          phone: credentials.phone,
-          email: credentials.email,
-          opening_hours: this.getDefaultOpeningHours(credentials.businessType),
-          tax_rate: 8.25,
-          currency: 'USD',
-          timezone: 'America/New_York',
-        };
+        // The database trigger will automatically create:
+        // 1. users table entry (minimal auth user)
 
-        console.log('Outlet data being sent:', outletData);
+        // Give the trigger a moment to complete
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
-        const { data: outlet, error: outletError } = await supabase
-          .from('outlets')
-          .insert(outletData)
-          .select()
+        // Get the created user profile
+        const { data: profile, error: profileError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', data.user.id)
           .single();
 
-        if (outletError) {
-          console.error('Outlet creation error details:', {
-            message: outletError.message,
-            details: outletError.details,
-            hint: outletError.hint,
-            code: outletError.code
-          });
-          throw outletError;
-        }
-
-        console.log('Outlet created successfully:', outlet.id);
-
-        // Create business settings with all required fields
-        const { error: settingsError } = await supabase
-          .from('business_settings')
-          .insert({
-            outlet_id: outlet.id,
-            business_name: credentials.companyName,
-            business_type: credentials.businessType,
-            theme: 'light',
-            language: 'en',
-            date_format: 'MM/DD/YYYY',
-            time_format: '12h',
-            currency: 'USD',
-            timezone: 'America/New_York'
-          });
-
-        if (settingsError) {
-          console.error('Business settings creation error:', settingsError);
-          throw settingsError;
-        }
-
-        console.log('Business settings created successfully');
-
-        // Create user profile as outlet owner
-        const { error: profileError } = await supabase
-          .from('users')
-          .insert({
-            id: data.user.id,
-            email: credentials.email,
-            name: credentials.name,
-            role: 'outlet_admin',
-            outlet_id: outlet.id,
-            permissions: this.getDefaultPermissions('outlet_admin'),
-            is_active: true,
-          });
-
         if (profileError) {
-          console.error('User profile creation error:', profileError);
+          console.error('Error fetching created profile:', profileError);
           throw profileError;
         }
 
-        console.log('User profile created successfully');
+        console.log('Profile created by trigger:', profile);
 
         const authUser: AuthUser = {
           id: data.user.id,
-          email: credentials.email,
-          name: credentials.name,
-          role: 'outlet_admin',
-          outletId: outlet.id,
-          permissions: this.getDefaultPermissions('outlet_admin'),
+          email: profile.email,
+          name: profile.name,
+          role: profile.role,
+          outletId: null, // No outlet - they'll set up business later
+          permissions: this.getDefaultPermissions('business_owner'),
           isOwner: true,
         };
 
-        console.log('Owner signup completed successfully:', authUser);
+        console.log('User signup completed successfully:', authUser);
         return { user: authUser, error: null };
       }
 
