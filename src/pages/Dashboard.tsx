@@ -496,83 +496,90 @@ const Dashboard: React.FC = () => {
 
       {/* Onboarding Popup */}
       {showOnboarding && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-background border rounded-xl shadow-2xl max-w-2xl w-full p-8 relative">
+        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 p-6">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl max-w-lg w-full relative border border-gray-100 dark:border-gray-800">
             <button
               onClick={() => setShowOnboarding(false)}
-              className="absolute top-4 right-4 text-muted-foreground hover:text-foreground transition-colors"
+              className="absolute top-6 right-6 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
             >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
 
-            {/* Single Step: Trial Setup */}
-            <div className="space-y-8">
-              <div className="text-center">
-                <h2 className="text-3xl font-bold text-foreground mb-3">
-                  🚀 Welcome to Compazz!
-                </h2>
-                <p className="text-lg text-muted-foreground">
-                  Start your 7-day free trial and transform your business finances
+            {/* Header */}
+            <div className="px-8 pt-8 pb-6 text-center border-b border-gray-50 dark:border-gray-800">
+              <h2 className="text-2xl font-semibold text-gray-900 dark:text-white tracking-tight">
+                Welcome to Compazz
+              </h2>
+              <p className="text-gray-500 dark:text-gray-400 mt-2 font-light">
+                Start your 7-day free trial
+              </p>
+            </div>
+
+            {/* Features */}
+            <div className="px-8 py-6">
+              <div className="space-y-4">
+                <div className="flex items-start space-x-4">
+                  <div className="w-10 h-10 bg-gray-50 dark:bg-gray-800 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <FileText className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-sm font-medium text-gray-900 dark:text-white">Receipt Scanning</h4>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 font-light">AI-powered document processing</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start space-x-4">
+                  <div className="w-10 h-10 bg-gray-50 dark:bg-gray-800 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <BarChart3 className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-sm font-medium text-gray-900 dark:text-white">Financial Reports</h4>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 font-light">Real-time insights and analytics</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start space-x-4">
+                  <div className="w-10 h-10 bg-gray-50 dark:bg-gray-800 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <Users className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-sm font-medium text-gray-900 dark:text-white">Team Collaboration</h4>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 font-light">Multi-user access and permissions</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 pt-6 border-t border-gray-50 dark:border-gray-800">
+                <p className="text-xs text-gray-400 dark:text-gray-500 text-center font-light">
+                  No charges during trial • Cancel anytime
                 </p>
               </div>
+            </div>
 
-              {/* Trial Features */}
-              <div className="bg-gradient-to-r from-blue-50 to-emerald-50 dark:from-blue-900/20 dark:to-emerald-900/20 p-8 rounded-xl">
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 text-center">
-                  ✨ Your Free Trial Includes Everything:
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="flex items-center space-x-3">
-                    <CheckCircle className="w-6 h-6 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                    <span className="text-base font-medium text-gray-700 dark:text-gray-300">AI-Powered Receipt Scanning</span>
+            {/* Actions */}
+            <div className="px-8 pb-8">
+              <Button
+                onClick={handleCompleteOnboarding}
+                disabled={loading}
+                className="w-full bg-gray-900 hover:bg-gray-800 dark:bg-white dark:hover:bg-gray-100 text-white dark:text-gray-900 font-medium py-3 rounded-lg transition-colors"
+              >
+                {loading ? (
+                  <div className="flex items-center justify-center">
+                    <div className="w-4 h-4 border-2 border-gray-300 border-t-transparent rounded-full animate-spin mr-2"></div>
+                    Starting Trial...
                   </div>
-                  <div className="flex items-center space-x-3">
-                    <CheckCircle className="w-6 h-6 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                    <span className="text-base font-medium text-gray-700 dark:text-gray-300">Smart Invoice Management</span>
-                  </div>
-                  <div className="flex items-center space-x-3">
-                    <CheckCircle className="w-6 h-6 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                    <span className="text-base font-medium text-gray-700 dark:text-gray-300">Real-Time Financial Reports</span>
-                  </div>
-                  <div className="flex items-center space-x-3">
-                    <CheckCircle className="w-6 h-6 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                    <span className="text-base font-medium text-gray-700 dark:text-gray-300">Multi-User Collaboration</span>
-                  </div>
-                </div>
-
-                <div className="mt-6 text-center">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    💳 <strong>No charges during trial</strong> • Cancel anytime • Full access to all features
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
-                <Button
-                  onClick={handleCompleteOnboarding}
-                  disabled={loading}
-                  className="bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white px-8 py-3 text-lg"
-                >
-                  {loading ? (
-                    <>
-                      <Loader2 className="mr-2 w-5 h-5 animate-spin" />
-                      Starting Trial...
-                    </>
-                  ) : (
-                    'Start My Free Trial'
-                  )}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setShowOnboarding(false)}
-                  className="px-8 py-3"
-                >
-                  Explore First
-                </Button>
-              </div>
-
+                ) : (
+                  'Start Free Trial'
+                )}
+              </Button>
+              <button
+                onClick={() => setShowOnboarding(false)}
+                className="mt-3 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors font-light"
+              >
+                Explore first
+              </button>
             </div>
           </div>
         </div>
