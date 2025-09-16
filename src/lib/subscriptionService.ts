@@ -170,8 +170,8 @@ export class SubscriptionService {
     const subscription = await this.getUserSubscription(userId);
 
     if (!subscription) {
-      // Default to startup plan features if no subscription
-      return this.planConfigs.startup.features[feature];
+      // No subscription yet - allow all features during onboarding
+      return true;
     }
 
     return subscription.features[feature];
@@ -182,8 +182,8 @@ export class SubscriptionService {
     const subscription = await this.getUserSubscription(userId);
 
     if (!subscription) {
-      // Default to startup plan limit
-      return currentOutletCount < this.planConfigs.startup.features.maxOutlets;
+      // No subscription yet - allow unlimited during onboarding
+      return true;
     }
 
     const maxOutlets = subscription.features.maxOutlets;

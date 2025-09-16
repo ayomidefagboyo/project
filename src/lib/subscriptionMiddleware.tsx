@@ -10,22 +10,7 @@ export class SubscriptionMiddleware {
     onAccessDenied?: () => void
   ): Promise<boolean> {
     try {
-      // First check if user has started trial
-      const { supabase } = await import('../lib/supabase');
-      const { data: userProfile, error: userError } = await supabase
-        .from('users')
-        .select('trial_started_at')
-        .eq('id', userId)
-        .single();
-
-      const trialStarted = !userError && userProfile?.trial_started_at;
-
-      if (!trialStarted) {
-        // User hasn't started trial yet - give them access to all features during onboarding
-        return true;
-      }
-
-      // User has started trial - check their subscription
+      // Check subscription for feature access
       const hasAccess = await subscriptionService.hasFeatureAccess(userId, feature);
 
       if (!hasAccess && onAccessDenied) {
@@ -35,7 +20,8 @@ export class SubscriptionMiddleware {
       return hasAccess;
     } catch (error) {
       console.error('Error checking feature access:', error);
-      return false;
+      // Allow access during onboarding if subscription check fails
+      return true;
     }
   }
 
@@ -121,7 +107,6 @@ export class SubscriptionMiddleware {
     const [currentCount, setCurrentCount] = React.useState<number>(0);
     const [maxOutlets, setMaxOutlets] = React.useState<number>(0);
     const [loading, setLoading] = React.useState(true);
-    const [hasStartedTrial, setHasStartedTrial] = React.useState<boolean | null>(null);
 
     React.useEffect(() => {
       if (!userId) {
@@ -129,50 +114,35 @@ export class SubscriptionMiddleware {
         return;
       }
 
-      // First check if user has started trial or has subscription
-      import('../lib/supabase').then(({ supabase }) => {
-        supabase
-          .from('users')
-          .select('trial_started_at')
-          .eq('id', userId)
-          .single()
-          .then(({ data: userProfile, error: userError }) => {
-            const trialStarted = !userError && userProfile?.trial_started_at;
-            setHasStartedTrial(!!trialStarted);
+      // Check subscription for outlet limits
+      Promise.all([
+        subscriptionService.getUserOutletCount(userId),
+        subscriptionService.getUserSubscription(userId)
+      ]).then(([count, subscription]) => {
+        setCurrentCount(count);
 
-            if (!trialStarted) {
-              // User hasn't started trial yet - give them unlimited access during onboarding
-              setCurrentCount(0);
-              setMaxOutlets(-1); // Unlimited during onboarding
-              setCanAddOutlet(true);
-              setLoading(false);
-              return;
-            }
-
-            // User has started trial - check their subscription
-            Promise.all([
-              subscriptionService.getUserOutletCount(userId),
-              subscriptionService.getUserSubscription(userId)
-            ]).then(([count, subscription]) => {
-              setCurrentCount(count);
-              // Default to startup plan features if no subscription
-              const max = subscription?.features.maxOutlets || subscriptionService.getPlanConfig('startup').features.maxOutlets;
-              setMaxOutlets(max);
-              setCanAddOutlet(max === -1 || count < max);
-              setLoading(false);
-            }).catch((error) => {
-              console.warn('Error loading outlet limits, defaulting to startup plan:', error);
-              // Fallback to startup plan limits on error
-              setCurrentCount(0);
-              setMaxOutlets(1);
-              setCanAddOutlet(true);
-              setLoading(false);
-            });
-          });
+        if (!subscription) {
+          // No subscription yet - give unlimited access during onboarding
+          setMaxOutlets(-1);
+          setCanAddOutlet(true);
+        } else {
+          // Use subscription limits
+          const max = subscription.features.maxOutlets;
+          setMaxOutlets(max);
+          setCanAddOutlet(max === -1 || count < max);
+        }
+        setLoading(false);
+      }).catch((error) => {
+        console.warn('Error loading outlet limits, allowing access during onboarding:', error);
+        // Fallback to unlimited access during onboarding
+        setCurrentCount(0);
+        setMaxOutlets(-1);
+        setCanAddOutlet(true);
+        setLoading(false);
       });
     }, [userId]);
 
-    return { canAddOutlet, currentCount, maxOutlets, loading, hasStartedTrial };
+    return { canAddOutlet, currentCount, maxOutlets, loading };
   }
 }
 
