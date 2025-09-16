@@ -54,24 +54,40 @@ class ApiClient {
   }
 
   /**
-   * Get authentication token from localStorage
+   * Get authentication token from localStorage or Supabase session
    */
-  private getStoredToken(): string | null {
+  private async getStoredToken(): Promise<string | null> {
     if (this.token) return this.token;
-    return localStorage.getItem('auth_token');
+
+    // First try localStorage for custom tokens
+    const customToken = localStorage.getItem('auth_token');
+    if (customToken) return customToken;
+
+    // Fallback to Supabase session token
+    try {
+      const { supabase } = await import('./supabase');
+      const { data: { session } } = await supabase.auth.getSession();
+      return session?.access_token || null;
+    } catch (error) {
+      console.error('Error getting Supabase session:', error);
+      return null;
+    }
   }
 
   /**
    * Get headers for API requests
    */
-  private getHeaders(): HeadersInit {
+  private async getHeaders(): Promise<HeadersInit> {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
     };
 
-    const token = this.getStoredToken();
+    const token = await this.getStoredToken();
     if (token) {
       headers.Authorization = `Bearer ${token}`;
+      console.log('🔐 Auth token found and added to headers');
+    } else {
+      console.warn('⚠️ No auth token found in localStorage or Supabase session');
     }
 
     return headers;
@@ -125,7 +141,7 @@ class ApiClient {
 
       const response = await fetch(url.toString(), {
         method: 'GET',
-        headers: this.getHeaders(),
+        headers: await this.getHeaders(),
       });
 
       return await this.handleResponse<T>(response);
@@ -145,7 +161,7 @@ class ApiClient {
     try {
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
         method: 'POST',
-        headers: this.getHeaders(),
+        headers: await this.getHeaders(),
         body: data ? JSON.stringify(data) : undefined,
       });
 
@@ -166,7 +182,7 @@ class ApiClient {
     try {
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
         method: 'PUT',
-        headers: this.getHeaders(),
+        headers: await this.getHeaders(),
         body: data ? JSON.stringify(data) : undefined,
       });
 
@@ -187,7 +203,7 @@ class ApiClient {
     try {
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
         method: 'PATCH',
-        headers: this.getHeaders(),
+        headers: await this.getHeaders(),
         body: data ? JSON.stringify(data) : undefined,
       });
 
@@ -208,7 +224,7 @@ class ApiClient {
     try {
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
         method: 'DELETE',
-        headers: this.getHeaders(),
+        headers: await this.getHeaders(),
       });
 
       return await this.handleResponse<T>(response);
