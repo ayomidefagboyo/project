@@ -1,58 +1,81 @@
-import { apiClient } from './apiClient';
 import { supabase } from './supabase';
-import { emailService } from './emailService';
-import { User, UserRole } from '@/types';
+import { logger } from './logger';
+import { ApiClient } from './apiClient';
+import { LoginCredentials, OwnerSignupCredentials, AuthResponse, User, Outlet, Permission, UserInvitation, AuthUser } from '@/types';
 
-export interface AuthUser {
-  id: string;
-  email: string;
-  name: string;
-  role: UserRole;
-  outletId: string;
-  permissions: string[];
-  isOwner: boolean;
-}
-
-export interface LoginCredentials {
+export interface InviteCredentials {
   email: string;
   password: string;
-}
-
-export interface OwnerSignupCredentials {
-  email: string;
-  password: string;
-  name: string;
-  companyName: string;
-  businessType?: 'supermarket' | 'restaurant' | 'lounge' | 'retail' | 'cafe';
-  phone?: string;
-  address?: {
-    street?: string;
-    city?: string;
-    state?: string;
-    zip?: string;
-    country?: string;
-  };
-}
-
-export interface InviteUserData {
-  email: string;
-  name: string;
-  role: UserRole;
-  outletId: string;
-}
-
-export interface AuthResponse {
-  user: AuthUser | null;
-  error: string | null;
-}
-
-export interface InviteResponse {
-  success: boolean;
-  error: string | null;
-  inviteId?: string;
+  inviteId: string;
 }
 
 class AuthService {
+  private apiClient: ApiClient;
+
+  constructor() {
+    this.apiClient = new ApiClient();
+  }
+
+  // Common default permissions for roles
+  getDefaultPermissions(role: string): Permission[] {
+    switch (role) {
+      case 'outlet_admin':
+        return [
+          'view_dashboard',
+          'manage_invoices',
+          'manage_expenses',
+          'view_reports',
+          'manage_vendors',
+          'approve_invoices',
+          'view_analytics',
+          'manage_staff',
+          'view_audit_trail'
+        ] as Permission[];
+      case 'staff':
+        return [
+          'view_dashboard',
+          'create_invoices',
+          'create_expenses',
+          'view_reports'
+        ] as Permission[];
+      case 'business_owner':
+        return [
+          'view_dashboard',
+          'manage_invoices',
+          'manage_expenses',
+          'view_reports',
+          'manage_vendors',
+          'approve_invoices',
+          'view_analytics',
+          'manage_staff',
+          'view_audit_trail',
+          'view_all_outlets',
+          'create_global_vendors',
+          'approve_vendor_invoices',
+          'view_consolidated_reports'
+        ] as Permission[];
+      case 'super_admin':
+        return [
+          'view_dashboard',
+          'manage_invoices',
+          'manage_expenses',
+          'view_reports',
+          'manage_vendors',
+          'approve_invoices',
+          'view_analytics',
+          'manage_staff',
+          'view_audit_trail',
+          'view_all_outlets',
+          'create_global_vendors',
+          'approve_vendor_invoices',
+          'view_consolidated_reports',
+          'manage_system'
+        ] as Permission[];
+      default:
+        return [];
+    }
+  }
+
   // Company owner signup - creates outlet and owner account
   async signUpOwner(credentials: OwnerSignupCredentials): Promise<AuthResponse> {
     try {
@@ -60,7 +83,7 @@ class AuthService {
       if (import.meta.env.VITE_DEBUG === 'true') {
         console.log('Starting owner signup process');
       }
-      
+
       // Create auth user
       const { data, error } = await supabase.auth.signUp({
         email: credentials.email,
@@ -75,27 +98,21 @@ class AuthService {
       console.log('Auth user created successfully:', data.user?.id);
 
       if (data.user) {
-        const businessType = credentials.businessType || 'retail';
-        const phone = credentials.phone ?? '';
-        const address = {
-          street: credentials.address?.street ?? '',
-          city: credentials.address?.city ?? '',
-          state: credentials.address?.state ?? '',
-          zip: credentials.address?.zip ?? '',
-          country: credentials.address?.country ?? 'USA',
-        };
-
-        console.log('Creating outlet with data:', { businessType, phone, address });
-
         // Create outlet first
         const outletData = {
           name: credentials.companyName,
-          business_type: businessType,
+          business_type: credentials.businessType,
           status: 'active',
-          address: address,
-          phone: phone,
+          address: {
+            street: credentials.address.street,
+            city: credentials.address.city,
+            state: credentials.address.state,
+            zip: credentials.address.zip,
+            country: credentials.address.country || 'USA',
+          },
+          phone: credentials.phone,
           email: credentials.email,
-          opening_hours: this.getDefaultOpeningHours(businessType),
+          opening_hours: this.getDefaultOpeningHours(credentials.businessType),
           tax_rate: 8.25,
           currency: 'USD',
           timezone: 'America/New_York',
@@ -127,14 +144,14 @@ class AuthService {
           .insert({
             outlet_id: outlet.id,
             business_name: credentials.companyName,
-            business_type: businessType,
-            tax_number: 'TAX-' + Date.now(),
-            theme: 'auto',
-            language: 'en',
-            date_format: 'MM/DD/YYYY',
-            time_format: '12h',
-            currency: 'USD',
-            timezone: 'America/New_York',
+            business_type: credentials.businessType,
+            default_currency: 'USD',
+            default_tax_rate: 8.25,
+            fiscal_year_end: '12-31',
+            accounting_method: 'accrual',
+            invoice_numbering: 'auto',
+            expense_approval_required: false,
+            multi_location_enabled: false,
           });
 
         if (settingsError) {
@@ -181,46 +198,40 @@ class AuthService {
       return { user: null, error: 'No user data received' };
     } catch (error) {
       console.error('Owner signup error details:', error);
-      return { 
-        user: null, 
-        error: error instanceof Error ? error.message : 'Owner signup failed' 
+      return {
+        user: null,
+        error: error instanceof Error ? error.message : 'Owner signup failed'
       };
     }
   }
 
   // Invite team member to company
-  async inviteUser(inviteData: InviteUserData, invitedByUserId: string): Promise<InviteResponse> {
+  async inviteTeamMember(outletId: string, invitedByUserId: string, inviteData: {
+    email: string;
+    role: 'outlet_admin' | 'staff';
+    permissions: Permission[];
+  }): Promise<{ data: UserInvitation | null; error: string | null }> {
     try {
-      console.log('Starting user invitation with data:', { ...inviteData, invitedByUserId });
-      
       // Create invitation record
-      const { data: invite, error: inviteError } = await supabase
+      const invitation = {
+        email: inviteData.email,
+        role: inviteData.role,
+        permissions: inviteData.permissions,
+        outlet_id: outletId,
+        invited_by: invitedByUserId,
+        status: 'pending',
+        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days
+      };
+
+      const { data: inviteRecord, error: inviteError } = await supabase
         .from('user_invitations')
-        .insert({
-          email: inviteData.email,
-          name: inviteData.name,
-          role: inviteData.role,
-          outlet_id: inviteData.outletId,
-          invited_by: invitedByUserId,
-          status: 'pending',
-          expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days
-        })
+        .insert(invitation)
         .select()
         .single();
 
-      if (inviteError) {
-        console.error('Supabase invitation error details:', {
-          message: inviteError.message,
-          details: inviteError.details,
-          hint: inviteError.hint,
-          code: inviteError.code
-        });
-        throw inviteError;
-      }
+      if (inviteError) throw inviteError;
 
-      console.log('Invitation created successfully:', invite.id);
-
-      // Send invitation email using Supabase email service
+      // Send invitation email
       try {
         // Get outlet details for the email
         const { data: outlet, error: outletError } = await supabase
@@ -244,43 +255,32 @@ class AuthService {
           console.warn('Could not fetch inviter details for email:', inviterError);
         }
 
-        // Generate invitation link
-        const invitationLink = `${import.meta.env.VITE_APP_URL}/accept-invitation?token=${invite.token}`;
-
-        // Send the invitation email
-        const emailResult = await emailService.sendInvitationEmail({
-          to: inviteData.email,
-          name: inviteData.name,
-          role: inviteData.role,
-          outletName: outlet?.name || 'Your Company',
-          inviterName: inviter?.name || 'Team Admin',
-          invitationLink,
-          expiresIn: '7 days'
+        // In a real app, you would send an email here
+        const inviteLink = `${import.meta.env.VITE_APP_URL}/invite/${inviteRecord.id}`;
+        console.log('Team member invitation created:', {
+          email: inviteData.email,
+          inviteLink,
+          outlet: outlet?.name,
+          inviter: inviter?.name
         });
 
-        if (!emailResult.success) {
-          console.warn('Email sending failed, but invitation was created:', emailResult.error);
-        }
+        return { data: inviteRecord, error: null };
       } catch (emailError) {
-        console.warn('Email sending failed, but invitation was created:', emailError);
+        console.error('Error sending invitation email:', emailError);
+        // Don't fail the invitation creation if email fails
+        return { data: inviteRecord, error: null };
       }
-
-      return { 
-        success: true, 
-        error: null, 
-        inviteId: invite.id 
-      };
     } catch (error) {
-      console.error('Invite user error details:', error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Failed to invite user' 
+      console.error('Invite team member error:', error);
+      return {
+        data: null,
+        error: error instanceof Error ? error.message : 'Failed to create invitation'
       };
     }
   }
 
-  // Accept invitation and create user account
-  async acceptInvitation(inviteId: string, password: string): Promise<AuthResponse> {
+  // Complete team member signup from invitation
+  async signUpFromInvite(credentials: InviteCredentials): Promise<AuthResponse> {
     try {
       // Get invitation details
       const { data: invite, error: inviteError } = await supabase
@@ -308,16 +308,16 @@ class AuthService {
       if (error) throw error;
 
       if (data.user) {
-        // Create user profile
+        // Create user profile with invited role and permissions
         const { error: profileError } = await supabase
           .from('users')
           .insert({
             id: data.user.id,
             email: invite.email,
-            name: invite.name,
+            name: credentials.name || invite.email.split('@')[0],
             role: invite.role,
             outlet_id: invite.outlet_id,
-            permissions: this.getDefaultPermissions(invite.role),
+            permissions: invite.permissions,
             is_active: true,
           });
 
@@ -326,21 +326,17 @@ class AuthService {
         // Mark invitation as accepted
         await supabase
           .from('user_invitations')
-          .update({ 
-            status: 'accepted',
-            accepted_at: new Date().toISOString(),
-            accepted_by: data.user.id
-          })
+          .update({ status: 'accepted' })
           .eq('id', inviteId);
 
         const authUser: AuthUser = {
           id: data.user.id,
           email: invite.email,
-          name: invite.name,
+          name: credentials.name || invite.email.split('@')[0],
           role: invite.role,
           outletId: invite.outlet_id,
-          permissions: this.getDefaultPermissions(invite.role),
-          isOwner: false,
+          permissions: invite.permissions,
+          isOwner: invite.role === 'outlet_admin',
         };
 
         return { user: authUser, error: null };
@@ -348,15 +344,15 @@ class AuthService {
 
       return { user: null, error: 'No user data received' };
     } catch (error) {
-      console.error('Accept invitation error:', error);
-      return { 
-        user: null, 
-        error: error instanceof Error ? error.message : 'Failed to accept invitation' 
+      console.error('Signup from invite error:', error);
+      return {
+        user: null,
+        error: error instanceof Error ? error.message : 'Signup from invitation failed'
       };
     }
   }
 
-  // Sign in with Google
+  // Sign in with Google OAuth
   async signInWithGoogle(): Promise<AuthResponse> {
     try {
       const { data, error } = await supabase.auth.signInWithOAuth({
@@ -373,9 +369,9 @@ class AuthService {
       return { user: null, error: null };
     } catch (error) {
       console.error('Google sign-in error:', error);
-      return { 
-        user: null, 
-        error: error instanceof Error ? error.message : 'Google sign-in failed' 
+      return {
+        user: null,
+        error: error instanceof Error ? error.message : 'Google sign-in failed'
       };
     }
   }
@@ -434,7 +430,7 @@ class AuthService {
               .single();
 
             if (outletError) {
-              console.error('Failed to create outlet for OAuth user:', outletError);
+              console.error('Outlet creation error during OAuth:', outletError);
               throw outletError;
             }
 
@@ -445,45 +441,45 @@ class AuthService {
                 outlet_id: outlet.id,
                 business_name: `${fullName}'s Business`,
                 business_type: 'retail',
-                tax_number: 'TAX-' + Date.now(),
-                theme: 'auto',
-                language: 'en',
-                date_format: 'MM/DD/YYYY',
-                time_format: '12h',
-                currency: 'USD',
-                timezone: 'America/New_York',
+                default_currency: 'USD',
+                default_tax_rate: 8.25,
+                fiscal_year_end: '12-31',
+                accounting_method: 'accrual',
+                invoice_numbering: 'auto',
+                expense_approval_required: false,
+                multi_location_enabled: false,
               });
 
             if (settingsError) {
-              console.error('Failed to create business settings for OAuth user:', settingsError);
+              console.error('Business settings creation error during OAuth:', settingsError);
               throw settingsError;
             }
 
-            // Create user profile for OAuth user as outlet admin
+            // Create user profile
             const { data: newProfile, error: createError } = await supabase
               .from('users')
               .insert({
                 id: data.user.id,
                 email: data.user.email!,
                 name: fullName,
-                role: 'outlet_admin',
+                role: 'business_owner',
                 outlet_id: outlet.id,
-                permissions: this.getDefaultPermissions('outlet_admin'),
+                permissions: this.getDefaultPermissions('business_owner'),
                 is_active: true,
               })
               .select()
               .single();
 
             if (createError) {
-              console.error('Failed to create OAuth user profile during sign in:', createError);
+              console.error('User profile creation error during OAuth:', createError);
               throw createError;
             }
 
             const authUser: AuthUser = {
-              id: newProfile.id,
-              email: newProfile.email,
-              name: newProfile.name,
-              role: newProfile.role,
+              id: data.user.id,
+              email: data.user.email!,
+              name: fullName,
+              role: 'business_owner',
               outletId: newProfile.outlet_id,
               permissions: newProfile.permissions || [],
               isOwner: true,
@@ -511,9 +507,9 @@ class AuthService {
       return { user: null, error: 'No user data received' };
     } catch (error) {
       console.error('Sign in error:', error);
-      return { 
-        user: null, 
-        error: error instanceof Error ? error.message : 'Sign in failed' 
+      return {
+        user: null,
+        error: error instanceof Error ? error.message : 'Sign in failed'
       };
     }
   }
@@ -526,9 +522,21 @@ class AuthService {
       return { error: null };
     } catch (error) {
       console.error('Sign out error:', error);
-      return { 
-        error: error instanceof Error ? error.message : 'Sign out failed' 
-      };
+      return { error: error instanceof Error ? error.message : 'Sign out failed' };
+    }
+  }
+
+  // Reset password
+  async resetPassword(email: string): Promise<{ error: string | null }> {
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${import.meta.env.VITE_APP_URL}/reset-password`,
+      });
+      if (error) throw error;
+      return { error: null };
+    } catch (error) {
+      console.error('Reset password error:', error);
+      return { error: error instanceof Error ? error.message : 'Reset password failed' };
     }
   }
 
@@ -536,13 +544,12 @@ class AuthService {
   async getCurrentSession() {
     try {
       const { data: { session }, error } = await supabase.auth.getSession();
-      if (error) throw error;
-      return { session, error: null };
+      return { session, error: error ? error.message : null };
     } catch (error) {
       console.error('Get session error:', error);
-      return { 
-        session: null, 
-        error: error instanceof Error ? error.message : 'Failed to get session' 
+      return {
+        session: null,
+        error: error instanceof Error ? error.message : 'Failed to get session'
       };
     }
   }
@@ -601,7 +608,7 @@ class AuthService {
               .single();
 
             if (outletError) {
-              console.error('Failed to create outlet for OAuth user:', outletError);
+              console.error('Outlet creation error during getCurrentUser:', outletError);
               throw outletError;
             }
 
@@ -612,54 +619,51 @@ class AuthService {
                 outlet_id: outlet.id,
                 business_name: `${fullName}'s Business`,
                 business_type: 'retail',
-                tax_number: 'TAX-' + Date.now(),
-                theme: 'auto',
-                language: 'en',
-                date_format: 'MM/DD/YYYY',
-                time_format: '12h',
-                currency: 'USD',
-                timezone: 'America/New_York',
+                default_currency: 'USD',
+                default_tax_rate: 8.25,
+                fiscal_year_end: '12-31',
+                accounting_method: 'accrual',
+                invoice_numbering: 'auto',
+                expense_approval_required: false,
+                multi_location_enabled: false,
               });
 
             if (settingsError) {
-              console.error('Failed to create business settings for OAuth user:', settingsError);
+              console.error('Business settings creation error during getCurrentUser:', settingsError);
               throw settingsError;
             }
 
-            // Create user profile for OAuth user as outlet admin
+            // Create user profile
             const { data: newProfile, error: createError } = await supabase
               .from('users')
               .insert({
                 id: user.id,
                 email: user.email!,
                 name: fullName,
-                role: 'outlet_admin',
+                role: 'business_owner',
                 outlet_id: outlet.id,
-                permissions: this.getDefaultPermissions('outlet_admin'),
+                permissions: this.getDefaultPermissions('business_owner'),
                 is_active: true,
               })
               .select()
               .single();
 
             if (createError) {
-              console.error('Failed to create OAuth user profile:', createError);
+              console.error('User profile creation error during getCurrentUser:', createError);
               throw createError;
             }
 
             const authUser: AuthUser = {
-              id: newProfile.id,
-              email: newProfile.email,
-              name: newProfile.name,
-              role: newProfile.role,
+              id: user.id,
+              email: user.email!,
+              name: fullName,
+              role: 'business_owner',
               outletId: newProfile.outlet_id,
               permissions: newProfile.permissions || [],
               isOwner: true,
             };
 
             return { user: authUser, error: null };
-          }
-
-          throw profileError;
         }
 
         const authUser: AuthUser = {
@@ -678,9 +682,9 @@ class AuthService {
       return { user: null, error: 'No user found' };
     } catch (error) {
       console.error('Get current user error:', error);
-      return { 
-        user: null, 
-        error: error instanceof Error ? error.message : 'Failed to get user' 
+      return {
+        user: null,
+        error: error instanceof Error ? error.message : 'Failed to get user'
       };
     }
   }
@@ -697,143 +701,128 @@ class AuthService {
       return { data: data || [], error: null };
     } catch (error) {
       console.error('Get user outlets error:', error);
-      return { 
-        data: null, 
-        error: error instanceof Error ? error.message : 'Failed to get user outlets' 
+      return {
+        data: null,
+        error: error instanceof Error ? error.message : 'Failed to get user outlets'
       };
     }
   }
 
-  // Reset password
-  async resetPassword(email: string): Promise<{ error: string | null }> {
+  // Reset password with token
+  async updatePassword(password: string): Promise<{ error: string | null }> {
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${import.meta.env.VITE_APP_URL}/reset-password`,
-      });
-      if (error) throw error;
-      return { error: null };
-    } catch (error) {
-      console.error('Reset password error:', error);
-      return { 
-        error: error instanceof Error ? error.message : 'Password reset failed' 
-      };
-    }
-  }
-
-  // Update password
-  async updatePassword(newPassword: string): Promise<{ error: string | null }> {
-    try {
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword,
-      });
+      const { error } = await supabase.auth.updateUser({ password });
       if (error) throw error;
       return { error: null };
     } catch (error) {
       console.error('Update password error:', error);
-      return { 
-        error: error instanceof Error ? error.message : 'Password update failed' 
-      };
+      return { error: error instanceof Error ? error.message : 'Password update failed' };
     }
   }
 
-  // Get default opening hours based on business type
+  // Update user profile
+  async updateUserProfile(updates: Partial<AuthUser>): Promise<{ error: string | null }> {
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update(updates)
+        .eq('id', updates.id);
+
+      if (error) throw error;
+      return { error: null };
+    } catch (error) {
+      console.error('Update user profile error:', error);
+      return { error: error instanceof Error ? error.message : 'Profile update failed' };
+    }
+  }
+
+  // Helper method to get default opening hours based on business type
   private getDefaultOpeningHours(businessType: string) {
+    const defaultHours = {
+      monday: { open: '09:00', close: '17:00', closed: false },
+      tuesday: { open: '09:00', close: '17:00', closed: false },
+      wednesday: { open: '09:00', close: '17:00', closed: false },
+      thursday: { open: '09:00', close: '17:00', closed: false },
+      friday: { open: '09:00', close: '17:00', closed: false },
+      saturday: { open: '10:00', close: '16:00', closed: false },
+      sunday: { open: '10:00', close: '16:00', closed: true },
+    };
+
     switch (businessType) {
-      case 'supermarket':
-        return {
-          monday: { open: '08:00', close: '22:00' },
-          tuesday: { open: '08:00', close: '22:00' },
-          wednesday: { open: '08:00', close: '22:00' },
-          thursday: { open: '08:00', close: '22:00' },
-          friday: { open: '08:00', close: '23:00' },
-          saturday: { open: '09:00', close: '23:00' },
-          sunday: { open: '09:00', close: '21:00' }
-        };
       case 'restaurant':
         return {
-          monday: { open: '11:00', close: '22:00' },
-          tuesday: { open: '11:00', close: '22:00' },
-          wednesday: { open: '11:00', close: '22:00' },
-          thursday: { open: '11:00', close: '23:00' },
-          friday: { open: '11:00', close: '00:00' },
-          saturday: { open: '10:00', close: '00:00' },
-          sunday: { open: '10:00', close: '22:00' }
+          monday: { open: '11:00', close: '22:00', closed: false },
+          tuesday: { open: '11:00', close: '22:00', closed: false },
+          wednesday: { open: '11:00', close: '22:00', closed: false },
+          thursday: { open: '11:00', close: '22:00', closed: false },
+          friday: { open: '11:00', close: '23:00', closed: false },
+          saturday: { open: '11:00', close: '23:00', closed: false },
+          sunday: { open: '11:00', close: '21:00', closed: false },
         };
       case 'lounge':
         return {
-          monday: { open: '17:00', close: '02:00' },
-          tuesday: { open: '17:00', close: '02:00' },
-          wednesday: { open: '17:00', close: '02:00' },
-          thursday: { open: '17:00', close: '02:00' },
-          friday: { open: '17:00', close: '03:00' },
-          saturday: { open: '17:00', close: '03:00' },
-          sunday: { open: '17:00', close: '02:00' }
+          monday: { open: '17:00', close: '02:00', closed: true },
+          tuesday: { open: '17:00', close: '02:00', closed: true },
+          wednesday: { open: '17:00', close: '02:00', closed: false },
+          thursday: { open: '17:00', close: '02:00', closed: false },
+          friday: { open: '17:00', close: '03:00', closed: false },
+          saturday: { open: '17:00', close: '03:00', closed: false },
+          sunday: { open: '17:00', close: '02:00', closed: false },
+        };
+      case 'cafe':
+        return {
+          monday: { open: '07:00', close: '19:00', closed: false },
+          tuesday: { open: '07:00', close: '19:00', closed: false },
+          wednesday: { open: '07:00', close: '19:00', closed: false },
+          thursday: { open: '07:00', close: '19:00', closed: false },
+          friday: { open: '07:00', close: '20:00', closed: false },
+          saturday: { open: '08:00', close: '20:00', closed: false },
+          sunday: { open: '08:00', close: '18:00', closed: false },
+        };
+      case 'supermarket':
+        return {
+          monday: { open: '06:00', close: '22:00', closed: false },
+          tuesday: { open: '06:00', close: '22:00', closed: false },
+          wednesday: { open: '06:00', close: '22:00', closed: false },
+          thursday: { open: '06:00', close: '22:00', closed: false },
+          friday: { open: '06:00', close: '22:00', closed: false },
+          saturday: { open: '06:00', close: '22:00', closed: false },
+          sunday: { open: '08:00', close: '20:00', closed: false },
         };
       default:
-        return {
-          monday: { open: '09:00', close: '18:00' },
-          tuesday: { open: '09:00', close: '18:00' },
-          wednesday: { open: '09:00', close: '18:00' },
-          thursday: { open: '09:00', close: '18:00' },
-          friday: { open: '09:00', close: '18:00' },
-          saturday: { open: '10:00', close: '16:00' },
-          sunday: { open: '10:00', close: '16:00' }
-        };
+        return defaultHours;
     }
   }
 
-  // Get default permissions based on role
-  private getDefaultPermissions(role: UserRole): string[] {
-    switch (role) {
-      case 'super_admin':
-        return [
-          'view_dashboard', 'view_sales', 'create_sales', 'edit_sales', 'delete_sales',
-          'view_inventory', 'manage_inventory', 'view_expenses', 'manage_expenses',
-          'view_reports', 'generate_reports', 'manage_users', 'manage_outlets',
-          'view_analytics', 'manage_settings'
-        ];
-      case 'outlet_admin':
-        return [
-          'view_dashboard', 'view_sales', 'create_sales', 'edit_sales', 'delete_sales',
-          'view_inventory', 'manage_inventory', 'view_expenses', 'manage_expenses',
-          'view_reports', 'generate_reports', 'manage_users', 'view_analytics', 'manage_settings'
-        ];
-      case 'manager':
-        return [
-          'view_dashboard', 'view_sales', 'create_sales', 'edit_sales',
-          'view_inventory', 'view_expenses', 'manage_expenses',
-          'view_reports', 'generate_reports', 'view_analytics'
-        ];
-      case 'cashier':
-        return [
-          'view_dashboard', 'view_sales', 'create_sales',
-          'view_inventory', 'view_expenses'
-        ];
-      case 'waiter':
-        return [
-          'view_dashboard', 'view_sales', 'create_sales'
-        ];
-      case 'kitchen_staff':
-        return [
-          'view_dashboard', 'view_inventory'
-        ];
-      case 'inventory_staff':
-        return [
-          'view_dashboard', 'view_inventory', 'manage_inventory'
-        ];
-      case 'accountant':
-        return [
-          'view_dashboard', 'view_expenses', 'manage_expenses',
-          'view_reports', 'generate_reports', 'view_analytics'
-        ];
-      case 'viewer':
-        return [
-          'view_dashboard', 'view_reports'
-        ];
-      default:
-        return ['view_dashboard'];
+  // Handle OAuth callback
+  async handleOAuthCallback(): Promise<{ data: any; error: string | null }> {
+    try {
+      const { data, error } = await supabase.auth.getSession();
+
+      if (error) {
+        console.error('OAuth session error:', error);
+        return { data: null, error: error.message };
+      }
+
+      if (data.session) {
+        // Clean the URL hash
+        if (window.location.hash) {
+          window.history.replaceState(null, '', window.location.pathname);
+        }
+
+        return { data: data.session, error: null };
+      }
+
+      return { data: null, error: 'No session found' };
+    } catch (error) {
+      console.error('Error handling OAuth callback:', error);
+      return {
+        data: null,
+        error: error instanceof Error ? error.message : 'OAuth callback failed'
+      };
     }
   }
 }
 
 export const authService = new AuthService();
+export * from '@/types';
