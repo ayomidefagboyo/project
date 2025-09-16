@@ -75,6 +75,125 @@ const Dashboard: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOutletSelectorOpen]);
 
+  // Handle return from Stripe and complete onboarding
+  useEffect(() => {
+    const handleStripeReturn = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const trialStarted = urlParams.get('trial');
+      const onboardingComplete = urlParams.get('onboarding');
+      const paymentCancelled = urlParams.get('payment') === 'cancelled';
+
+      // Handle cancelled payment
+      if (trialStarted === 'cancelled' || paymentCancelled) {
+        localStorage.removeItem('onboarding_data');
+        window.history.replaceState({}, document.title, '/dashboard');
+        setError('Trial setup was cancelled. You can try again anytime.');
+        return;
+      }
+
+      if (trialStarted === 'started' && onboardingComplete === 'complete' && currentUser) {
+        try {
+          // Get stored onboarding data
+          const storedData = localStorage.getItem('onboarding_data');
+          if (!storedData) return;
+
+          const onboardingData = JSON.parse(storedData);
+
+          // Only create profile/outlet if needed (for OAuth users)
+          if (onboardingData.needsProfileCreation) {
+            setLoading(true);
+
+            // Create outlet
+            const outletData = {
+              name: onboardingData.outletName,
+              business_type: onboardingData.businessType,
+              status: 'active',
+              address: {
+                street: '',
+                city: '',
+                state: '',
+                zip: '',
+                country: 'USA',
+              },
+              phone: '',
+              email: onboardingData.userEmail,
+              opening_hours: {
+                monday: { open: '09:00', close: '17:00', closed: false },
+                tuesday: { open: '09:00', close: '17:00', closed: false },
+                wednesday: { open: '09:00', close: '17:00', closed: false },
+                thursday: { open: '09:00', close: '17:00', closed: false },
+                friday: { open: '09:00', close: '17:00', closed: false },
+                saturday: { open: '09:00', close: '17:00', closed: false },
+                sunday: { open: '09:00', close: '17:00', closed: true }
+              },
+              tax_rate: 8.25,
+              currency: 'USD',
+              timezone: 'America/New_York',
+            };
+
+            const { data: outlet, error: outletError } = await supabase
+              .from('outlets')
+              .insert(outletData)
+              .select()
+              .single();
+
+            if (outletError) throw outletError;
+
+            // Create business settings
+            const { error: settingsError } = await supabase
+              .from('business_settings')
+              .insert({
+                outlet_id: outlet.id,
+                business_name: onboardingData.outletName,
+                business_type: onboardingData.businessType,
+                theme: 'light',
+                language: 'en',
+                date_format: 'MM/DD/YYYY',
+                time_format: '12h',
+                currency: 'USD',
+                timezone: 'America/New_York'
+              });
+
+            if (settingsError) throw settingsError;
+
+            // Create user profile
+            const { error: profileError } = await authService.createUserProfile({
+              name: onboardingData.userName,
+              role: 'business_owner',
+              outletId: outlet.id
+            });
+
+            if (profileError) throw new Error(profileError);
+
+            // Clean up
+            localStorage.removeItem('onboarding_data');
+
+            // Refresh context to load new data
+            await refreshData();
+            await loadOutletData();
+
+            setLoading(false);
+
+            // Clean up URL
+            window.history.replaceState({}, document.title, '/dashboard');
+          } else {
+            // Clean up for existing users
+            localStorage.removeItem('onboarding_data');
+            window.history.replaceState({}, document.title, '/dashboard');
+          }
+        } catch (error) {
+          console.error('Error completing onboarding after Stripe:', error);
+          setError('Failed to complete setup. Please contact support.');
+          setLoading(false);
+        }
+      }
+    };
+
+    if (currentUser) {
+      handleStripeReturn();
+    }
+  }, [currentUser, refreshData, loadOutletData]);
+
   // Initialize selected outlets
   useEffect(() => {
     if (currentUser) {
@@ -204,94 +323,23 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  // Handle complete onboarding with Stripe trial
+  // Handle complete onboarding - redirect to Stripe FIRST
   const handleCompleteOnboarding = async () => {
     try {
       setLoading(true);
 
-      let outletId = currentUser?.outletId;
+      // Store onboarding data in localStorage for after Stripe return
+      const onboardingData = {
+        outletName: outletName.trim() || `${currentUser?.name}'s Business`,
+        businessType: businessType,
+        needsProfileCreation: !currentUser?.outletId, // Flag for OAuth users
+        userName: currentUser?.name || '',
+        userEmail: currentUser?.email || ''
+      };
 
-      // For OAuth users who don't have an outlet yet, create one
-      if (!outletId && currentUser) {
-        const outletData = {
-          name: outletName.trim() || `${currentUser.name}'s Business`,
-          business_type: businessType,
-          status: 'active',
-          address: {
-            street: '',
-            city: '',
-            state: '',
-            zip: '',
-            country: 'USA',
-          },
-          phone: '',
-          email: currentUser.email,
-          opening_hours: {
-            monday: { open: '09:00', close: '17:00', closed: false },
-            tuesday: { open: '09:00', close: '17:00', closed: false },
-            wednesday: { open: '09:00', close: '17:00', closed: false },
-            thursday: { open: '09:00', close: '17:00', closed: false },
-            friday: { open: '09:00', close: '17:00', closed: false },
-            saturday: { open: '09:00', close: '17:00', closed: false },
-            sunday: { open: '09:00', close: '17:00', closed: true }
-          },
-          tax_rate: 8.25,
-          currency: 'USD',
-          timezone: 'America/New_York',
-        };
+      localStorage.setItem('onboarding_data', JSON.stringify(onboardingData));
 
-        const { data: outlet, error: outletError } = await supabase
-          .from('outlets')
-          .insert(outletData)
-          .select()
-          .single();
-
-        if (outletError) throw outletError;
-        outletId = outlet.id;
-
-        // Create business settings for new outlet
-        const { error: settingsError } = await supabase
-          .from('business_settings')
-          .insert({
-            outlet_id: outlet.id,
-            business_name: outletName.trim() || `${currentUser.name}'s Business`,
-            business_type: businessType,
-            theme: 'light',
-            language: 'en',
-            date_format: 'MM/DD/YYYY',
-            time_format: '12h',
-            currency: 'USD',
-            timezone: 'America/New_York'
-          });
-
-        if (settingsError) throw settingsError;
-
-        // Create user profile for OAuth users
-        const { error: profileError } = await authService.createUserProfile({
-          name: currentUser.name,
-          role: 'business_owner',
-          outletId: outlet.id
-        });
-
-        if (profileError) throw new Error(profileError);
-
-        // Refresh the context to load the new outlet data
-        await refreshData();
-        await loadOutletData();
-      } else if (outletName.trim() && outletId) {
-        // Update existing outlet if name is provided
-        const { error: updateError } = await supabase
-          .from('outlets')
-          .update({
-            name: outletName,
-            business_type: businessType,
-          })
-          .eq('id', outletId);
-
-        if (updateError) throw updateError;
-      }
-
-      // Start Stripe-managed trial with payment method collection
+      // Redirect to Stripe IMMEDIATELY for payment method collection
       const successUrl = `${window.location.origin}/dashboard?trial=started&onboarding=complete`;
       const cancelUrl = `${window.location.origin}/dashboard?trial=cancelled`;
 
@@ -306,7 +354,7 @@ const Dashboard: React.FC = () => {
         7 // 7-day trial
       );
 
-      // Redirect to Stripe checkout
+      // Redirect to Stripe checkout immediately
       await stripeService.redirectToCheckout((response as any).sessionId);
     } catch (error) {
       console.error('Error starting trial:', error);
