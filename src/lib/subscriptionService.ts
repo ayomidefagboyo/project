@@ -136,9 +136,14 @@ export class SubscriptionService {
         .from(TABLES.SUBSCRIPTIONS)
         .select('*')
         .eq('user_id', userId)
-        .single();
+        .maybeSingle();
 
       if (error) {
+        // Handle specific error codes gracefully
+        if (error.code === '406' || error.message.includes('Not Acceptable')) {
+          console.warn('Subscriptions table query blocked - user may not have subscription yet');
+          return null;
+        }
         console.error('Error fetching subscription:', error);
         return null;
       }

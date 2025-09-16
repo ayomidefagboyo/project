@@ -107,11 +107,17 @@ export class SubscriptionMiddleware {
         subscriptionService.getUserSubscription(userId)
       ]).then(([count, subscription]) => {
         setCurrentCount(count);
-        const max = subscription?.features.maxOutlets || 1;
+        // Default to startup plan features if no subscription
+        const max = subscription?.features.maxOutlets || subscriptionService.getPlanConfig('startup').features.maxOutlets;
         setMaxOutlets(max);
         setCanAddOutlet(max === -1 || count < max);
         setLoading(false);
-      }).catch(() => {
+      }).catch((error) => {
+        console.warn('Error loading outlet limits, defaulting to startup plan:', error);
+        // Fallback to startup plan limits on error
+        setCurrentCount(0);
+        setMaxOutlets(1);
+        setCanAddOutlet(true);
         setLoading(false);
       });
     }, [userId]);
