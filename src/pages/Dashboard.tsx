@@ -26,6 +26,7 @@ import { formatCurrency } from '@/lib/utils';
 import VendorInvoiceTable from '@/components/invoice/VendorInvoiceTable';
 import { FeatureGate } from '@/components/subscription/FeatureGate';
 import { supabase } from '@/lib/supabase';
+import { stripeService } from '@/lib/stripeService';
 import TrialExpired from '@/components/TrialExpired';
 import { trackUserJourney, trackTrialEvent, trackFeatureUsage, trackDashboardInteraction, trackDeviceInfo } from '@/lib/posthog';
 
@@ -154,9 +155,14 @@ const Dashboard: React.FC = () => {
         .from('subscriptions')
         .select('status, trial_end, plan_id')
         .eq('user_id', currentUser.id)
-        .single();
+        .maybeSingle();
 
-      if (error || !subscription) {
+      if (error) {
+        console.error('Error checking subscription:', error);
+        return;
+      }
+
+      if (!subscription) {
         // No subscription yet - show onboarding
         if (isBusinessOwner() && vendorInvoices.length === 0) {
           setShowOnboarding(true);
