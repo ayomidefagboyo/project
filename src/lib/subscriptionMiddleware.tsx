@@ -10,6 +10,22 @@ export class SubscriptionMiddleware {
     onAccessDenied?: () => void
   ): Promise<boolean> {
     try {
+      // First check if user has started trial
+      const { supabase } = await import('../lib/supabase');
+      const { data: userProfile, error: userError } = await supabase
+        .from('users')
+        .select('trial_started_at')
+        .eq('id', userId)
+        .single();
+
+      const trialStarted = !userError && userProfile?.trial_started_at;
+
+      if (!trialStarted) {
+        // User hasn't started trial yet - give them access to all features during onboarding
+        return true;
+      }
+
+      // User has started trial - check their subscription
       const hasAccess = await subscriptionService.hasFeatureAccess(userId, feature);
 
       if (!hasAccess && onAccessDenied) {
@@ -80,6 +96,11 @@ export class SubscriptionMiddleware {
     const [loading, setLoading] = React.useState(true);
 
     React.useEffect(() => {
+      if (!userId) {
+        setLoading(false);
+        return;
+      }
+
       SubscriptionMiddleware.checkFeatureAccess(userId, feature)
         .then((access) => {
           setHasAccess(access);
@@ -100,29 +121,58 @@ export class SubscriptionMiddleware {
     const [currentCount, setCurrentCount] = React.useState<number>(0);
     const [maxOutlets, setMaxOutlets] = React.useState<number>(0);
     const [loading, setLoading] = React.useState(true);
+    const [hasStartedTrial, setHasStartedTrial] = React.useState<boolean | null>(null);
 
     React.useEffect(() => {
-      Promise.all([
-        subscriptionService.getUserOutletCount(userId),
-        subscriptionService.getUserSubscription(userId)
-      ]).then(([count, subscription]) => {
-        setCurrentCount(count);
-        // Default to startup plan features if no subscription
-        const max = subscription?.features.maxOutlets || subscriptionService.getPlanConfig('startup').features.maxOutlets;
-        setMaxOutlets(max);
-        setCanAddOutlet(max === -1 || count < max);
+      if (!userId) {
         setLoading(false);
-      }).catch((error) => {
-        console.warn('Error loading outlet limits, defaulting to startup plan:', error);
-        // Fallback to startup plan limits on error
-        setCurrentCount(0);
-        setMaxOutlets(1);
-        setCanAddOutlet(true);
-        setLoading(false);
+        return;
+      }
+
+      // First check if user has started trial or has subscription
+      import('../lib/supabase').then(({ supabase }) => {
+        supabase
+          .from('users')
+          .select('trial_started_at')
+          .eq('id', userId)
+          .single()
+          .then(({ data: userProfile, error: userError }) => {
+            const trialStarted = !userError && userProfile?.trial_started_at;
+            setHasStartedTrial(!!trialStarted);
+
+            if (!trialStarted) {
+              // User hasn't started trial yet - give them unlimited access during onboarding
+              setCurrentCount(0);
+              setMaxOutlets(-1); // Unlimited during onboarding
+              setCanAddOutlet(true);
+              setLoading(false);
+              return;
+            }
+
+            // User has started trial - check their subscription
+            Promise.all([
+              subscriptionService.getUserOutletCount(userId),
+              subscriptionService.getUserSubscription(userId)
+            ]).then(([count, subscription]) => {
+              setCurrentCount(count);
+              // Default to startup plan features if no subscription
+              const max = subscription?.features.maxOutlets || subscriptionService.getPlanConfig('startup').features.maxOutlets;
+              setMaxOutlets(max);
+              setCanAddOutlet(max === -1 || count < max);
+              setLoading(false);
+            }).catch((error) => {
+              console.warn('Error loading outlet limits, defaulting to startup plan:', error);
+              // Fallback to startup plan limits on error
+              setCurrentCount(0);
+              setMaxOutlets(1);
+              setCanAddOutlet(true);
+              setLoading(false);
+            });
+          });
       });
     }, [userId]);
 
-    return { canAddOutlet, currentCount, maxOutlets, loading };
+    return { canAddOutlet, currentCount, maxOutlets, loading, hasStartedTrial };
   }
 }
 
