@@ -346,6 +346,9 @@ const Dashboard: React.FC = () => {
       // Track trial start attempt
       trackTrialEvent('started', 'startup', 7);
 
+      // Debug: Check API URL
+      console.log('API Base URL:', import.meta.env.VITE_API_BASE_URL);
+
       // Create Stripe subscription with trial (default to startup plan)
       const response = await stripeService.createSubscriptionCheckout(
         'startup', // Default plan for trial
@@ -493,11 +496,11 @@ const Dashboard: React.FC = () => {
 
       {/* Onboarding Popup */}
       {showOnboarding && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 max-w-2xl w-full p-8 relative">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-background border rounded-xl shadow-2xl max-w-2xl w-full p-8 relative">
             <button
               onClick={() => setShowOnboarding(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              className="absolute top-4 right-4 text-muted-foreground hover:text-foreground transition-colors"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -507,13 +510,10 @@ const Dashboard: React.FC = () => {
             {/* Single Step: Combined Setup and Trial */}
             <div className="space-y-6">
               <div className="text-center">
-                <div className="w-16 h-16 bg-gradient-to-tr from-blue-500 to-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Building2 className="w-8 h-8 text-white" />
-                </div>
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-                  Welcome to Compazz! 🎉
+                <h2 className="text-2xl font-bold text-foreground mb-2">
+                  Welcome to Compazz!
                 </h2>
-                <p className="text-gray-600 dark:text-gray-400">
+                <p className="text-muted-foreground">
                   Let's get your 7-day free trial started
                 </p>
               </div>
@@ -604,9 +604,6 @@ const Dashboard: React.FC = () => {
                 </Button>
               </div>
 
-              <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
-                No credit card required • Cancel anytime • Setup can be completed later
-              </p>
             </div>
           </div>
         </div>
