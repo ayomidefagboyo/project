@@ -75,6 +75,15 @@ const Dashboard: React.FC = () => {
   // Initialize selected outlets
   useEffect(() => {
     if (currentUser) {
+      // Check if user has outlets before proceeding
+      if (!currentUser.outletId) {
+        // New user without outlets - show onboarding immediately
+        setShowOnboarding(true);
+        setLoading(false);
+        return;
+      }
+
+      // User has outlets - proceed with normal dashboard loading
       const accessibleOutlets = getAccessibleOutlets();
       const selectedOutlets = canViewAllOutlets() ? accessibleOutlets : [accessibleOutlets[0]].filter(Boolean);
 
@@ -83,35 +92,35 @@ const Dashboard: React.FC = () => {
         selectedOutlets
       }));
 
-      // Track dashboard access and device info
-      trackUserJourney('dashboard', {
-        user_id: currentUser.id,
-        accessible_outlets_count: accessibleOutlets.length,
-        can_view_all: canViewAllOutlets(),
-        is_business_owner: isBusinessOwner()
-      });
+      // Track dashboard access and device info (only for users with outlets)
+      try {
+        trackUserJourney('dashboard', {
+          user_id: currentUser.id,
+          accessible_outlets_count: accessibleOutlets.length,
+          can_view_all: canViewAllOutlets(),
+          is_business_owner: isBusinessOwner()
+        });
 
-      // Track device info for analytics
-      trackDeviceInfo();
+        // Track device info for analytics
+        trackDeviceInfo();
 
-      // Track dashboard feature viewing
-      trackFeatureUsage('dashboard_overview', 'viewed', {
-        user_id: currentUser.id,
-        outlet_count: accessibleOutlets.length
-      });
+        // Track dashboard feature viewing
+        trackFeatureUsage('dashboard_overview', 'viewed', {
+          user_id: currentUser.id,
+          outlet_count: accessibleOutlets.length
+        });
+      } catch (error) {
+        console.warn('Analytics tracking failed:', error);
+      }
 
       // Check subscription status
       if (currentUser) {
         checkSubscriptionStatus();
       }
 
-      // Show onboarding immediately for new users without outlets
-      if (!currentUser?.outletId && isBusinessOwner()) {
-        setShowOnboarding(true);
-      }
       setLoading(false);
     }
-  }, [currentUser, canViewAllOutlets, vendorInvoices.length]);
+  }, [currentUser, canViewAllOutlets]);
 
   // Load vendor invoices data
   const loadDashboardData = async () => {
@@ -163,8 +172,8 @@ const Dashboard: React.FC = () => {
       }
 
       if (!subscription) {
-        // No subscription yet - show onboarding
-        if (isBusinessOwner() && vendorInvoices.length === 0) {
+        // No subscription yet - show onboarding for business owners without outlets
+        if (isBusinessOwner() && !currentUser.outletId) {
           setShowOnboarding(true);
         }
         return;
@@ -344,7 +353,7 @@ const Dashboard: React.FC = () => {
   }
 
   const selectedOutletNames = dashboardView.selectedOutlets
-    .map(id => userOutlets.find(outlet => outlet.id === id)?.name)
+    .map(id => userOutlets?.find(outlet => outlet.id === id)?.name)
     .filter(Boolean);
 
   return (
