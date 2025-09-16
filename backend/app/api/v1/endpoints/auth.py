@@ -15,50 +15,52 @@ from typing import Dict, Any
 router = APIRouter()
 
 
-@router.post("/signup/owner", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
-async def signup_owner(signup_data: OwnerSignupRequest):
-    """
-    Create a new owner account with company/outlet
-    
-    This endpoint creates:
-    1. A new user account in Supabase Auth
-    2. A new outlet/business
-    3. Business settings
-    4. User profile with outlet_admin role
-    5. Returns JWT token for immediate access
-    """
-    try:
-        result = await auth_service.create_owner_account(signup_data.dict())
-        return SignupResponse(**result)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create owner account"
-        )
+# DEPRECATED: Using pure Supabase auth now
+# @router.post("/signup/owner", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
+# async def signup_owner(signup_data: OwnerSignupRequest):
+#     """
+#     Create a new owner account with company/outlet
+#
+#     This endpoint creates:
+#     1. A new user account in Supabase Auth
+#     2. A new outlet/business
+#     3. Business settings
+#     4. User profile with outlet_admin role
+#     5. Returns JWT token for immediate access
+#     """
+#     try:
+#         result = await auth_service.create_owner_account(signup_data.dict())
+#         return SignupResponse(**result)
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail="Failed to create owner account"
+#         )
 
 
-@router.post("/signin", response_model=SigninResponse)
-async def signin(signin_data: SigninRequest):
-    """
-    Authenticate user with email and password
-    
-    Returns user information and JWT token for API access
-    """
-    try:
-        result = await auth_service.authenticate_user(
-            signin_data.email, 
-            signin_data.password
-        )
-        return SigninResponse(**result)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Authentication failed"
-        )
+# DEPRECATED: Using pure Supabase auth now
+# @router.post("/signin", response_model=SigninResponse)
+# async def signin(signin_data: SigninRequest):
+#     """
+#     Authenticate user with email and password
+#
+#     Returns user information and JWT token for API access
+#     """
+#     try:
+#         result = await auth_service.authenticate_user(
+#             signin_data.email,
+#             signin_data.password
+#         )
+#         return SigninResponse(**result)
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail="Authentication failed"
+#         )
 
 
 @router.get("/me", response_model=UserResponse)

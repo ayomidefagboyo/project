@@ -82,18 +82,13 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
       return;
     }
 
-    if (!formData.companyName.trim()) {
-      setError('Company name is required');
-      setIsLoading(false);
-      return;
-    }
 
     try {
       const { user, error: authError } = await authService.signUpOwner({
         email: formData.email,
         password: formData.password,
         name: formData.name,
-        companyName: formData.companyName,
+        companyName: formData.companyName, // Optional
       });
 
       if (authError) {
@@ -107,7 +102,6 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
         // Track successful signup
         trackEvent('user_signup', {
           user_id: user.id,
-          company_name: formData.companyName,
           has_trial: isTrial,
           selected_plan: selectedPlan,
           signup_method: 'email'
@@ -117,7 +111,6 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
         identifyUser(user.id, {
           name: formData.name,
           email: formData.email,
-          company_name: formData.companyName,
           signup_date: new Date().toISOString(),
           is_trial: isTrial,
           plan_id: selectedPlan
@@ -435,28 +428,24 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="companyName" className="block text-sm font-medium text-foreground mb-2">
-                    Company Name
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                      <Building className="h-5 w-5 text-muted-foreground" />
-                    </div>
-                    <input
-                      id="companyName"
-                      name="companyName"
-                      type="text"
-                      required
-                      value={formData.companyName}
-                      onChange={handleChange}
-                      className="block w-full pl-12 pr-4 py-3 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
-                      placeholder="Your company"
-                    />
+              <div>
+                <label htmlFor="companyName" className="block text-sm font-medium text-foreground mb-2">
+                  Company Name <span className="text-muted-foreground">(optional)</span>
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <Building className="h-5 w-5 text-muted-foreground" />
                   </div>
+                  <input
+                    id="companyName"
+                    name="companyName"
+                    type="text"
+                    value={formData.companyName}
+                    onChange={handleChange}
+                    className="block w-full pl-12 pr-4 py-3 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
+                    placeholder="Your company (can be added later)"
+                  />
                 </div>
-
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
