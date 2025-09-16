@@ -5,7 +5,7 @@ export const initPostHog = () => {
   const posthogApiKey = import.meta.env.VITE_POSTHOG_API_KEY;
   const posthogHost = import.meta.env.VITE_POSTHOG_HOST || 'https://app.posthog.com';
 
-  if (posthogApiKey) {
+  if (posthogApiKey && posthogApiKey.startsWith('phc_')) {
     try {
       posthog.init(posthogApiKey, {
         api_host: posthogHost,
@@ -14,6 +14,11 @@ export const initPostHog = () => {
             console.log('PostHog loaded successfully');
           }
         },
+        // Disable if there are loading errors
+        disable_session_recording: false,
+        disable_persistence: false,
+        // Reduce retry attempts to minimize errors
+        xhr_headers: {},
       // Enable session recordings for better user insights
       session_recording: {
         // Record only on production to avoid dev noise
@@ -53,16 +58,26 @@ export const initPostHog = () => {
       }
     } catch (error) {
       console.error('Failed to initialize PostHog:', error);
+      // Disable PostHog completely if initialization fails
+      posthog.__loaded = false;
     }
   } else if (import.meta.env.DEV) {
-    console.warn('PostHog API key not found. Analytics tracking is disabled.');
+    console.warn('PostHog API key not found or invalid. Analytics tracking is disabled.');
+    // Ensure PostHog is disabled
+    posthog.__loaded = false;
   }
 };
 
 // Track custom events
 export const trackEvent = (eventName: string, properties?: Record<string, any>) => {
-  if (posthog.__loaded) {
-    posthog.capture(eventName, properties);
+  try {
+    if (posthog.__loaded) {
+      posthog.capture(eventName, properties);
+    }
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      console.warn('PostHog tracking failed:', error);
+    }
   }
 };
 
