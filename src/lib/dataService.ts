@@ -461,7 +461,7 @@ export class DataService {
         .from(TABLES.BUSINESS_SETTINGS)
         .select('*')
         .eq('outlet_id', outletId)
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
       return { data: data as BusinessSettings, error: null };
