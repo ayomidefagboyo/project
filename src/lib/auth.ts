@@ -362,20 +362,26 @@ class AuthService {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${import.meta.env.VITE_APP_URL}/dashboard`
+          redirectTo: `${import.meta.env.VITE_APP_URL}/dashboard`,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          }
         }
       });
 
       if (error) throw error;
 
       // Note: With OAuth, the user will be redirected and we'll handle the callback
-      // This method initiates the OAuth flow
+      // Supabase automatically handles both sign-in and sign-up:
+      // - If user exists: signs them in
+      // - If user doesn't exist: creates account and signs them in
       return { user: null, error: null };
     } catch (error) {
-      console.error('Google sign-in error:', error);
+      console.error('Google OAuth error:', error);
       return {
         user: null,
-        error: error instanceof Error ? error.message : 'Google sign-in failed'
+        error: error instanceof Error ? error.message : 'Google authentication failed'
       };
     }
   }

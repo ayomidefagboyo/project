@@ -274,8 +274,8 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
         }
       }
     } catch (err) {
-      setError('Google sign-up failed');
-      console.error('Google sign-up error:', err);
+      setError('Google authentication failed');
+      console.error('Google authentication error:', err);
     } finally {
       setIsGoogleLoading(false);
     }
@@ -374,7 +374,7 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
             ) : (
               <Chrome className="w-5 h-5" />
             )}
-            {isGoogleLoading ? 'Creating account...' : 'Continue with Google'}
+            {isGoogleLoading ? 'Authenticating...' : 'Continue with Google'}
           </button>
 
           {/* Divider */}
