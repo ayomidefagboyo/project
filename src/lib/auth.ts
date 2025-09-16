@@ -588,11 +588,15 @@ class AuthService {
           .from('users')
           .select('*')
           .eq('id', user.id)
-          .single();
+          .maybeSingle();
 
         if (profileError) {
-          // If user doesn't exist in users table (OAuth signup), create profile
-          if (profileError.details === 'The result contains 0 rows') {
+          console.error('Error fetching user profile:', profileError);
+          throw profileError;
+        }
+
+        // If user doesn't exist in users table (OAuth signup), create profile
+        if (!profile) {
             console.log('Creating profile for OAuth user:', user.id);
 
             // Extract name from user metadata (Google OAuth)
