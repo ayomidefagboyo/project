@@ -47,7 +47,7 @@ class SubscriptionCreateRequest(BaseModel):
 @router.post("/create-payment-intent")
 async def create_payment_intent(
     request: PaymentIntentRequest,
-    current_user: Dict[str, Any] = Depends(require_auth)
+    current_user: Dict[str, Any] = Depends(require_auth())
 ):
     """
     Create a Stripe payment intent for one-time payments
@@ -90,7 +90,7 @@ async def create_payment_intent(
 @router.post("/create-subscription-checkout")
 async def create_subscription_checkout(
     request: SubscriptionCheckoutRequest,
-    current_user: Dict[str, Any] = Depends(require_auth)
+    current_user: Dict[str, Any] = Depends(require_auth())
 ):
     """
     Create a Stripe checkout session for subscriptions
@@ -103,7 +103,7 @@ async def create_subscription_checkout(
         # Create or get customer
         customer_id = await get_or_create_stripe_customer(current_user)
         print(f"👤 Customer ID: {customer_id}")
-        
+
         # Prepare subscription data with trial
         subscription_data = {
             'metadata': {
@@ -170,7 +170,7 @@ async def create_subscription_checkout(
 @router.post("/create-subscription")
 async def create_subscription(
     request: SubscriptionCreateRequest,
-    current_user: Dict[str, Any] = Depends(require_auth)
+    current_user: Dict[str, Any] = Depends(require_auth())
 ):
     """
     Create a subscription directly with trial period
@@ -233,7 +233,7 @@ async def create_subscription(
 @router.post("/create-setup-intent")
 async def create_setup_intent(
     request: SetupIntentRequest,
-    current_user: Dict[str, Any] = Depends(require_auth)
+    current_user: Dict[str, Any] = Depends(require_auth())
 ):
     """
     Create a setup intent for saving payment methods
@@ -266,7 +266,7 @@ async def create_setup_intent(
 @router.get("/customer/{customer_id}")
 async def get_customer(
     customer_id: str,
-    current_user: Dict[str, Any] = Depends(require_auth)
+    current_user: Dict[str, Any] = Depends(require_auth())
 ):
     """
     Get customer information with subscriptions
@@ -295,7 +295,7 @@ async def get_customer(
 @router.get("/subscription/{subscription_id}")
 async def get_subscription(
     subscription_id: str,
-    current_user: Dict[str, Any] = Depends(require_auth)
+    current_user: Dict[str, Any] = Depends(require_auth())
 ):
     """
     Get subscription details
@@ -317,7 +317,7 @@ async def get_subscription(
 @router.post("/subscription/{subscription_id}/cancel")
 async def cancel_subscription(
     subscription_id: str,
-    current_user: Dict[str, Any] = Depends(require_auth)
+    current_user: Dict[str, Any] = Depends(require_auth())
 ):
     """
     Cancel a subscription
@@ -343,7 +343,7 @@ async def cancel_subscription(
 async def update_subscription(
     subscription_id: str,
     request: SubscriptionUpdateRequest,
-    current_user: Dict[str, Any] = Depends(require_auth)
+    current_user: Dict[str, Any] = Depends(require_auth())
 ):
     """
     Update subscription plan
@@ -375,7 +375,7 @@ async def update_subscription(
 @router.get("/customer/{customer_id}/payment-methods")
 async def get_payment_methods(
     customer_id: str,
-    current_user: Dict[str, Any] = Depends(require_auth)
+    current_user: Dict[str, Any] = Depends(require_auth())
 ):
     """
     Get customer's saved payment methods
