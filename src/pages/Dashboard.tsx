@@ -27,16 +27,19 @@ import VendorInvoiceTable from '@/components/invoice/VendorInvoiceTable';
 import { FeatureGate } from '@/components/subscription/FeatureGate';
 import { supabase } from '@/lib/supabase';
 import { stripeService } from '@/lib/stripeService';
+import { authService } from '@/lib/auth';
 import TrialExpired from '@/components/TrialExpired';
 import { trackUserJourney, trackTrialEvent, trackFeatureUsage, trackDashboardInteraction, trackDeviceInfo } from '@/lib/posthog';
 
 const Dashboard: React.FC = () => {
-  const { 
-    currentUser, 
-    userOutlets, 
-    canViewAllOutlets, 
-    getAccessibleOutlets, 
-    isBusinessOwner 
+  const {
+    currentUser,
+    userOutlets,
+    canViewAllOutlets,
+    getAccessibleOutlets,
+    isBusinessOwner,
+    refreshData,
+    loadOutletData
   } = useOutlet();
 
   // Multi-store dashboard state
@@ -206,15 +209,84 @@ const Dashboard: React.FC = () => {
     try {
       setLoading(true);
 
-      // Update outlet if name is provided
-      if (outletName.trim() && currentUser?.outletId) {
+      let outletId = currentUser?.outletId;
+
+      // For OAuth users who don't have an outlet yet, create one
+      if (!outletId && currentUser) {
+        const outletData = {
+          name: outletName.trim() || `${currentUser.name}'s Business`,
+          business_type: businessType,
+          status: 'active',
+          address: {
+            street: '',
+            city: '',
+            state: '',
+            zip: '',
+            country: 'USA',
+          },
+          phone: '',
+          email: currentUser.email,
+          opening_hours: {
+            monday: { open: '09:00', close: '17:00', closed: false },
+            tuesday: { open: '09:00', close: '17:00', closed: false },
+            wednesday: { open: '09:00', close: '17:00', closed: false },
+            thursday: { open: '09:00', close: '17:00', closed: false },
+            friday: { open: '09:00', close: '17:00', closed: false },
+            saturday: { open: '09:00', close: '17:00', closed: false },
+            sunday: { open: '09:00', close: '17:00', closed: true }
+          },
+          tax_rate: 8.25,
+          currency: 'USD',
+          timezone: 'America/New_York',
+        };
+
+        const { data: outlet, error: outletError } = await supabase
+          .from('outlets')
+          .insert(outletData)
+          .select()
+          .single();
+
+        if (outletError) throw outletError;
+        outletId = outlet.id;
+
+        // Create business settings for new outlet
+        const { error: settingsError } = await supabase
+          .from('business_settings')
+          .insert({
+            outlet_id: outlet.id,
+            business_name: outletName.trim() || `${currentUser.name}'s Business`,
+            business_type: businessType,
+            theme: 'light',
+            language: 'en',
+            date_format: 'MM/DD/YYYY',
+            time_format: '12h',
+            currency: 'USD',
+            timezone: 'America/New_York'
+          });
+
+        if (settingsError) throw settingsError;
+
+        // Create user profile for OAuth users
+        const { error: profileError } = await authService.createUserProfile({
+          name: currentUser.name,
+          role: 'business_owner',
+          outletId: outlet.id
+        });
+
+        if (profileError) throw new Error(profileError);
+
+        // Refresh the context to load the new outlet data
+        await refreshData();
+        await loadOutletData();
+      } else if (outletName.trim() && outletId) {
+        // Update existing outlet if name is provided
         const { error: updateError } = await supabase
           .from('outlets')
           .update({
             name: outletName,
             business_type: businessType,
           })
-          .eq('id', currentUser.outletId);
+          .eq('id', outletId);
 
         if (updateError) throw updateError;
       }
