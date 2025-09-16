@@ -362,26 +362,20 @@ class AuthService {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${import.meta.env.VITE_APP_URL}/dashboard`,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          }
+          redirectTo: `${import.meta.env.VITE_APP_URL}/dashboard`
         }
       });
 
       if (error) throw error;
 
       // Note: With OAuth, the user will be redirected and we'll handle the callback
-      // Supabase automatically handles both sign-in and sign-up:
-      // - If user exists: signs them in
-      // - If user doesn't exist: creates account and signs them in
+      // This method initiates the OAuth flow
       return { user: null, error: null };
     } catch (error) {
-      console.error('Google OAuth error:', error);
+      console.error('Google sign-in error:', error);
       return {
         user: null,
-        error: error instanceof Error ? error.message : 'Google authentication failed'
+        error: error instanceof Error ? error.message : 'Google sign-in failed'
       };
     }
   }
@@ -431,16 +425,12 @@ class AuthService {
           .from('users')
           .select('*')
           .eq('id', data.user.id)
-          .maybeSingle();
+          .single();
 
         if (profileError) {
-          console.error('Error fetching user profile during sign in:', profileError);
-          throw profileError;
-        }
-
-        if (!profile) {
-          // User doesn't exist in users table (OAuth user), create profile
-          console.log('Creating profile for OAuth user during sign in:', data.user.id);
+          // If user doesn't exist in users table (OAuth user), create profile
+          if (profileError.details === 'The result contains 0 rows') {
+            console.log('Creating profile for OAuth user during sign in:', data.user.id);
 
             // Extract name from user metadata (Google OAuth)
             const fullName = data.user.user_metadata?.full_name || data.user.user_metadata?.name || data.user.email?.split('@')[0] || '';
@@ -598,16 +588,12 @@ class AuthService {
           .from('users')
           .select('*')
           .eq('id', user.id)
-          .maybeSingle();
+          .single();
 
         if (profileError) {
-          console.error('Error fetching user profile:', profileError);
-          throw profileError;
-        }
-
-        if (!profile) {
-          // User doesn't exist in users table (OAuth signup), create profile
-          console.log('Creating profile for OAuth user:', user.id);
+          // If user doesn't exist in users table (OAuth signup), create profile
+          if (profileError.details === 'The result contains 0 rows') {
+            console.log('Creating profile for OAuth user:', user.id);
 
             // Extract name from user metadata (Google OAuth)
             const fullName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || '';
