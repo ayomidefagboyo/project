@@ -1,6 +1,4 @@
 import { supabase } from './supabase';
-import { logger } from './logger';
-import { ApiClient } from './apiClient';
 import { LoginCredentials, OwnerSignupCredentials, AuthResponse, User, Outlet, Permission, UserInvitation, AuthUser } from '@/types';
 
 export interface InviteCredentials {
@@ -10,10 +8,8 @@ export interface InviteCredentials {
 }
 
 class AuthService {
-  private apiClient: ApiClient;
-
   constructor() {
-    this.apiClient = new ApiClient();
+    // No need for ApiClient in auth service
   }
 
   // Common default permissions for roles
