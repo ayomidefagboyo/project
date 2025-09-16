@@ -28,9 +28,22 @@ class ApiClient {
       : 'https://compazz-backend.onrender.com/api/v1';
 
     this.baseUrl = envUrl || defaultUrl;
-    console.log('ApiClient initialized with baseUrl:', this.baseUrl);
+
+    // Enhanced debugging for production issues
+    console.log('=== ApiClient Debug ===');
     console.log('Environment VITE_API_BASE_URL:', envUrl);
+    console.log('Default URL (fallback):', defaultUrl);
+    console.log('Final baseUrl:', this.baseUrl);
     console.log('Current hostname:', window.location.hostname);
+    console.log('All env vars:', import.meta.env);
+    console.log('======================');
+
+    // Safety check for placeholder URLs
+    if (this.baseUrl.includes('your-render-backend-url')) {
+      console.error('⚠️ PLACEHOLDER URL DETECTED! Using fallback...');
+      this.baseUrl = 'https://compazz-backend.onrender.com/api/v1';
+      console.log('Fixed baseUrl:', this.baseUrl);
+    }
   }
 
   /**
