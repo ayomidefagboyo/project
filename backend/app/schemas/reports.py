@@ -29,13 +29,6 @@ class EODData(BaseModel):
     inventory_cost: float = Field(0.0, ge=0, description="Inventory cost")
     notes: Optional[str] = Field(None, max_length=1000, description="Additional notes")
 
-    @field_validator('sales_cash', 'sales_transfer', 'sales_pos', 'sales_credit', 
-                     'opening_balance', 'closing_balance', 'bank_deposit', 'inventory_cost')
-    @classmethod
-    def validate_amounts(cls, v):
-        if v < 0:
-            raise ValueError('Amount cannot be negative')
-        return round(v, 2)
 
     def get_total_sales(self) -> float:
         """Calculate total sales"""
@@ -79,13 +72,6 @@ class EODUpdate(BaseModel):
     notes: Optional[str] = Field(None, max_length=1000)
     status: Optional[ReportStatus] = None
 
-    @field_validator('sales_cash', 'sales_transfer', 'sales_pos', 'sales_credit', 
-                     'opening_balance', 'closing_balance', 'bank_deposit', 'inventory_cost')
-    @classmethod
-    def validate_amounts(cls, v):
-        if v is not None and v < 0:
-            raise ValueError('Amount cannot be negative')
-        return round(v, 2) if v is not None else None
 
 
 class EnhancedDailyReport(EODData):
