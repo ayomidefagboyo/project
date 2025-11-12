@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     # Stripe Settings
     STRIPE_SECRET_KEY: Optional[str] = os.getenv("STRIPE_SECRET_KEY", "")
     VITE_STRIPE_PUBLISHABLE_KEY: Optional[str] = os.getenv("VITE_STRIPE_PUBLISHABLE_KEY", "")
+
     
     model_config = {
         "env_file": ".env",
