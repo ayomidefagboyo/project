@@ -67,8 +67,7 @@ class AuthService {
         options: {
           data: {
             name: credentials.name,
-            company_name: credentials.companyName,
-            business_type: credentials.businessType,
+            role: 'business_owner', // Set default role for new signups
           }
         }
       });
@@ -324,6 +323,17 @@ export const authService = new AuthService();
 
 // Export types
 export type { AuthUser, LoginCredentials, OwnerSignupCredentials, InviteCredentials, AuthResponse, InviteResponse };
+
+
+
+
+
+
+
+
+
+
+
 
 
 

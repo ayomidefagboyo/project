@@ -29,6 +29,7 @@ import { supabase } from '@/lib/supabase';
 import { stripeService } from '@/lib/stripeService';
 import { authService } from '@/lib/auth';
 import TrialExpired from '@/components/TrialExpired';
+import CompanyOnboarding from '@/components/onboarding/CompanyOnboarding';
 import { trackUserJourney, trackTrialEvent, trackFeatureUsage, trackDashboardInteraction, trackDeviceInfo } from '@/lib/posthog';
 
 const Dashboard: React.FC = () => {
@@ -57,6 +58,7 @@ const Dashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isOutletSelectorOpen, setIsOutletSelectorOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showCompanyOnboarding, setShowCompanyOnboarding] = useState(false);
   const [showTrialExpired, setShowTrialExpired] = useState(false);
   const [trialDaysRemaining, setTrialDaysRemaining] = useState(0);
   const [outletName, setOutletName] = useState('');
@@ -198,9 +200,9 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     if (currentUser) {
       // Check if user has outlets before proceeding
-      if (!currentUser.outletId) {
-        // New user without outlets - show onboarding immediately
-        setShowOnboarding(true);
+      if (!currentUser.outletId && userOutlets.length === 0) {
+        // New user without outlets - show company onboarding immediately
+        setShowCompanyOnboarding(true);
         setLoading(false);
         return;
       }
@@ -490,6 +492,21 @@ const Dashboard: React.FC = () => {
             setShowTrialExpired(false);
             // Refresh page to reflect new subscription status
             window.location.reload();
+          }}
+        />
+      )}
+
+      {/* Company Onboarding Modal */}
+      {showCompanyOnboarding && (
+        <CompanyOnboarding
+          onComplete={() => {
+            setShowCompanyOnboarding(false);
+            // Refresh outlet data after onboarding
+            refreshData();
+          }}
+          onSkip={() => {
+            setShowCompanyOnboarding(false);
+            // For now, just hide the modal - could show a different message
           }}
         />
       )}
