@@ -21,7 +21,6 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
     email: '',
     password: '',
     confirmPassword: '',
-    companyName: '',
   });
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
@@ -88,7 +87,6 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
         email: formData.email,
         password: formData.password,
         name: formData.name,
-        companyName: formData.companyName, // Optional
       });
 
       if (authError) {
@@ -135,38 +133,8 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
           }
         }
 
-        // If trial signup, redirect to Stripe trial setup
-        if (isTrial && selectedPlan) {
-          const successUrl = `${window.location.origin}/dashboard?payment=success&trial=true`;
-          const cancelUrl = `${window.location.origin}/dashboard?payment=cancelled`;
-
-          try {
-            // Track trial start
-            trackTrialEvent('started', selectedPlan);
-
-            const response = await stripeService.createSubscriptionCheckout(
-              selectedPlan,
-              successUrl,
-              cancelUrl,
-              7 // 7-day free trial
-            );
-
-            await stripeService.redirectToCheckout((response as any).sessionId);
-            return; // Don't call onSuccess, let Stripe handle the redirect
-          } catch (error) {
-            console.error('Error creating Stripe trial:', error);
-            // Track trial start failure
-            trackEvent('trial_start_failed', {
-              user_id: user.id,
-              plan_id: selectedPlan,
-              error: error instanceof Error ? error.message : 'Unknown error'
-            });
-            // Fallback to dashboard without Stripe trial
-            onSuccess?.();
-          }
-        } else {
-          onSuccess?.();
-        }
+        // Always go to dashboard for onboarding first
+        onSuccess?.();
 
         // Track successful form completion and performance
         const endTime = Date.now();
@@ -233,38 +201,8 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
           }
         }
 
-        // If trial signup, redirect to Stripe trial setup
-        if (isTrial && selectedPlan) {
-          const successUrl = `${window.location.origin}/dashboard?payment=success&trial=true`;
-          const cancelUrl = `${window.location.origin}/dashboard?payment=cancelled`;
-
-          try {
-            // Track trial start
-            trackTrialEvent('started', selectedPlan);
-
-            const response = await stripeService.createSubscriptionCheckout(
-              selectedPlan,
-              successUrl,
-              cancelUrl,
-              7 // 7-day free trial
-            );
-
-            await stripeService.redirectToCheckout((response as any).sessionId);
-            return; // Don't call onSuccess, let Stripe handle the redirect
-          } catch (error) {
-            console.error('Error creating Stripe trial:', error);
-            // Track trial start failure
-            trackEvent('trial_start_failed', {
-              user_id: user.id,
-              plan_id: selectedPlan,
-              error: error instanceof Error ? error.message : 'Unknown error'
-            });
-            // Fallback to dashboard without Stripe trial
-            onSuccess?.();
-          }
-        } else {
-          onSuccess?.();
-        }
+        // Always go to dashboard for onboarding first
+        onSuccess?.();
       }
     } catch (err) {
       setError('Google authentication failed');
@@ -428,25 +366,6 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
                 </div>
               </div>
 
-              <div>
-                <label htmlFor="companyName" className="block text-sm font-medium text-foreground mb-2">
-                  Company Name <span className="text-muted-foreground">(optional)</span>
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                    <Building className="h-5 w-5 text-muted-foreground" />
-                  </div>
-                  <input
-                    id="companyName"
-                    name="companyName"
-                    type="text"
-                    value={formData.companyName}
-                    onChange={handleChange}
-                    className="block w-full pl-12 pr-4 py-3 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
-                    placeholder="Your company (can be added later)"
-                  />
-                </div>
-              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
