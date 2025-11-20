@@ -4,6 +4,47 @@ import { SubscriptionPlan, Subscription, SubscriptionFeatures, PlanConfig } from
 export class SubscriptionService {
   // Plan configurations
   private planConfigs: Record<SubscriptionPlan, PlanConfig> = {
+    free: {
+      name: 'Free Plan',
+      description: 'Get started with basic features for one location. Perfect for testing and small operations.',
+      features: {
+        maxOutlets: 1,
+        corePos: true,
+        basicInventory: true,
+        standardReporting: true,
+        emailSupport: true,
+        mobileApp: false,
+        basicPayments: true,
+        multiLocationManagement: false,
+        advancedAnalytics: false,
+        staffManagement: false,
+        inventorySync: false,
+        prioritySupport: false,
+        loyaltyPrograms: false,
+        advancedPayments: false,
+        apiAccess: false,
+        customBranding: false,
+        dedicatedAccountManager: false,
+        advancedSecurity: false,
+        customReports: false,
+        phoneSupport: false,
+        priorityFeatures: false,
+      },
+      pricing: {
+        monthly: {
+          USD: 0,
+          EUR: 0,
+          GBP: 0,
+        },
+      },
+      stripePriceIds: {
+        monthly: {
+          USD: 'price_free', // No actual Stripe price needed for free plan
+          EUR: 'price_free',
+          GBP: 'price_free',
+        },
+      },
+    },
     startup: {
       name: 'Startup Plan',
       description: 'Perfect for single-location businesses. Includes core POS functionality, basic inventory management, and standard reporting for 1 outlet.',
@@ -170,8 +211,8 @@ export class SubscriptionService {
     const subscription = await this.getUserSubscription(userId);
 
     if (!subscription) {
-      // No subscription yet - allow all features during onboarding
-      return true;
+      // No subscription yet - default to free plan features
+      return this.planConfigs.free.features[feature];
     }
 
     return subscription.features[feature];
@@ -182,8 +223,9 @@ export class SubscriptionService {
     const subscription = await this.getUserSubscription(userId);
 
     if (!subscription) {
-      // No subscription yet - allow unlimited during onboarding
-      return true;
+      // No subscription yet - default to free plan limits (1 outlet)
+      const maxOutlets = this.planConfigs.free.features.maxOutlets;
+      return maxOutlets === -1 || currentOutletCount < maxOutlets;
     }
 
     const maxOutlets = subscription.features.maxOutlets;

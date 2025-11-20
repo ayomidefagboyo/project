@@ -36,7 +36,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
   const location = useLocation();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isCreateDropdownOpen, setIsCreateDropdownOpen] = useState(false);
-  const [isCreateReportOpen, setIsCreateReportOpen] = useState(false);
+  const [isCreateReportOpen, setIsCreateReportOpen] = useState(true);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown when clicking outside

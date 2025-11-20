@@ -5,6 +5,7 @@
 import { apiClient } from './apiClient';
 import { supabase } from './supabase';
 import { User, UserRole } from '@/types';
+import { subscriptionService } from './subscriptionService';
 
 export interface AuthUser {
   id: string;
@@ -78,6 +79,22 @@ class AuthService {
       }
 
       if (data.user) {
+        // Create free subscription for new user
+        try {
+          const freePlanConfig = subscriptionService.getPlanConfig('free');
+          await subscriptionService.createSubscription({
+            user_id: data.user.id,
+            plan_id: 'free',
+            status: 'active',
+            features: freePlanConfig.features,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+        } catch (subscriptionError) {
+          console.warn('Failed to create free subscription:', subscriptionError);
+          // Don't fail signup if subscription creation fails
+        }
+
         const authUser: AuthUser = {
           id: data.user.id,
           email: data.user.email || '',

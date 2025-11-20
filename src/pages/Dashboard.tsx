@@ -496,8 +496,8 @@ const Dashboard: React.FC = () => {
         />
       )}
 
-      {/* Company Onboarding Modal */}
-      {showCompanyOnboarding && (
+      {/* Company Onboarding - Full Screen */}
+      {showCompanyOnboarding ? (
         <CompanyOnboarding
           onComplete={() => {
             setShowCompanyOnboarding(false);
@@ -509,9 +509,9 @@ const Dashboard: React.FC = () => {
             // For now, just hide the modal - could show a different message
           }}
         />
-      )}
-
-      {/* Onboarding Popup */}
+      ) : (
+        <>
+          {/* Onboarding Popup */}
       {showOnboarding && (
         <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 p-6">
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl max-w-lg w-full relative border border-gray-100 dark:border-gray-800">
@@ -917,6 +917,8 @@ const Dashboard: React.FC = () => {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 };
