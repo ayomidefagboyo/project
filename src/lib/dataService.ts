@@ -116,11 +116,13 @@ export class DataService {
   // Outlet operations with subscription gating
   async createOutlet(outlet: Partial<Outlet>, userId?: string): Promise<{ data: Outlet | null; error: string | null }> {
     if (userId) {
-      // Use gated API call to check outlet limits
+      // Use gated API call to check outlet limits and create outlet
       const result = await gatedApiCalls.createOutlet(userId, outlet);
       if (result.error) {
         return { data: null, error: result.error };
       }
+      // Return the outlet created by the gated API call
+      return { data: result.data?.outlet || null, error: null };
     }
 
     return this.create<Outlet>(TABLES.OUTLETS, outlet);

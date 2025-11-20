@@ -11,9 +11,10 @@ import { dataService } from '@/lib/services';
 import stripeService, { Subscription } from '@/lib/stripeService';
 import { paymentPlans } from '@/lib/stripe';
 import { Outlet as OutletType } from '@/types';
+import CompanyOnboarding from '@/components/onboarding/CompanyOnboarding';
 
 const Settings: React.FC = () => {
-  const { currentOutlet, currentUser, hasPermission, setCurrentOutlet, userOutlets, setUserOutlets } = useOutlet();
+  const { currentOutlet, currentUser, hasPermission, setCurrentOutlet, userOutlets, setUserOutlets, refreshData } = useOutlet();
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showEditBusinessModal, setShowEditBusinessModal] = useState(false);
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
@@ -33,12 +34,29 @@ const Settings: React.FC = () => {
     isVisible: false
   });
 
-  if (!currentOutlet) {
+  // Only show onboarding if user truly has no outlets (like Dashboard logic)
+  if (!currentUser?.outletId && userOutlets.length === 0) {
+    return (
+      <CompanyOnboarding
+        onComplete={() => {
+          // Refresh outlet data after onboarding
+          refreshData();
+        }}
+        onSkip={() => {
+          // For now, just refresh - could redirect to dashboard
+          refreshData();
+        }}
+      />
+    );
+  }
+
+  // Show loading or fallback if currentOutlet is not set but user has outlets
+  if (!currentOutlet && userOutlets.length > 0) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
           <Building2 className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-          <p className="text-muted-foreground">No outlet selected</p>
+          <p className="text-muted-foreground">Loading outlet settings...</p>
         </div>
       </div>
     );

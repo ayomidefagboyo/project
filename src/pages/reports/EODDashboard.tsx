@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { 
+import {
   Calendar,
   DollarSign,
   TrendingUp,
@@ -20,6 +20,7 @@ import { eodService } from '../../lib/eodService';
 import { useErrorHandler } from '../../lib/errorHandler';
 import { currencyService } from '../../lib/currencyService';
 import { supabase } from '../../lib/supabase';
+import CompanyOnboarding from '../../components/onboarding/CompanyOnboarding';
 
 interface EODFormData {
   date: string;
@@ -32,7 +33,7 @@ interface EODFormData {
 }
 
 const EODDashboard: React.FC = () => {
-  const { currentOutlet } = useOutlet();
+  const { currentOutlet, refreshData } = useOutlet();
   const { error, setError, clearError } = useErrorHandler();
   
   const [loading, setLoading] = useState(false);
@@ -180,17 +181,16 @@ const EODDashboard: React.FC = () => {
 
   if (!currentOutlet) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <AlertTriangle className="h-16 w-16 text-red-500 mx-auto mb-4" />
-          <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-            No Outlet Selected
-          </h3>
-          <p className="text-gray-600 dark:text-gray-400">
-            Please select an outlet to create an EOD report.
-          </p>
-        </div>
-      </div>
+      <CompanyOnboarding
+        onComplete={() => {
+          // Refresh outlet data after onboarding
+          refreshData();
+        }}
+        onSkip={() => {
+          // For now, just refresh - could redirect to dashboard
+          refreshData();
+        }}
+      />
     );
   }
 

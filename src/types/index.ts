@@ -535,7 +535,7 @@ export interface UserPermissions {
 }
 
 // Subscription Plan Types
-export type SubscriptionPlan = 'startup' | 'business' | 'enterprise';
+export type SubscriptionPlan = 'free' | 'startup' | 'business' | 'enterprise';
 
 export interface SubscriptionFeatures {
   maxOutlets: number;

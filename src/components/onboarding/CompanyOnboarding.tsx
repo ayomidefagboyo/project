@@ -53,11 +53,10 @@ const CompanyOnboarding: React.FC<CompanyOnboardingProps> = ({ onComplete, onSki
         status: 'active',
         currency: 'USD', // Default currency
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
       }, currentUser.id);
 
       if (outletError || !outlet) {
+        console.error('Create outlets error:', outletError);
         throw new Error(outletError || 'Failed to create outlet');
       }
 

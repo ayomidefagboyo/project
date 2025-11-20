@@ -119,8 +119,21 @@ export const gatedApiCalls = {
   createOutlet: async (userId: string, outletData: any) => {
     return ApiMiddleware.makeApiCall(
       async () => {
-        // Create outlet logic
-        return { success: true, outlet: outletData };
+        // Import here to avoid circular dependency
+        const { supabase } = await import('./supabase');
+
+        // Actually create the outlet in the database
+        const { data: outlet, error } = await supabase
+          .from('outlets')
+          .insert(outletData)
+          .select()
+          .single();
+
+        if (error) {
+          throw new Error(error.message);
+        }
+
+        return { success: true, outlet };
       },
       { userId, checkOutletLimit: true }
     );
