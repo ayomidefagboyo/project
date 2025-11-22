@@ -222,7 +222,7 @@ const Dashboard: React.FC = () => {
           user_id: currentUser.id,
           accessible_outlets_count: accessibleOutlets.length,
           can_view_all: canViewAllOutlets(),
-          is_business_owner: isBusinessOwner()
+          is_business_owner: isBusinessOwner
         });
 
         // Track device info for analytics
@@ -297,7 +297,7 @@ const Dashboard: React.FC = () => {
 
       if (!subscription) {
         // No subscription yet - show onboarding for business owners without outlets
-        if (isBusinessOwner() && !currentUser.outletId) {
+        if (isBusinessOwner && !currentUser.outletId) {
           setShowOnboarding(true);
         }
         return;

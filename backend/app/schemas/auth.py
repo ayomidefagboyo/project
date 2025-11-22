@@ -185,3 +185,42 @@ class UserProfileUpdate(BaseModel):
             raise ValueError('Name cannot be empty')
         return v.strip() if v else None
 
+
+class InviteRequest(BaseModel):
+    """Schema for user invitation request"""
+    email: EmailStr = Field(..., description="Email address to invite")
+    name: str = Field(..., min_length=1, max_length=255, description="Full name of the invitee")
+    role: UserRole = Field(..., description="Role to assign to the invited user")
+    outletId: str = Field(..., description="Outlet ID to associate with the user")
+
+    @validator('name')
+    def validate_name(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Name cannot be empty')
+        return v.strip()
+
+
+class InviteResponse(BaseModel):
+    """Schema for invitation response"""
+    success: bool = Field(..., description="Whether the invitation was sent successfully")
+    invite_id: Optional[str] = Field(None, description="Invitation ID for tracking")
+    message: str = Field(..., description="Success or error message")
+
+
+class AcceptInviteRequest(BaseModel):
+    """Schema for accepting an invitation"""
+    invite_id: str = Field(..., description="Invitation ID")
+    password: str = Field(..., min_length=8, max_length=128, description="New user password")
+
+    @validator('password')
+    def validate_password(cls, v):
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters long')
+        if not any(c.isupper() for c in v):
+            raise ValueError('Password must contain at least one uppercase letter')
+        if not any(c.islower() for c in v):
+            raise ValueError('Password must contain at least one lowercase letter')
+        if not any(c.isdigit() for c in v):
+            raise ValueError('Password must contain at least one digit')
+        return v
+

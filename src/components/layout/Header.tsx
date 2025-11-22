@@ -262,7 +262,6 @@ const Header: React.FC<HeaderProps> = ({ isDarkMode, toggleDarkMode, onToggleSid
       {showInviteModal && (
         <InviteTeamMember
           onClose={() => setShowInviteModal(false)}
-          onSuccess={handleInviteSuccess}
         />
       )}
 
