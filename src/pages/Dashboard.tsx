@@ -21,6 +21,7 @@ import RecentActivity from '@/components/dashboard/RecentActivity';
 import { Button } from '@/components/ui/Button';
 import { useOutlet } from '@/contexts/OutletContext';
 import { vendorInvoiceService } from '@/lib/vendorInvoiceService';
+import { eodService } from '@/lib/eodServiceNew';
 import { VendorInvoice, DashboardView, Outlet } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import VendorInvoiceTable from '@/components/invoice/VendorInvoiceTable';
@@ -54,6 +55,7 @@ const Dashboard: React.FC = () => {
   });
 
   const [vendorInvoices, setVendorInvoices] = useState<VendorInvoice[]>([]);
+  const [eodStats, setEodStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isOutletSelectorOpen, setIsOutletSelectorOpen] = useState(false);
@@ -246,7 +248,7 @@ const Dashboard: React.FC = () => {
     }
   }, [currentUser, canViewAllOutlets]);
 
-  // Load vendor invoices data
+  // Load vendor invoices and EOD data
   const loadDashboardData = async () => {
     try {
       setLoading(true);
@@ -258,6 +260,7 @@ const Dashboard: React.FC = () => {
         return;
       }
 
+      // Load vendor invoices
       const { data, error: invoiceError } = await vendorInvoiceService.getVendorInvoices(outletIds);
 
       if (invoiceError) {
@@ -265,6 +268,19 @@ const Dashboard: React.FC = () => {
       } else if (data) {
         setVendorInvoices(data);
       }
+
+      // Load EOD statistics for the first outlet (or combine if multi-outlet)
+      try {
+        const { data: statsData, error: statsError } = await eodService.getEODStats();
+        if (statsError) {
+          console.warn('Failed to load EOD stats:', statsError);
+        } else if (statsData) {
+          setEodStats(statsData);
+        }
+      } catch (eodError) {
+        console.warn('Error loading EOD stats:', eodError);
+      }
+
     } catch (err) {
       console.error('Error loading dashboard data:', err);
       setError('Failed to load dashboard data');
@@ -401,8 +417,9 @@ const Dashboard: React.FC = () => {
           endDate: dashboardView.dateRange.endDate
         },
         metrics: {
-          totalSales: 45250.00, // This would come from real data
-          totalExpenses: metrics.totalExpenses,
+          totalSales: eodStats?.total_sales || 0,
+          totalExpenses: eodStats?.total_expenses || metrics.totalExpenses,
+          netProfit: eodStats?.net_profit || 0,
           pendingInvoices: metrics.pendingInvoices,
           approvedInvoices: metrics.approvedInvoices,
           totalInvoices: metrics.totalInvoices
@@ -726,30 +743,30 @@ const Dashboard: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
           <DashboardCard
             title="Total Sales"
-            value="$45,250.00"
+            value={eodStats ? formatCurrency(eodStats.total_sales) : "$0.00"}
             icon={<TrendingUp className="w-5 h-5" />}
             subtitle="This month"
             change={{ value: 15.2, isPositive: true }}
           />
           <DashboardCard
             title="Total Expenses"
-            value={formatCurrency(metrics.totalExpenses)}
+            value={eodStats ? formatCurrency(eodStats.total_expenses) : formatCurrency(metrics.totalExpenses)}
             icon={<DollarSign className="w-5 h-5" />}
             subtitle="This month"
             change={{ value: 12.5, isPositive: false }}
           />
           <DashboardCard
-            title="Pending Approvals"
-            value={metrics.pendingInvoices.toString()}
+            title="Pending Reports"
+            value={eodStats?.reports_by_status?.draft || 0}
             icon={<Clock className="w-5 h-5" />}
-            subtitle={metrics.pendingInvoices === 1 ? "Invoice awaiting" : "Invoices awaiting"}
+            subtitle="EOD reports awaiting"
             change={{ value: 8.1, isPositive: false }}
           />
           <DashboardCard
-            title="Approved Invoices"
-            value={metrics.approvedInvoices.toString()}
+            title="Net Profit"
+            value={eodStats ? formatCurrency(eodStats.net_profit) : "$0.00"}
             icon={<CheckCircle className="w-5 h-5" />}
-            subtitle="Ready for payment"
+            subtitle="This month"
             change={{ value: 23.4, isPositive: true }}
           />
         </div>
