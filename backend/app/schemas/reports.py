@@ -29,7 +29,6 @@ class EODData(BaseModel):
     inventory_cost: float = Field(0.0, ge=0, description="Inventory cost")
     notes: Optional[str] = Field(None, max_length=1000, description="Additional notes")
 
-
     def get_total_sales(self) -> float:
         """Calculate total sales"""
         return round(self.sales_cash + self.sales_transfer + self.sales_pos + self.sales_credit, 2)

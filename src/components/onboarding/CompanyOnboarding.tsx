@@ -18,14 +18,11 @@ const CompanyOnboarding: React.FC<CompanyOnboardingProps> = ({ onComplete, onSki
   const { currentUser, setUserOutlets, setCurrentOutlet } = useOutlet();
 
   const businessTypes = [
-    'Supermarket/Retail',
-    'Pharmacy',
-    'Restaurant/Food Service',
-    'Professional Services',
-    'Healthcare',
-    'Technology',
-    'Manufacturing',
-    'Other'
+    { label: 'Supermarket/Grocery Store', value: 'supermarket' },
+    { label: 'Retail Store', value: 'retail' },
+    { label: 'Restaurant/Food Service', value: 'restaurant' },
+    { label: 'Café/Coffee Shop', value: 'cafe' },
+    { label: 'Lounge/Bar', value: 'lounge' }
   ];
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -46,10 +43,24 @@ const CompanyOnboarding: React.FC<CompanyOnboardingProps> = ({ onComplete, onSki
       }
 
       // Create the outlet with company information
+      const defaultOpeningHours = {
+        monday: { open: '09:00', close: '17:00', isOpen: true },
+        tuesday: { open: '09:00', close: '17:00', isOpen: true },
+        wednesday: { open: '09:00', close: '17:00', isOpen: true },
+        thursday: { open: '09:00', close: '17:00', isOpen: true },
+        friday: { open: '09:00', close: '17:00', isOpen: true },
+        saturday: { open: '09:00', close: '17:00', isOpen: true },
+        sunday: { open: '09:00', close: '17:00', isOpen: false }
+      };
+
       const { data: outlet, error: outletError } = await dataService.createOutlet({
         name: formData.companyName,
         business_type: formData.businessType,
-        address: formData.location,
+        address: formData.location || 'Not provided',
+        phone: 'Not provided', // Default placeholder - can be updated later
+        email: currentUser.email, // Use the email from signup
+        opening_hours: defaultOpeningHours, // Default business hours
+        tax_rate: 0, // Default tax rate - can be updated later
         status: 'active',
         currency: 'USD', // Default currency
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -141,7 +152,7 @@ const CompanyOnboarding: React.FC<CompanyOnboardingProps> = ({ onComplete, onSki
               >
                 <option value="">Select your business type</option>
                 {businessTypes.map((type) => (
-                  <option key={type} value={type}>{type}</option>
+                  <option key={type.value} value={type.value}>{type.label}</option>
                 ))}
               </select>
             </div>
