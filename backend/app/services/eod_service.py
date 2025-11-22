@@ -47,29 +47,44 @@ class EODService:
             cash_variance = eod_data.get_cash_variance()
             gross_margin_percent = eod_data.get_gross_margin_percent()
             
-            # Prepare report data
+            # Prepare report data - only include columns that exist in database
             report_dict = eod_data.dict()
-            report_dict.update({
+            # Convert date to string for JSON serialization
+            if isinstance(report_dict.get("date"), date):
+                report_dict["date"] = report_dict["date"].isoformat()
+
+            # Prepare full EOD report data for the eod table
+            eod_report = {
+                "date": report_dict["date"],
+                "sales_cash": eod_data.sales_cash,
+                "sales_transfer": eod_data.sales_transfer,
+                "sales_pos": eod_data.sales_pos,
+                "sales_credit": eod_data.sales_credit,
+                "opening_balance": eod_data.opening_balance,
+                "closing_balance": eod_data.closing_balance,
+                "bank_deposit": eod_data.bank_deposit,
+                "inventory_cost": eod_data.inventory_cost,
+                "notes": eod_data.notes,
                 "outlet_id": outlet_id,
-                "status": ReportStatus.DRAFT,
+                "submitted_by": user_id,
                 "total_sales": total_sales,
                 "gross_profit": gross_profit,
                 "expected_cash": expected_cash,
                 "cash_variance": cash_variance,
                 "gross_margin_percent": gross_margin_percent,
-                "submitted_by": user_id,
+                "status": ReportStatus.DRAFT,
                 "discrepancies": self._calculate_discrepancies(eod_data)
-            })
-            
-            # Insert report
-            response = self.supabase.table(Tables.DAILY_REPORTS).insert(report_dict).execute()
+            }
+
+            # Insert report into eod table
+            response = self.supabase.table(Tables.EOD).insert(eod_report).execute()
             
             if not response.data:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Failed to create EOD report"
                 )
-            
+
             report = response.data[0]
             return EnhancedDailyReport(**report)
             
@@ -94,7 +109,7 @@ class EODService:
         """Get EOD reports with pagination and filtering"""
         try:
             # Build query
-            query = self.supabase.table(Tables.DAILY_REPORTS).select("*", count="exact")
+            query = self.supabase.table(Tables.EOD).select("*", count="exact")
             query = query.eq("outlet_id", outlet_id)
             
             # Apply date filters
@@ -139,7 +154,7 @@ class EODService:
     async def get_eod_report(self, report_id: str, outlet_id: str) -> EnhancedDailyReport:
         """Get a specific EOD report"""
         try:
-            response = self.supabase.table(Tables.DAILY_REPORTS).select("*").eq("id", report_id).eq("outlet_id", outlet_id).execute()
+            response = self.supabase.table(Tables.EOD).select("*").eq("id", report_id).eq("outlet_id", outlet_id).execute()
             
             if not response.data:
                 raise HTTPException(
@@ -198,7 +213,7 @@ class EODService:
                 return existing
             
             # Update report
-            response = self.supabase.table(Tables.DAILY_REPORTS).update(update_dict).eq("id", report_id).eq("outlet_id", outlet_id).execute()
+            response = self.supabase.table(Tables.EOD).update(update_dict).eq("id", report_id).eq("outlet_id", outlet_id).execute()
             
             if not response.data:
                 raise HTTPException(
@@ -225,7 +240,7 @@ class EODService:
             await self.get_eod_report(report_id, outlet_id)
             
             # Delete report
-            response = self.supabase.table(Tables.DAILY_REPORTS).delete().eq("id", report_id).eq("outlet_id", outlet_id).execute()
+            response = self.supabase.table(Tables.EOD).delete().eq("id", report_id).eq("outlet_id", outlet_id).execute()
             
             return True
             
@@ -241,7 +256,7 @@ class EODService:
     async def check_eod_exists(self, outlet_id: str, report_date: str) -> EODExistsResponse:
         """Check if EOD report exists for a specific date"""
         try:
-            response = self.supabase.table(Tables.DAILY_REPORTS).select("*").eq("outlet_id", outlet_id).eq("date", report_date).execute()
+            response = self.supabase.table(Tables.EOD).select("*").eq("outlet_id", outlet_id).eq("date", report_date).execute()
             
             if response.data:
                 report = EnhancedDailyReport(**response.data[0])
@@ -302,14 +317,14 @@ class EODService:
             
             # Cash flow trend
             cash_flow_trend = [
-                {"date": report.date, "amount": report.closing_balance - report.opening_balance}
+                {"date": report.date.isoformat() if isinstance(report.date, date) else report.date, "amount": report.closing_balance - report.opening_balance}
                 for report in reports
             ]
-            
+
             # Sales trend
             sales_trend = [
                 {
-                    "date": report.date,
+                    "date": report.date.isoformat() if isinstance(report.date, date) else report.date,
                     "sales": report.get_total_sales(),
                     "expenses": report.inventory_cost,
                     "profit": report.get_gross_profit()
@@ -326,7 +341,7 @@ class EODService:
             
             # Top performing days
             top_performing_days = sorted(
-                [{"date": report.date, "sales": report.get_total_sales(), "profit": report.get_gross_profit()} for report in reports],
+                [{"date": report.date.isoformat() if isinstance(report.date, date) else report.date, "sales": report.get_total_sales(), "profit": report.get_gross_profit()} for report in reports],
                 key=lambda x: x["sales"],
                 reverse=True
             )[:5]
@@ -366,7 +381,7 @@ class EODService:
         """Get EOD statistics"""
         try:
             # Get all reports for the outlet
-            response = self.supabase.table(Tables.DAILY_REPORTS).select("*").eq("outlet_id", outlet_id).execute()
+            response = self.supabase.table(Tables.EOD).select("*").eq("outlet_id", outlet_id).execute()
             
             reports = response.data or []
             
@@ -424,7 +439,7 @@ class EODService:
                 "notes": approval_data.notes
             }
             
-            response = self.supabase.table(Tables.DAILY_REPORTS).update(update_data).eq("id", report_id).eq("outlet_id", outlet_id).execute()
+            response = self.supabase.table(Tables.EOD).update(update_data).eq("id", report_id).eq("outlet_id", outlet_id).execute()
             
             if not response.data:
                 raise HTTPException(

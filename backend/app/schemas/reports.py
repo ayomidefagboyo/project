@@ -4,7 +4,7 @@ Pydantic schemas for EOD reporting and analytics data validation
 
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Dict, Any, List, ForwardRef
-from datetime import datetime, date
+from datetime import datetime, date as DateType
 from enum import Enum
 
 
@@ -18,7 +18,7 @@ class ReportStatus(str, Enum):
 
 class EODData(BaseModel):
     """Schema for EOD (End of Day) report data"""
-    date: date = Field(..., description="Report date")
+    date: DateType = Field(..., description="Report date")
     sales_cash: float = Field(0.0, ge=0, description="Cash sales amount")
     sales_transfer: float = Field(0.0, ge=0, description="Bank transfer sales amount")
     sales_pos: float = Field(0.0, ge=0, description="POS card sales amount")
@@ -134,8 +134,8 @@ class EODStatsResponse(BaseModel):
 
 class EODSearchRequest(BaseModel):
     """Schema for EOD search request"""
-    date_from: Optional[date] = Field(None, description="Search from date")
-    date_to: Optional[date] = Field(None, description="Search to date")
+    date_from: Optional[DateType] = Field(None, description="Search from date")
+    date_to: Optional[DateType] = Field(None, description="Search to date")
     status: Optional[ReportStatus] = Field(None, description="Filter by status")
     min_sales: Optional[float] = Field(None, ge=0, description="Minimum sales amount")
     max_sales: Optional[float] = Field(None, ge=0, description="Maximum sales amount")
@@ -145,8 +145,8 @@ class EODSearchRequest(BaseModel):
 
 class EODComparisonRequest(BaseModel):
     """Schema for EOD comparison request"""
-    date_from: date = Field(..., description="Start date for comparison")
-    date_to: date = Field(..., description="End date for comparison")
+    date_from: DateType = Field(..., description="Start date for comparison")
+    date_to: DateType = Field(..., description="End date for comparison")
     compare_with_previous: bool = Field(True, description="Compare with previous period")
     metrics: List[str] = Field(["sales", "profit", "margin"], description="Metrics to compare")
 
@@ -192,5 +192,5 @@ class EODSummaryResponse(BaseModel):
     month_sales: float = Field(..., description="This month's sales")
     month_profit: float = Field(..., description="This month's profit")
     pending_reports: int = Field(..., description="Number of pending reports")
-    last_report_date: Optional[date] = Field(None, description="Last report date")
+    last_report_date: Optional[DateType] = Field(None, description="Last report date")
     cash_variance_today: Optional[float] = Field(None, description="Today's cash variance")

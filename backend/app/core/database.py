@@ -75,6 +75,7 @@ class Tables:
     INVOICE_ITEMS = "invoice_items"
     EXPENSES = "expenses"
     DAILY_REPORTS = "daily_reports"
+    EOD = "eod"
     BUSINESS_SETTINGS = "business_settings"
     USER_INVITATIONS = "user_invitations"
     AUDIT_ENTRIES = "audit_entries"
