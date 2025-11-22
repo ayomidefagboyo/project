@@ -133,3 +133,51 @@ async def delete_eod_report(
     except Exception as e:
         logger.error(f"Error deleting EOD report: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete EOD report")
+
+
+@router.get("/analytics")
+async def get_eod_analytics(
+    outlet_id: Optional[str] = Query(None, description="Outlet ID"),
+    date_from: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: Dict[str, Any] = Depends(require_auth())
+):
+    """Get EOD analytics for dashboard"""
+    try:
+        # Use outlet_id from query param or try to get from user context
+        if not outlet_id:
+            outlet_id = current_user.get('outlet_id')
+
+        if not outlet_id:
+            raise HTTPException(status_code=400, detail="No outlet specified")
+
+        analytics = await eod_service.get_eod_analytics(outlet_id, date_from, date_to)
+        return analytics
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting EOD analytics: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get EOD analytics")
+
+
+@router.get("/stats/overview")
+async def get_eod_stats_overview(
+    outlet_id: Optional[str] = Query(None, description="Outlet ID"),
+    current_user: Dict[str, Any] = Depends(require_auth())
+):
+    """Get EOD statistics overview for dashboard"""
+    try:
+        # Use outlet_id from query param or try to get from user context
+        if not outlet_id:
+            outlet_id = current_user.get('outlet_id')
+
+        if not outlet_id:
+            raise HTTPException(status_code=400, detail="No outlet specified")
+
+        stats = await eod_service.get_eod_stats_overview(outlet_id)
+        return stats
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting EOD stats overview: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get EOD stats overview")

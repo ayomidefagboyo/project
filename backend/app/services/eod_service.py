@@ -278,8 +278,211 @@ class EODService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to check EOD existence"
             )
-    
-    async def get_eod_analytics(self, outlet_id: str, date_from: str, date_to: str) -> EODAnalytics:
+
+    async def get_eod_analytics(self, outlet_id: str, date_from: Optional[str] = None, date_to: Optional[str] = None) -> Dict[str, Any]:
+        """Get EOD analytics for dashboard"""
+        try:
+            from datetime import datetime, timedelta
+
+            # Default date range: last 30 days
+            if not date_to:
+                date_to = datetime.now().strftime('%Y-%m-%d')
+            if not date_from:
+                date_from = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+
+            # Get all EOD reports in date range
+            response = self.supabase.table(Tables.EOD)\
+                .select("*")\
+                .eq("outlet_id", outlet_id)\
+                .gte("date", date_from)\
+                .lte("date", date_to)\
+                .order("date", desc=False)\
+                .execute()
+
+            reports = response.data or []
+
+            if not reports:
+                return {
+                    "average_daily_sales": 0,
+                    "total_sales": 0,
+                    "total_expenses": 0,
+                    "net_profit": 0,
+                    "cash_variance": 0,
+                    "sales_trend": [],
+                    "top_selling_days": [],
+                    "expense_breakdown": {},
+                    "cash_flow_analysis": {
+                        "average_cash_flow": 0,
+                        "cash_flow_trend": "stable",
+                        "variance_analysis": {
+                            "high_variance_days": 0,
+                            "low_variance_days": 0,
+                            "average_variance": 0
+                        }
+                    }
+                }
+
+            # Calculate metrics
+            total_sales = sum(float(r.get('total_sales', 0)) for r in reports)
+            total_expenses = sum(float(r.get('inventory_cost', 0)) for r in reports)
+            total_cash_variance = sum(float(r.get('cash_variance', 0)) for r in reports)
+
+            average_daily_sales = total_sales / len(reports) if reports else 0
+            net_profit = total_sales - total_expenses
+
+            # Sales trend data
+            sales_trend = []
+            for report in reports:
+                sales_trend.append({
+                    "date": report.get('date'),
+                    "sales": float(report.get('total_sales', 0)),
+                    "expenses": float(report.get('inventory_cost', 0)),
+                    "profit": float(report.get('gross_profit', 0))
+                })
+
+            # Top selling days (sorted by sales)
+            top_selling_days = sorted(
+                [{"date": r.get('date'), "sales": float(r.get('total_sales', 0))} for r in reports],
+                key=lambda x: x['sales'],
+                reverse=True
+            )[:5]
+
+            # Expense breakdown
+            expense_breakdown = {
+                "inventory": total_expenses,
+                "operational": 0  # Could add more categories later
+            }
+
+            # Cash flow analysis
+            variances = [float(r.get('cash_variance', 0)) for r in reports]
+            average_variance = sum(variances) / len(variances) if variances else 0
+            high_variance_days = sum(1 for v in variances if abs(v) > 100)
+            low_variance_days = sum(1 for v in variances if abs(v) <= 10)
+
+            # Determine trend
+            if len(sales_trend) >= 2:
+                recent_avg = sum(d['sales'] for d in sales_trend[-7:]) / min(7, len(sales_trend))
+                earlier_avg = sum(d['sales'] for d in sales_trend[:-7]) / max(1, len(sales_trend) - 7)
+                if recent_avg > earlier_avg * 1.05:
+                    cash_flow_trend = "increasing"
+                elif recent_avg < earlier_avg * 0.95:
+                    cash_flow_trend = "decreasing"
+                else:
+                    cash_flow_trend = "stable"
+            else:
+                cash_flow_trend = "stable"
+
+            return {
+                "average_daily_sales": round(average_daily_sales, 2),
+                "total_sales": round(total_sales, 2),
+                "total_expenses": round(total_expenses, 2),
+                "net_profit": round(net_profit, 2),
+                "cash_variance": round(total_cash_variance, 2),
+                "sales_trend": sales_trend,
+                "top_selling_days": top_selling_days,
+                "expense_breakdown": expense_breakdown,
+                "cash_flow_analysis": {
+                    "average_cash_flow": round(average_variance, 2),
+                    "cash_flow_trend": cash_flow_trend,
+                    "variance_analysis": {
+                        "high_variance_days": high_variance_days,
+                        "low_variance_days": low_variance_days,
+                        "average_variance": round(average_variance, 2)
+                    }
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting EOD analytics: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to get EOD analytics"
+            )
+
+    async def get_eod_stats_overview(self, outlet_id: str) -> Dict[str, Any]:
+        """Get EOD statistics overview for dashboard"""
+        try:
+            from datetime import datetime, timedelta
+
+            # Get current month data
+            current_month_start = datetime.now().replace(day=1).strftime('%Y-%m-%d')
+            today = datetime.now().strftime('%Y-%m-%d')
+
+            response = self.supabase.table(Tables.EOD)\
+                .select("*")\
+                .eq("outlet_id", outlet_id)\
+                .gte("date", current_month_start)\
+                .lte("date", today)\
+                .execute()
+
+            reports = response.data or []
+
+            # Calculate basic stats
+            total_reports = len(reports)
+            total_sales = sum(float(r.get('total_sales', 0)) for r in reports)
+            total_expenses = sum(float(r.get('inventory_cost', 0)) for r in reports)
+            net_profit = total_sales - total_expenses
+            cash_variance = sum(float(r.get('cash_variance', 0)) for r in reports)
+            average_daily_sales = total_sales / max(1, total_reports)
+
+            # Reports by status
+            reports_by_status = {}
+            for report in reports:
+                status = report.get('status', 'draft')
+                reports_by_status[status] = reports_by_status.get(status, 0) + 1
+
+            # Sales by payment method
+            sales_by_payment_method = {
+                "cash": sum(float(r.get('sales_cash', 0)) for r in reports),
+                "transfer": sum(float(r.get('sales_transfer', 0)) for r in reports),
+                "pos": sum(float(r.get('sales_pos', 0)) for r in reports),
+                "credit": sum(float(r.get('sales_credit', 0)) for r in reports)
+            }
+
+            # Monthly trends (last 6 months)
+            monthly_trends = []
+            for i in range(6):
+                month_start = (datetime.now().replace(day=1) - timedelta(days=30*i)).replace(day=1)
+                month_end = (month_start.replace(month=month_start.month % 12 + 1) - timedelta(days=1)) if month_start.month != 12 else month_start.replace(year=month_start.year + 1, month=1) - timedelta(days=1)
+
+                month_response = self.supabase.table(Tables.EOD)\
+                    .select("*")\
+                    .eq("outlet_id", outlet_id)\
+                    .gte("date", month_start.strftime('%Y-%m-%d'))\
+                    .lte("date", month_end.strftime('%Y-%m-%d'))\
+                    .execute()
+
+                month_reports = month_response.data or []
+                month_sales = sum(float(r.get('total_sales', 0)) for r in month_reports)
+                month_expenses = sum(float(r.get('inventory_cost', 0)) for r in month_reports)
+
+                monthly_trends.append({
+                    "month": month_start.strftime('%Y-%m'),
+                    "sales": round(month_sales, 2),
+                    "expenses": round(month_expenses, 2),
+                    "profit": round(month_sales - month_expenses, 2)
+                })
+
+            return {
+                "total_reports": total_reports,
+                "total_sales": round(total_sales, 2),
+                "total_expenses": round(total_expenses, 2),
+                "net_profit": round(net_profit, 2),
+                "average_daily_sales": round(average_daily_sales, 2),
+                "cash_variance": round(cash_variance, 2),
+                "reports_by_status": reports_by_status,
+                "sales_by_payment_method": {k: round(v, 2) for k, v in sales_by_payment_method.items()},
+                "monthly_trends": monthly_trends[::-1]  # Reverse to show oldest to newest
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting EOD stats overview: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to get EOD stats overview"
+            )
+
+    async def get_eod_analytics_old(self, outlet_id: str, date_from: str, date_to: str) -> EODAnalytics:
         """Get EOD analytics for a date range"""
         try:
             # Get reports for the period
