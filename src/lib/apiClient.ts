@@ -21,29 +21,19 @@ class ApiClient {
   private token: string | null = null;
 
   constructor() {
-    // Use localhost in development if no backend URL is set
+    // Use environment variable - no fallback
     const envUrl = import.meta.env.VITE_API_BASE_URL;
-    const defaultUrl = window.location.hostname === 'localhost'
-      ? 'http://localhost:8000/api/v1'
-      : 'https://compazz-backend.onrender.com/api/v1';
 
-    this.baseUrl = envUrl || defaultUrl;
-
-    // Enhanced debugging for production issues
-    console.log('=== ApiClient Debug ===');
-    console.log('Environment VITE_API_BASE_URL:', envUrl);
-    console.log('Default URL (fallback):', defaultUrl);
-    console.log('Final baseUrl:', this.baseUrl);
-    console.log('Current hostname:', window.location.hostname);
-    console.log('All env vars:', import.meta.env);
-    console.log('======================');
-
-    // Safety check for placeholder URLs
-    if (this.baseUrl.includes('your-render-backend-url')) {
-      console.error('⚠️ PLACEHOLDER URL DETECTED! Using fallback...');
-      this.baseUrl = 'https://compazz-backend.onrender.com/api/v1';
-      console.log('Fixed baseUrl:', this.baseUrl);
+    if (!envUrl) {
+      throw new Error('VITE_API_BASE_URL environment variable is required');
     }
+
+    this.baseUrl = envUrl;
+
+    // Debug logging
+    console.log('=== ApiClient Debug ===');
+    console.log('API Base URL:', this.baseUrl);
+    console.log('======================');
   }
 
   /**
