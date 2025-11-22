@@ -107,23 +107,24 @@ export interface EODSearchRequest {
 
 class EODService {
   // Create EOD report
-  async createEODReport(eodData: EODCreateData): Promise<EODResponse> {
+  async createEODReport(eodData: EODCreateData, outletId?: string): Promise<EODResponse> {
     try {
-      const response = await apiClient.post('/eod/reports', eodData);
-      
+      const url = outletId ? `/eod/reports?outlet_id=${outletId}` : '/eod/reports';
+      const response = await apiClient.post(url, eodData);
+
       if (response.error) {
         return { data: null, error: response.error };
       }
 
-      return { 
-        data: response.data, 
-        error: null 
+      return {
+        data: response.data,
+        error: null
       };
     } catch (error) {
       console.error('Create EOD report error:', error);
-      return { 
-        data: null, 
-        error: error instanceof Error ? error.message : 'Failed to create EOD report' 
+      return {
+        data: null,
+        error: error instanceof Error ? error.message : 'Failed to create EOD report'
       };
     }
   }
