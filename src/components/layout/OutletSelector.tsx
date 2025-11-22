@@ -86,7 +86,7 @@ const OutletSelector: React.FC<OutletSelectorProps> = ({ onCreateStore }) => {
       </button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 mt-1 w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50">
+        <div className="absolute top-full left-0 mt-1 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50">
           <div className="py-2">
             <div className="px-3 py-1">
               <h3 className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
@@ -100,9 +100,7 @@ const OutletSelector: React.FC<OutletSelectorProps> = ({ onCreateStore }) => {
               <button
                 key={outlet.id}
                 onClick={() => handleOutletSelect(outlet)}
-                className={`w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
-                  currentOutlet.id === outlet.id ? 'bg-blue-50 dark:bg-blue-900/20' : ''
-                }`}
+                className="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -111,25 +109,8 @@ const OutletSelector: React.FC<OutletSelectorProps> = ({ onCreateStore }) => {
                       <div className="font-medium text-gray-900 dark:text-white text-sm truncate">
                         {outlet.name}
                       </div>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                          {outlet.address.city}, {outlet.address.state}
-                        </span>
-                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${
-                          outlet.status === 'active' 
-                            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' 
-                            : outlet.status === 'maintenance'
-                            ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
-                            : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                        }`}>
-                          {outlet.status}
-                        </span>
-                      </div>
                     </div>
                   </div>
-                  {currentOutlet.id === outlet.id && (
-                    <Check size={14} className="text-blue-600 flex-shrink-0" />
-                  )}
                 </div>
               </button>
             ))}
@@ -143,16 +124,16 @@ const OutletSelector: React.FC<OutletSelectorProps> = ({ onCreateStore }) => {
                   Manage All Outlets
                 </button>
               )}
-              
+
               {onCreateStore && (
                 <>
                   {canAddOutlet ? (
                     <button
                       onClick={handleCreateStore}
-                      className="w-full flex items-center justify-center gap-2 px-2 py-1.5 text-xs font-medium text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-colors"
+                      className="w-full flex items-center justify-center gap-2 px-2 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded transition-colors"
                     >
                       <Plus size={14} />
-                      Create New Store
+                      Create Outlet
                     </button>
                   ) : (
                     <div className="px-2 py-1.5">
