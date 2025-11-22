@@ -30,6 +30,7 @@ import AIAssistant from '@/pages/AIAssistant';
 import AuditTrail from '@/pages/AuditTrail';
 import Settings from '@/pages/Settings';
 import AuthWrapper from '@/components/auth/AuthWrapper';
+import AcceptInvitation from '@/pages/AcceptInvitation';
 
 // Calculator imports
 import CalculatorLanding from '@/pages/calculators/CalculatorLanding';
@@ -92,7 +93,8 @@ const AppRoutes = () => {
       <Route path="/calculators/inventory-turnover" element={<InventoryTurnoverCalculator />} />
 
       <Route path="/auth" element={<AuthWrapper onAuthSuccess={() => window.location.href = '/dashboard'} />} />
-      
+      <Route path="/invite/accept/:token" element={<AcceptInvitation />} />
+
       {/* Protected routes */}
       <Route path="/dashboard" element={
         <ProtectedRoute>

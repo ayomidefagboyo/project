@@ -105,7 +105,17 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     )
 
 # Configure CORS
-cors_origins = settings.BACKEND_CORS_ORIGINS.split(",") if settings.BACKEND_CORS_ORIGINS else ["http://localhost:5173"]
+cors_origins = settings.BACKEND_CORS_ORIGINS.split(",") if settings.BACKEND_CORS_ORIGINS else [
+    "http://localhost:5173",
+    "http://localhost:5174",  # Add common alternate Vite port
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174"
+]
+
+# Debug CORS configuration
+logger.info(f"🌐 CORS Origins: {cors_origins}")
+logger.info(f"🔧 BACKEND_CORS_ORIGINS env var: {settings.BACKEND_CORS_ORIGINS}")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,

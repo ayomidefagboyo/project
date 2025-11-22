@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/Button';
-import { authService } from '@/lib/auth';
+import { authService } from '@/lib/authService';
 import { UserRole } from '@/types';
 import { useOutlet } from '@/contexts/OutletContext';
 import { Mail, UserPlus, CheckCircle, XCircle } from 'lucide-react';
@@ -51,7 +51,7 @@ const InviteTeamMember: React.FC<InviteTeamMemberProps> = ({ onClose }) => {
         name: formData.name,
         role: formData.role,
         outletId: currentOutlet.id
-      }, currentUser.id);
+      });
 
       if (inviteError) {
         setError(inviteError);
@@ -77,12 +77,10 @@ const InviteTeamMember: React.FC<InviteTeamMemberProps> = ({ onClose }) => {
 
   const roleOptions = [
     { value: 'manager', label: 'Manager' },
-    { value: 'cashier', label: 'Cashier' },
-    { value: 'waiter', label: 'Waiter' },
-    { value: 'kitchen_staff', label: 'Kitchen Staff' },
-    { value: 'inventory_staff', label: 'Inventory Staff' },
     { value: 'accountant', label: 'Accountant' },
-    { value: 'viewer', label: 'Viewer' }
+    { value: 'outlet_staff', label: 'Staff Member' },
+    { value: 'inventory_staff', label: 'Inventory Manager' },
+    { value: 'viewer', label: 'View Only' }
   ];
 
   return (
