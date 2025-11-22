@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     STRIPE_SECRET_KEY: Optional[str] = os.getenv("STRIPE_SECRET_KEY", "")
     VITE_STRIPE_PUBLISHABLE_KEY: Optional[str] = os.getenv("VITE_STRIPE_PUBLISHABLE_KEY", "")
 
+    # Resend Email Settings
+    RESEND_API_KEY: Optional[str] = os.getenv("RESEND_API_KEY", "")
+    FROM_EMAIL: str = os.getenv("FROM_EMAIL", "onboarding@compazz.app")
+
     
     model_config = {
         "env_file": ".env",

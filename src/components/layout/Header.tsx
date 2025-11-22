@@ -13,7 +13,6 @@ import {
   Building2
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import OutletSelector from './OutletSelector';
 import { useOutlet } from '@/contexts/OutletContext';
 import { authService } from '@/lib/auth';
 import InviteTeamMember from '@/components/auth/InviteTeamMember';
@@ -108,8 +107,6 @@ const Header: React.FC<HeaderProps> = ({ isDarkMode, toggleDarkMode, onToggleSid
               <Menu className="w-5 h-5 text-gray-600 dark:text-gray-300" />
             </button>
 
-            {/* Outlet Selector */}
-            <OutletSelector />
           </div>
 
           {/* Center Section - Search */}

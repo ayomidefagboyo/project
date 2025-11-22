@@ -1,19 +1,30 @@
 """
-Email service using Supabase built-in email functionality
+Email service using Resend for reliable email delivery
 """
 
 import logging
+import os
 from typing import Dict, Any, Optional
-from app.core.database import supabase
+import resend
 
 logger = logging.getLogger(__name__)
 
 
 class EmailService:
-    """Email service for sending invitations and notifications"""
+    """Email service for sending invitations and notifications using Resend"""
 
     def __init__(self):
-        self.supabase = supabase
+        # Initialize Resend with API key
+        self.resend_api_key = os.getenv("RESEND_API_KEY")
+        self.from_email = os.getenv("FROM_EMAIL", "onboarding@compazz.app")
+
+        if self.resend_api_key and self.resend_api_key != "your_resend_api_key_here":
+            resend.api_key = self.resend_api_key
+            self.resend_enabled = True
+            logger.info("✅ Resend email service initialized")
+        else:
+            self.resend_enabled = False
+            logger.warning("⚠️ Resend API key not configured - using mock mode")
 
     async def send_invitation_email(
         self,
@@ -55,35 +66,36 @@ class EmailService:
                 invitation_url=invitation_url
             )
 
-            # Send email using Supabase Auth
-            # This uses Supabase's built-in email sending functionality
-            response = self.supabase.auth.admin.invite_user_by_email(
-                email,
-                options={
-                    "redirect_to": invitation_url,
-                    "data": {
-                        "invitation_token": invitation_token,
-                        "company_name": company_name,
-                        "role": role,
-                        "invited_by": inviter_name,
-                        "custom_invitation": True
-                    }
-                }
-            )
+            if self.resend_enabled:
+                try:
+                    # Send email using Resend
+                    response = resend.Emails.send({
+                        "from": self.from_email,
+                        "to": [email],
+                        "subject": subject,
+                        "html": html_content
+                    })
 
-            if response.user:
-                logger.info(f"✅ Invitation email sent successfully to {email}")
-                return {
-                    "success": True,
-                    "message": f"Invitation email sent to {email}",
-                    "user_id": response.user.id
-                }
+                    logger.info(f"✅ Invitation email sent via Resend to {email}")
+                    logger.info(f"📧 Resend Email ID: {response.get('id', 'N/A')}")
+                    logger.info(f"📧 Subject: {subject}")
+                    logger.info(f"📧 Invitation URL: {invitation_url}")
+                    logger.info(f"📧 Company: {company_name}, Role: {role}, Invited by: {inviter_name}")
+
+                    return {
+                        "success": True,
+                        "message": f"Invitation email sent to {email}",
+                        "email_id": response.get('id'),
+                        "method": "resend"
+                    }
+
+                except Exception as resend_error:
+                    logger.error(f"❌ Resend email failed: {str(resend_error)}")
+                    # Fall back to logging mode
+                    return self._log_invitation_details(email, subject, invitation_url, company_name, role, inviter_name)
             else:
-                logger.error(f"❌ Failed to send invitation email to {email}")
-                return {
-                    "success": False,
-                    "message": f"Failed to send invitation email to {email}"
-                }
+                # Mock mode - log invitation details
+                return self._log_invitation_details(email, subject, invitation_url, company_name, role, inviter_name)
 
         except Exception as e:
             logger.error(f"❌ Error sending invitation email to {email}: {str(e)}")
@@ -91,6 +103,21 @@ class EmailService:
                 "success": False,
                 "message": f"Failed to send invitation: {str(e)}"
             }
+
+    def _log_invitation_details(self, email: str, subject: str, invitation_url: str, company_name: str, role: str, inviter_name: str) -> Dict[str, Any]:
+        """Log invitation details when email sending is not available"""
+        logger.info(f"📧 MOCK MODE: Invitation would be sent to {email}")
+        logger.info(f"📧 Subject: {subject}")
+        logger.info(f"📧 Invitation URL: {invitation_url}")
+        logger.info(f"📧 Company: {company_name}, Role: {role}, Invited by: {inviter_name}")
+        logger.info("📧 To enable real email sending, add your Resend API key to RESEND_API_KEY environment variable")
+
+        return {
+            "success": True,
+            "message": f"Invitation created for {email} (Mock mode - check server logs for invitation URL)",
+            "invitation_url": invitation_url,
+            "method": "mock"
+        }
 
     def _create_invitation_email_html(
         self,

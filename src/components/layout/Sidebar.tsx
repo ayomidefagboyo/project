@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import Logo from '@/components/ui/Logo';
+import OutletSelector from '@/components/layout/OutletSelector';
 import { 
   LayoutDashboard, 
   FileText, 
@@ -24,6 +24,11 @@ import {
   Zap
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import CreateStoreModal, { StoreFormData } from '@/components/modals/CreateStoreModal';
+import Toast from '@/components/ui/Toast';
+import { useOutlet } from '@/contexts/OutletContext';
+import { dataService } from '@/lib/services';
+import { subscriptionService } from '@/lib/subscriptionService';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -34,9 +39,20 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, className = '' }) => {
   const location = useLocation();
+  const { currentUser, setUserOutlets } = useOutlet();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isCreateDropdownOpen, setIsCreateDropdownOpen] = useState(false);
   const [isCreateReportOpen, setIsCreateReportOpen] = useState(true);
+  const [showCreateStoreModal, setShowCreateStoreModal] = useState(false);
+  const [toast, setToast] = useState<{
+    message: string;
+    type: 'success' | 'error' | 'warning' | 'info';
+    isVisible: boolean;
+  }>({
+    message: '',
+    type: 'info',
+    isVisible: false
+  });
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown when clicking outside
@@ -52,6 +68,37 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info') => {
+    setToast({ message, type, isVisible: true });
+  };
+
+  const handleCreateStore = async (storeData: StoreFormData) => {
+    if (!currentUser) return;
+
+    try {
+      // Check outlet limit before creating
+      try {
+        const currentCount = await subscriptionService.getUserOutletCount(currentUser.id);
+        const canAdd = await subscriptionService.canAddOutlet(currentUser.id, currentCount);
+
+        if (!canAdd) {
+          showToast('You have reached your outlet limit. Please upgrade your plan to add more outlets.', 'warning');
+          return;
+        }
+      } catch (subscriptionError) {
+        console.warn('Subscription check failed, allowing outlet creation:', subscriptionError);
+      }
+
+      const newOutlet = await dataService.createOutlet(storeData, currentUser.id);
+      setUserOutlets(prev => [...prev, newOutlet]);
+      setShowCreateStoreModal(false);
+      showToast('New store created successfully!', 'success');
+    } catch (error) {
+      console.error('Error creating store:', error);
+      showToast('Failed to create store. Please try again.', 'error');
+    }
+  };
 
   const navItems = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -152,7 +199,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
         className={`
           ${className}
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
-          ${isCollapsed ? 'w-20' : 'w-80'}
+          ${isCollapsed ? 'w-16' : 'w-64'}
           fixed inset-y-0 left-0 z-50 flex flex-col bg-white/95 backdrop-blur-xl border-r border-gray-100
           dark:bg-gray-900/95 dark:border-gray-800
           lg:relative lg:translate-x-0 lg:transition-all lg:duration-300 lg:ease-in-out
@@ -162,7 +209,12 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
         {/* Header */}
         <div className={`flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-800 ${isCollapsed ? 'px-4' : ''}`}>
           {!isCollapsed && (
-            <Logo size="md" />
+            <OutletSelector onCreateStore={() => {
+              console.log('Create store clicked from sidebar - opening modal');
+              console.log('showCreateStoreModal before:', showCreateStoreModal);
+              setShowCreateStoreModal(true);
+              console.log('setShowCreateStoreModal(true) called');
+            }} />
           )}
 
           <div className="flex items-center space-x-2">
@@ -263,6 +315,25 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
           </Link>
         </div>
       </div>
+
+      {/* Create Store Modal */}
+      {console.log('Sidebar render - showCreateStoreModal:', showCreateStoreModal)}
+      {showCreateStoreModal && (
+        <CreateStoreModal
+          isOpen={showCreateStoreModal}
+          onClose={() => setShowCreateStoreModal(false)}
+          onCreate={handleCreateStore}
+        />
+      )}
+
+      {/* Toast */}
+      {toast.isVisible && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(prev => ({ ...prev, isVisible: false }))}
+        />
+      )}
     </>
   );
 };
