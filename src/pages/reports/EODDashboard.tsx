@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { useOutlet } from '../../contexts/OutletContext';
-import { eodService } from '../../lib/eodService';
+import { eodService } from '../../lib/eodServiceNew';
 import { useErrorHandler } from '../../lib/errorHandler';
 import { currencyService } from '../../lib/currencyService';
 import { supabase } from '../../lib/supabase';
@@ -136,18 +136,20 @@ const EODDashboard: React.FC = () => {
       }
 
       const reportData = {
-        outlet_id: currentOutlet.id,
         date: formData.date,
         sales_cash: toNumber(formData.salesCash),
         sales_transfer: toNumber(formData.salesTransfer),
         sales_pos: toNumber(formData.salesPOS),
-        expenses: toNumber(formData.expenses),
-        notes: formData.notes,
-        images: formData.images
+        sales_credit: 0, // Add this field as required by the new service
+        opening_balance: 0, // Add this field as required by the new service
+        closing_balance: 0, // Add this field as required by the new service
+        bank_deposit: 0, // Add this field as required by the new service
+        inventory_cost: toNumber(formData.expenses),
+        notes: formData.notes
       };
 
       console.log('Creating EOD report with data:', reportData);
-      const result = await eodService.createReport(reportData);
+      const result = await eodService.createEODReport(reportData, currentOutlet.id);
       console.log('EOD creation result:', result);
       
       if (result.error) {
@@ -493,7 +495,7 @@ const EODDashboard: React.FC = () => {
                         <DollarSign className="w-4 h-4 text-gray-600 dark:text-gray-400" />
                       </div>
                       <span className="text-sm font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">
-                        Net Profit
+                        Net Sales
                       </span>
                     </div>
                     <span className={`text-xl font-light tracking-tight ${
