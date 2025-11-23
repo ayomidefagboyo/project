@@ -17,6 +17,15 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, onSwitchToSignup }) =>
   const [error, setError] = useState<string | null>(null);
   const { setCurrentUser, setUserOutlets, setCurrentOutlet } = useOutlet();
 
+  // Helper function to handle email changes with storage
+  const handleEmailChange = (value: string) => {
+    setEmail(value);
+    // Store email in localStorage for smart routing if it's a valid email
+    if (value.includes('@')) {
+      localStorage.setItem('last_signup_email', value.toLowerCase());
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -165,7 +174,7 @@ const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, onSwitchToSignup }) =>
                     autoComplete="email"
                     required
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => handleEmailChange(e.target.value)}
                     className="block w-full pl-12 pr-4 py-4 border border-border rounded-lg text-foreground placeholder-muted-foreground bg-background focus:ring-2 focus:ring-primary focus:border-transparent transition-all duration-200 font-light"
                     placeholder="Enter your email"
                   />

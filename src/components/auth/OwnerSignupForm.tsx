@@ -45,6 +45,11 @@ const OwnerSignupForm: React.FC<OwnerSignupFormProps> = ({ onSuccess, onSwitchTo
       ...prev,
       [name]: value
     }));
+
+    // Store email in localStorage for smart routing
+    if (name === 'email' && value.includes('@')) {
+      localStorage.setItem('last_signup_email', value.toLowerCase());
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
