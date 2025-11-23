@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { 
-  BarChart3, 
-  Building2, 
-  Receipt, 
-  TrendingUp, 
-  Shield, 
-  Check, 
-  Star, 
+import {
+  BarChart3,
+  Building2,
+  Receipt,
+  TrendingUp,
+  Shield,
+  Check,
+  Star,
   ArrowRight,
   ChevronDown,
   Loader2,
@@ -18,6 +18,8 @@ import {
 import { paymentPlans } from '@/lib/stripe';
 import { currencyService, type CurrencyInfo } from '@/lib/currencyService';
 import { trackEvent, trackUserJourney } from '@/lib/posthog';
+import { authService } from '@/lib/auth';
+import { useOutlet } from '@/contexts/OutletContext';
 import LegalModal from '@/components/modals/LegalModal';
 import BusinessScenarioDemo from '@/components/demo/BusinessScenarioDemo';
 import PublicHeader from '@/components/layout/PublicHeader';
@@ -25,6 +27,7 @@ import PublicHeader from '@/components/layout/PublicHeader';
 const LandingPage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { currentUser } = useOutlet();
 
   // Track landing page visit
   useEffect(() => {
@@ -34,6 +37,14 @@ const LandingPage: React.FC = () => {
       referrer: document.referrer
     });
   }, [location]);
+
+  // If user is already authenticated, redirect to dashboard
+  useEffect(() => {
+    if (currentUser) {
+      navigate('/dashboard');
+    }
+  }, [currentUser, navigate]);
+
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [isAnnual, setIsAnnual] = useState(false);
@@ -61,6 +72,45 @@ const LandingPage: React.FC = () => {
     } catch (error) {
       console.error('Error navigating to signup:', error);
       navigate(`/auth?mode=signup&plan=${planId}&trial=true`);
+    } finally {
+      setLoadingPlan(null);
+    }
+  };
+
+  // Smart app launch - checks if user exists and routes accordingly
+  const handleLaunchApp = async () => {
+    setLoadingPlan('business'); // Use the business plan as the default
+
+    // Track CTA click
+    trackEvent('cta_clicked', {
+      plan_id: 'business',
+      cta_location: 'hero_launch_app',
+      is_annual: isAnnual,
+      currency: currency.code
+    });
+
+    try {
+      // For "Launch App" button, we want to be smart about routing
+      // Check if we have a stored email from previous attempts
+      const lastUsedEmail = localStorage.getItem('last_signup_email');
+
+      if (lastUsedEmail) {
+        // Check if this email exists in our system
+        const { exists, error } = await authService.checkEmailExists(lastUsedEmail);
+
+        if (!error && exists) {
+          // Email exists, route to signin
+          navigate('/auth?mode=signin');
+          return;
+        }
+      }
+
+      // Default to signup with trial for new users
+      navigate('/auth?mode=signup&plan=business&trial=true');
+    } catch (error) {
+      console.error('Error determining auth route:', error);
+      // Fallback to signup
+      navigate('/auth?mode=signup&plan=business&trial=true');
     } finally {
       setLoadingPlan(null);
     }
@@ -207,7 +257,7 @@ const LandingPage: React.FC = () => {
               <div className="flex flex-col sm:flex-row gap-4">
                 <div className="flex flex-col items-center sm:items-start">
                   <button
-                    onClick={() => handleSubscribe('business')}
+                    onClick={handleLaunchApp}
                     disabled={loadingPlan === 'business'}
                     className="btn-primary px-8 py-3.5 text-lg group disabled:opacity-50"
                   >

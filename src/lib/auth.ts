@@ -736,6 +736,30 @@ class AuthService {
       };
     }
   }
+
+  // Check if email exists in the system (to determine signin vs signup)
+  async checkEmailExists(email: string): Promise<{ exists: boolean; error: string | null }> {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('id')
+        .eq('email', email.toLowerCase())
+        .maybeSingle();
+
+      if (error) {
+        console.error('Email check error:', error);
+        return { exists: false, error: error.message };
+      }
+
+      return { exists: !!data, error: null };
+    } catch (error) {
+      console.error('Error checking if email exists:', error);
+      return {
+        exists: false,
+        error: error instanceof Error ? error.message : 'Failed to check email'
+      };
+    }
+  }
 }
 
 export const authService = new AuthService();
