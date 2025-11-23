@@ -72,7 +72,9 @@ class EODService:
                 "expected_cash": expected_cash,
                 "cash_variance": cash_variance,
                 "gross_margin_percent": gross_margin_percent,
-                "status": ReportStatus.DRAFT,
+                "status": ReportStatus.APPROVED,
+                "approved_by": user_id,
+                "approved_at": datetime.now().isoformat(),
                 "discrepancies": self._calculate_discrepancies(eod_data)
             }
 
@@ -399,20 +401,22 @@ class EODService:
                 detail="Failed to get EOD analytics"
             )
 
-    async def get_eod_stats_overview(self, outlet_id: str) -> Dict[str, Any]:
+    async def get_eod_stats_overview(self, outlet_id: str, date_from: Optional[str] = None, date_to: Optional[str] = None) -> Dict[str, Any]:
         """Get EOD statistics overview for dashboard"""
         try:
             from datetime import datetime, timedelta
 
-            # Get current month data
-            current_month_start = datetime.now().replace(day=1).strftime('%Y-%m-%d')
-            today = datetime.now().strftime('%Y-%m-%d')
+            # Use provided dates or default to current month
+            if not date_to:
+                date_to = datetime.now().strftime('%Y-%m-%d')
+            if not date_from:
+                date_from = datetime.now().replace(day=1).strftime('%Y-%m-%d')
 
             response = self.supabase.table(Tables.EOD)\
                 .select("*")\
                 .eq("outlet_id", outlet_id)\
-                .gte("date", current_month_start)\
-                .lte("date", today)\
+                .gte("date", date_from)\
+                .lte("date", date_to)\
                 .execute()
 
             reports = response.data or []

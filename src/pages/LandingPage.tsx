@@ -195,12 +195,12 @@ const LandingPage: React.FC = () => {
               
               {/* Main Heading */}
               <h1 className="text-4xl md:text-5xl lg:text-6xl font-semibold text-foreground mb-6 leading-[1.1] text-balance">
-                Financial management that actually works
+                Financial management built for <span className="text-primary">business owners</span>, not accountants.
               </h1>
-              
+
               {/* Subheading */}
               <p className="text-lg text-muted-foreground mb-10 leading-relaxed max-w-lg">
-                Stop losing money to poor financial tracking. Compazz helps businesses track expenses, manage invoices, and make data-driven decisions with confidence.
+                Track invoices, expenses, and daily cash flow from one dashboard. No complex accounting jargon, no expensive degrees required.
               </p>
               
               {/* CTAs */}
