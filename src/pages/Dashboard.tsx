@@ -70,18 +70,21 @@ const Dashboard: React.FC = () => {
   const [outletName, setOutletName] = useState('');
   const [businessType, setBusinessType] = useState<'supermarket' | 'restaurant' | 'lounge' | 'retail' | 'cafe'>('retail');
   
-  // Close dropdown when clicking outside
+  // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
       if (isOutletSelectorOpen && !target.closest('[data-dropdown="outlet-selector"]')) {
         setIsOutletSelectorOpen(false);
       }
+      if (showCustomDatePicker && !target.closest('[data-dropdown="date-picker"]')) {
+        setShowCustomDatePicker(false);
+      }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isOutletSelectorOpen]);
+  }, [isOutletSelectorOpen, showCustomDatePicker]);
 
   // Handle return from Stripe and complete onboarding
   useEffect(() => {
@@ -308,6 +311,42 @@ const Dashboard: React.FC = () => {
   };
 
   const currentDateRange = getDateRange(selectedDateRange);
+
+  // Helper function to get date range label for button display
+  const getDateRangeLabel = (range: string, customFrom: string, customTo: string): string => {
+    switch (range) {
+      case 'today':
+        return 'Today';
+      case 'yesterday':
+        return 'Yesterday';
+      case 'last_7_days':
+        return 'Last 7 days';
+      case 'last_30_days':
+        return 'Last 30 days';
+      case 'this_month':
+        return 'This month';
+      case 'last_month':
+        return 'Last month';
+      case 'this_quarter':
+        return 'This quarter';
+      case 'custom':
+        if (customFrom && customTo) {
+          return `${customFrom} to ${customTo}`;
+        }
+        return 'Custom range';
+      default:
+        return 'Select date range';
+    }
+  };
+
+  // Handle date range selection without triggering loading
+  const handleDateRangeSelect = (range: string) => {
+    setSelectedDateRange(range);
+    if (range !== 'custom') {
+      setShowCustomDatePicker(false);
+    }
+    // Don't close dropdown for custom to allow date input
+  };
 
   // Load vendor invoices and EOD data
   const loadDashboardData = async () => {
@@ -682,183 +721,201 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
       )}
-      {/* Header with Export and Filter */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700">
-        <div className="max-w-7xl mx-auto px-6 py-6">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Dashboard</h1>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                Overview of your business performance
-              </p>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-3">
-              <Button 
-                variant="outline" 
-                className="flex items-center space-x-2"
-                onClick={() => setIsOutletSelectorOpen(!isOutletSelectorOpen)}
-              >
-                <Filter className="w-4 h-4" />
-                <span>Filter</span>
-                <ChevronDown className="w-4 h-4" />
-              </Button>
-              <FeatureGate
-                userId={currentUser?.id || ''}
-                feature="advancedAnalytics"
-                fallback={
-                  <Button
-                    className="flex items-center space-x-2 bg-gray-400 cursor-not-allowed"
-                    disabled
-                  >
-                    <BarChart3 className="w-4 h-4" />
-                    <span>Export Report (Pro)</span>
-                  </Button>
-                }
-              >
-                <Button
-                  className="flex items-center space-x-2 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100"
-                  onClick={() => handleExportReport()}
-                >
-                  <BarChart3 className="w-4 h-4" />
-                  <span>Export Report</span>
-                  <ArrowRight className="w-4 h-4" />
-                </Button>
-              </FeatureGate>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-6 py-12">
-        {/* Outlet Selector */}
-        {canViewAllOutlets() && (
-          <div className="mb-12">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-8">
-              <div className="flex flex-col lg:flex-row lg:items-center gap-6">
-                <div className="flex items-center space-x-4">
-                  <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/20 rounded-xl flex items-center justify-center">
-                    <Building2 className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Multi-Location View</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Viewing data for {selectedOutletNames.length} location{selectedOutletNames.length !== 1 ? 's' : ''}
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="relative lg:ml-auto" data-dropdown="outlet-selector">
-                  <button
-                    onClick={() => setIsOutletSelectorOpen(!isOutletSelectorOpen)}
-                    className="flex items-center space-x-3 px-6 py-3 bg-gray-50 dark:bg-gray-700 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
-                  >
-                    <span className="text-sm font-medium text-gray-900 dark:text-white">
-                      {selectedOutletNames.length > 0 
-                        ? selectedOutletNames.join(', ')
-                        : 'Select locations'
-                      }
-                    </span>
-                    <ChevronDown className={`w-4 h-4 transition-transform ${isOutletSelectorOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                  
-                  {isOutletSelectorOpen && (
-                    <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-lg z-10">
-                      <div className="p-4 space-y-2">
-                        {userOutlets.map(outlet => (
-                          <label key={outlet.id} className="flex items-center space-x-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={dashboardView.selectedOutlets.includes(outlet.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setDashboardView(prev => ({
-                                    ...prev,
-                                    selectedOutlets: [...prev.selectedOutlets, outlet.id]
-                                  }));
-                                } else {
-                                  setDashboardView(prev => ({
-                                    ...prev,
-                                    selectedOutlets: prev.selectedOutlets.filter(id => id !== outlet.id)
-                                  }));
-                                }
-                              }}
-                              className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                            />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                                {outlet.name}
-                              </p>
-                              <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">
-                                {outlet.businessType}
-                              </p>
-                            </div>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
+      <div className="max-w-7xl mx-auto px-6 py-6">
+        {/* Compact Dashboard Header Card */}
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6 mb-8">
+          <div className="flex flex-col lg:flex-row lg:items-center gap-6">
+            {/* Title and Info */}
+            <div className="flex items-center space-x-4 flex-1">
+              <div>
+                <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Dashboard</h1>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Overview of your business performance
+                  {canViewAllOutlets() && (
+                    <span className="ml-2">• Viewing data for {selectedOutletNames.length} location{selectedOutletNames.length !== 1 ? 's' : ''}</span>
                   )}
-                </div>
+                </p>
+                {canViewAllOutlets() && (
+                  <div className="flex items-center gap-2 mt-2">
+                    <Building2 className="w-4 h-4 text-blue-500" />
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {selectedOutletNames.length > 0 ? selectedOutletNames.join(', ') : 'All locations'}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
-          </div>
-        )}
 
-        {/* Date Range Selector */}
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6 mb-8">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-gray-500" />
-              <span className="font-medium text-gray-900 dark:text-white">Date Range:</span>
-            </div>
+            {/* Controls Row */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 lg:gap-6">
+              {/* Custom Date Range Selector */}
+              <div className="relative" data-dropdown="date-picker">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center space-x-2"
+                  onClick={() => setShowCustomDatePicker(!showCustomDatePicker)}
+                >
+                  <Calendar className="w-4 h-4" />
+                  <span>{getDateRangeLabel(selectedDateRange, customDateFrom, customDateTo)}</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${showCustomDatePicker ? 'rotate-180' : ''}`} />
+                </Button>
 
-            <div className="flex flex-col sm:flex-row gap-3 flex-1">
-              <select
-                value={selectedDateRange}
-                onChange={(e) => {
-                  setSelectedDateRange(e.target.value);
-                  if (e.target.value !== 'custom') {
-                    setShowCustomDatePicker(false);
-                  } else {
-                    setShowCustomDatePicker(true);
+                {showCustomDatePicker && (
+                  <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-lg z-20">
+                    <div className="p-4">
+                      <div className="space-y-3">
+                        {/* Quick Date Options */}
+                        <div className="space-y-2">
+                          <h4 className="text-sm font-medium text-gray-900 dark:text-white">Quick Select</h4>
+                          <div className="grid grid-cols-2 gap-2">
+                            {[
+                              { value: 'today', label: 'Today' },
+                              { value: 'yesterday', label: 'Yesterday' },
+                              { value: 'last_7_days', label: 'Last 7 days' },
+                              { value: 'last_30_days', label: 'Last 30 days' },
+                              { value: 'this_month', label: 'This month' },
+                              { value: 'last_month', label: 'Last month' },
+                              { value: 'this_quarter', label: 'This quarter' },
+                              { value: 'custom', label: 'Custom range' }
+                            ].map(option => (
+                              <button
+                                key={option.value}
+                                onClick={() => handleDateRangeSelect(option.value)}
+                                className={`px-3 py-2 text-xs rounded-lg border transition-colors ${
+                                  selectedDateRange === option.value
+                                    ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300'
+                                    : 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600'
+                                }`}
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Custom Date Inputs */}
+                        {selectedDateRange === 'custom' && (
+                          <div className="space-y-3 border-t border-gray-200 dark:border-gray-600 pt-3">
+                            <h4 className="text-sm font-medium text-gray-900 dark:text-white">Custom Range</h4>
+                            <div className="space-y-2">
+                              <div>
+                                <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">From</label>
+                                <input
+                                  type="date"
+                                  value={customDateFrom}
+                                  onChange={(e) => setCustomDateFrom(e.target.value)}
+                                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:ring-2 focus:ring-ring focus:border-ring transition-colors"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">To</label>
+                                <input
+                                  type="date"
+                                  value={customDateTo}
+                                  onChange={(e) => setCustomDateTo(e.target.value)}
+                                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:ring-2 focus:ring-ring focus:border-ring transition-colors"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Apply Button */}
+                        <div className="flex justify-end pt-2 border-t border-gray-200 dark:border-gray-600">
+                          <Button
+                            size="sm"
+                            onClick={() => setShowCustomDatePicker(false)}
+                            className="bg-blue-600 hover:bg-blue-700 text-white"
+                          >
+                            Apply
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2">
+                {canViewAllOutlets() && (
+                  <div className="relative" data-dropdown="outlet-selector">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex items-center space-x-2"
+                      onClick={() => setIsOutletSelectorOpen(!isOutletSelectorOpen)}
+                    >
+                      <Filter className="w-4 h-4" />
+                      <span>Filter</span>
+                      <ChevronDown className={`w-4 h-4 transition-transform ${isOutletSelectorOpen ? 'rotate-180' : ''}`} />
+                    </Button>
+
+                    {isOutletSelectorOpen && (
+                      <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-lg z-10">
+                        <div className="p-4 space-y-2">
+                          {userOutlets.map(outlet => (
+                            <label key={outlet.id} className="flex items-center space-x-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={dashboardView.selectedOutlets.includes(outlet.id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setDashboardView(prev => ({
+                                      ...prev,
+                                      selectedOutlets: [...prev.selectedOutlets, outlet.id]
+                                    }));
+                                  } else {
+                                    setDashboardView(prev => ({
+                                      ...prev,
+                                      selectedOutlets: prev.selectedOutlets.filter(id => id !== outlet.id)
+                                    }));
+                                  }
+                                }}
+                                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                                  {outlet.name}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">
+                                  {outlet.businessType}
+                                </p>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <FeatureGate
+                  userId={currentUser?.id || ''}
+                  feature="advancedAnalytics"
+                  fallback={
+                    <Button
+                      size="sm"
+                      className="flex items-center space-x-2 bg-gray-400 cursor-not-allowed"
+                      disabled
+                    >
+                      <BarChart3 className="w-4 h-4" />
+                      <span>Export Report (Pro)</span>
+                    </Button>
                   }
-                }}
-                className="px-4 py-2 bg-background border border-border rounded-lg text-foreground focus:ring-2 focus:ring-ring focus:border-ring transition-colors"
-              >
-                <option value="today">Today</option>
-                <option value="yesterday">Yesterday</option>
-                <option value="last_7_days">Last 7 days</option>
-                <option value="last_30_days">Last 30 days</option>
-                <option value="this_month">This month</option>
-                <option value="last_month">Last month</option>
-                <option value="this_quarter">This quarter</option>
-                <option value="custom">Custom range</option>
-              </select>
-
-              {showCustomDatePicker && (
-                <div className="flex gap-2">
-                  <input
-                    type="date"
-                    value={customDateFrom}
-                    onChange={(e) => setCustomDateFrom(e.target.value)}
-                    className="px-3 py-2 bg-background border border-border rounded-lg text-foreground focus:ring-2 focus:ring-ring focus:border-ring transition-colors"
-                    placeholder="From"
-                  />
-                  <span className="flex items-center text-gray-500">to</span>
-                  <input
-                    type="date"
-                    value={customDateTo}
-                    onChange={(e) => setCustomDateTo(e.target.value)}
-                    className="px-3 py-2 bg-background border border-border rounded-lg text-foreground focus:ring-2 focus:ring-ring focus:border-ring transition-colors"
-                    placeholder="To"
-                  />
-                </div>
-              )}
-            </div>
-
-            <div className="text-sm text-gray-600 dark:text-gray-400">
-              {currentDateRange.from === currentDateRange.to
-                ? `${currentDateRange.from}`
-                : `${currentDateRange.from} to ${currentDateRange.to}`}
+                >
+                  <Button
+                    size="sm"
+                    className="flex items-center space-x-2 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100"
+                    onClick={() => handleExportReport()}
+                  >
+                    <BarChart3 className="w-4 h-4" />
+                    <span>Export Report</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </Button>
+                </FeatureGate>
+              </div>
             </div>
           </div>
         </div>
