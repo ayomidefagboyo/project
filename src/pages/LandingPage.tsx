@@ -229,10 +229,6 @@ const LandingPage: React.FC = () => {
             <div className="relative">
               <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 shadow-2xl border border-gray-200/50 dark:border-gray-800/50">
                 <div className="text-center mb-6">
-                  <div className="inline-flex items-center space-x-2 bg-emerald-100 dark:bg-emerald-900/50 px-3 py-1 rounded-full text-emerald-700 dark:text-emerald-300 text-sm font-medium mb-3">
-                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                    <span>Business Scenario Demo</span>
-                  </div>
                   <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
                     Track a Full Business Day
                   </h3>
