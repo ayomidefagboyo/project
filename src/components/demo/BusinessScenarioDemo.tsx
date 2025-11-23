@@ -13,8 +13,7 @@ interface DemoStep {
 }
 
 const BusinessScenarioDemo: React.FC = () => {
-  const [currentStep, setCurrentStep] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentStep, setCurrentStep] = useState(-1);
   const [totalSales, setTotalSales] = useState(0);
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [profit, setProfit] = useState(0);
@@ -22,9 +21,9 @@ const BusinessScenarioDemo: React.FC = () => {
   const demoSteps: DemoStep[] = [
     {
       id: 'eod',
-      time: '📊',
+      time: '8PM',
       title: 'EOD Report',
-      description: 'Cash: $540, Card: $890...',
+      description: 'Input cash register totals: Cash $540, Card/Transfer $890, POS transactions...',
       amount: '$1,430',
       type: 'income',
       icon: <Receipt className="w-4 h-4" />,
@@ -32,9 +31,9 @@ const BusinessScenarioDemo: React.FC = () => {
     },
     {
       id: 'receipt',
-      time: '📄',
+      time: '9PM',
       title: 'Scan Receipt',
-      description: 'AI extracting data...',
+      description: 'Take photo of supply invoice. AI extracts: Merchant, amount, category, date...',
       amount: '-$89',
       type: 'expense',
       icon: <Package className="w-4 h-4" />,
@@ -42,20 +41,20 @@ const BusinessScenarioDemo: React.FC = () => {
     },
     {
       id: 'ai_check',
-      time: '🤖',
+      time: '9PM',
       title: 'AI Analysis',
-      description: 'Expense looks normal',
-      amount: '✓',
+      description: 'AI reviews expense patterns and flags any anomalies. This expense looks normal.',
+      amount: 'No Issues',
       type: 'balance',
       icon: <CheckCircle className="w-4 h-4" />,
       status: 'processing'
     },
     {
       id: 'ask_ai',
-      time: '💬',
-      title: 'Ask AI',
-      description: '"How\'s my profit trend?"',
-      amount: '+12%',
+      time: '9PM',
+      title: 'Ask AI Assistant',
+      description: 'Chat with AI: "How is my profit trending?" AI responds with insights and comparisons.',
+      amount: '+12% vs yesterday',
       type: 'balance',
       icon: <TrendingUp className="w-4 h-4" />,
       status: 'processing'
@@ -74,31 +73,29 @@ const BusinessScenarioDemo: React.FC = () => {
     setProfit(stepIndex >= 0 ? finalProfit : 0);
   };
 
-  useEffect(() => {
-    if (isPlaying && currentStep < demoSteps.length - 1) {
-      const timer = setTimeout(() => {
-        setCurrentStep(prev => {
-          const nextStep = prev + 1;
-          updateTotals(nextStep);
-          return nextStep;
-        });
-      }, 1200);
-
-      return () => clearTimeout(timer);
-    } else if (currentStep >= demoSteps.length - 1) {
-      setIsPlaying(false);
+  const nextStep = () => {
+    if (currentStep < demoSteps.length - 1) {
+      const next = currentStep + 1;
+      setCurrentStep(next);
+      updateTotals(next);
     }
-  }, [currentStep, isPlaying, demoSteps.length]);
+  };
+
+  const prevStep = () => {
+    if (currentStep > -1) {
+      const prev = currentStep - 1;
+      setCurrentStep(prev);
+      updateTotals(prev);
+    }
+  };
 
   const startDemo = () => {
     setCurrentStep(0);
-    setIsPlaying(true);
     updateTotals(0);
   };
 
   const resetDemo = () => {
-    setCurrentStep(0);
-    setIsPlaying(false);
+    setCurrentStep(-1);
     setTotalSales(0);
     setTotalExpenses(0);
     setProfit(0);
@@ -133,61 +130,94 @@ const BusinessScenarioDemo: React.FC = () => {
   };
 
   return (
-    <div className="w-full max-w-sm mx-auto">
+    <div className="w-full max-w-md mx-auto">
       {/* Demo Controls */}
-      <div className="flex justify-center mb-4">
-        <button
-          onClick={startDemo}
-          disabled={isPlaying}
-          className="px-6 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          {isPlaying ? '▶ Playing...' : '▶ Watch Sarah\'s Day'}
-        </button>
-      </div>
-
-      {/* Compact Timeline */}
-      <div className="space-y-2 mb-4">
-        {demoSteps.map((step, index) => {
-          const status = getStepStatus(index);
-          const isActive = index === currentStep;
-
-          return (
-            <div
-              key={step.id}
-              className={`flex items-center justify-between p-2 rounded-lg transition-all duration-700 transform ${
-                status === 'completed'
-                  ? 'bg-emerald-50 dark:bg-emerald-900/20 opacity-70'
-                  : status === 'processing'
-                  ? 'bg-orange-50 dark:bg-orange-900/20 scale-105 shadow-md animate-pulse'
-                  : 'bg-gray-50 dark:bg-gray-800 opacity-40'
-              }`}
+      <div className="flex justify-center space-x-2 mb-4">
+        {currentStep === -1 ? (
+          <button
+            onClick={startDemo}
+            className="px-6 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
+          >
+            Start Demo
+          </button>
+        ) : (
+          <>
+            <button
+              onClick={prevStep}
+              disabled={currentStep === -1}
+              className="px-4 py-2 bg-gray-600 text-white rounded-lg text-sm font-medium hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              <div className="flex items-center space-x-2">
-                <span className="text-lg">{step.time}</span>
-                <div>
-                  <p className={`text-sm font-medium ${
-                    status === 'pending' ? 'text-gray-400' : 'text-gray-900 dark:text-white'
-                  }`}>
-                    {step.title}
-                  </p>
-                  {status === 'processing' && (
-                    <p className="text-xs text-orange-600 animate-pulse">{step.description}</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center space-x-1">
-                <span className={`text-sm font-bold ${
-                  status === 'pending' ? 'text-gray-300' : getAmountColor(step.type)
-                }`}>
-                  {step.amount}
-                </span>
-                {getStatusIcon(status)}
-              </div>
-            </div>
-          );
-        })}
+              Previous
+            </button>
+            <button
+              onClick={nextStep}
+              disabled={currentStep >= demoSteps.length - 1}
+              className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Next
+            </button>
+            <button
+              onClick={resetDemo}
+              className="px-4 py-2 bg-gray-600 text-white rounded-lg text-sm font-medium hover:bg-gray-700 transition-colors"
+            >
+              Reset
+            </button>
+          </>
+        )}
       </div>
+
+      {/* Timeline */}
+      {currentStep >= 0 && (
+        <div className="space-y-2 mb-4">
+          {demoSteps.map((step, index) => {
+            const status = getStepStatus(index);
+            const isActive = index === currentStep;
+
+            return (
+              <div
+                key={step.id}
+                className={`rounded-lg transition-all duration-500 transform ${
+                  status === 'completed'
+                    ? 'bg-emerald-50 dark:bg-emerald-900/20 opacity-70'
+                    : status === 'processing'
+                    ? 'bg-orange-50 dark:bg-orange-900/20 scale-105 shadow-lg ring-2 ring-orange-300'
+                    : 'bg-gray-50 dark:bg-gray-800 opacity-60'
+                }`}
+              >
+                {/* Collapsed View */}
+                <div className="flex items-center justify-between p-3">
+                  <div className="flex items-center space-x-3">
+                    <span className="text-sm font-medium text-gray-600">{step.time}</span>
+                    <p className={`text-sm font-medium ${
+                      status === 'pending' ? 'text-gray-400' : 'text-gray-900 dark:text-white'
+                    }`}>
+                      {step.title}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <span className={`text-sm font-bold ${
+                      status === 'pending' ? 'text-gray-300' : getAmountColor(step.type)
+                    }`}>
+                      {step.amount}
+                    </span>
+                    {getStatusIcon(status)}
+                  </div>
+                </div>
+
+                {/* Expanded View - Only for Active Step */}
+                {status === 'processing' && (
+                  <div className="px-3 pb-3 border-t border-orange-200 dark:border-orange-800 mt-2 pt-2">
+                    <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
+                      {step.description}
+                    </p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Compact Summary */}
       <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3">
@@ -200,9 +230,9 @@ const BusinessScenarioDemo: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-600">AI Insight:</span>
-              <div className="flex items-center text-emerald-600 animate-pulse">
+            <div className="text-center">
+              <span className="text-xs text-gray-600">AI Insights</span>
+              <div className="flex items-center justify-center text-emerald-600 animate-pulse mt-1">
                 <TrendingUp className="w-4 h-4 mr-1" />
                 <span className="text-xs font-medium">+12% vs yesterday</span>
               </div>
@@ -210,7 +240,7 @@ const BusinessScenarioDemo: React.FC = () => {
             <div className="text-center">
               <p className="text-xs text-gray-600 dark:text-gray-400">Net Profit</p>
               <p className="text-xl font-bold text-emerald-600 animate-bounce">
-                ${profit.toFixed(0)}
+                $1,341
               </p>
             </div>
           </div>
