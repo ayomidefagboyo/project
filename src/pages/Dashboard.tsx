@@ -22,8 +22,8 @@ import { Button } from '@/components/ui/Button';
 import { useOutlet } from '@/contexts/OutletContext';
 import { vendorInvoiceService } from '@/lib/vendorInvoiceService';
 import { eodService } from '@/lib/eodServiceNew';
+import { currencyService } from '@/lib/currencyService';
 import { VendorInvoice, DashboardView, Outlet } from '@/types';
-import { formatCurrency } from '@/lib/utils';
 import VendorInvoiceTable from '@/components/invoice/VendorInvoiceTable';
 import { FeatureGate } from '@/components/subscription/FeatureGate';
 import { supabase } from '@/lib/supabase';
@@ -58,6 +58,10 @@ const Dashboard: React.FC = () => {
   const [eodStats, setEodStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedDateRange, setSelectedDateRange] = useState('this_month');
+  const [customDateFrom, setCustomDateFrom] = useState('');
+  const [customDateTo, setCustomDateTo] = useState('');
+  const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
   const [isOutletSelectorOpen, setIsOutletSelectorOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showCompanyOnboarding, setShowCompanyOnboarding] = useState(false);
@@ -248,6 +252,63 @@ const Dashboard: React.FC = () => {
     }
   }, [currentUser, canViewAllOutlets]);
 
+  // Date range calculation helper
+  const getDateRange = (range: string) => {
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+
+    switch (range) {
+      case 'today':
+        return { from: today, to: today, label: 'Today' };
+
+      case 'yesterday':
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = yesterday.toISOString().split('T')[0];
+        return { from: yesterdayStr, to: yesterdayStr, label: 'Yesterday' };
+
+      case 'last_7_days':
+        const sevenDaysAgo = new Date(now);
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        return { from: sevenDaysAgo.toISOString().split('T')[0], to: today, label: 'Last 7 days' };
+
+      case 'last_30_days':
+        const thirtyDaysAgo = new Date(now);
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        return { from: thirtyDaysAgo.toISOString().split('T')[0], to: today, label: 'Last 30 days' };
+
+      case 'this_month':
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        return { from: monthStart.toISOString().split('T')[0], to: today, label: 'This month' };
+
+      case 'last_month':
+        const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+        return {
+          from: lastMonthStart.toISOString().split('T')[0],
+          to: lastMonthEnd.toISOString().split('T')[0],
+          label: 'Last month'
+        };
+
+      case 'this_quarter':
+        const quarterStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+        return { from: quarterStart.toISOString().split('T')[0], to: today, label: 'This quarter' };
+
+      case 'custom':
+        return {
+          from: customDateFrom || today,
+          to: customDateTo || today,
+          label: 'Custom range'
+        };
+
+      default:
+        const defaultMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        return { from: defaultMonthStart.toISOString().split('T')[0], to: today, label: 'This month' };
+    }
+  };
+
+  const currentDateRange = getDateRange(selectedDateRange);
+
   // Load vendor invoices and EOD data
   const loadDashboardData = async () => {
     try {
@@ -269,9 +330,12 @@ const Dashboard: React.FC = () => {
         setVendorInvoices(data);
       }
 
-      // Load EOD statistics for the first outlet (or combine if multi-outlet)
+      // Load EOD statistics for the selected date range
       try {
-        const { data: statsData, error: statsError } = await eodService.getEODStats();
+        const { data: statsData, error: statsError } = await eodService.getEODStats(
+          currentDateRange.from,
+          currentDateRange.to
+        );
         if (statsError) {
           console.warn('Failed to load EOD stats:', statsError);
         } else if (statsData) {
@@ -293,7 +357,7 @@ const Dashboard: React.FC = () => {
     if (dashboardView.selectedOutlets.length > 0) {
       loadDashboardData();
     }
-  }, [dashboardView.selectedOutlets]);
+  }, [dashboardView.selectedOutlets, selectedDateRange, customDateFrom, customDateTo]);
 
   // Check subscription status (Stripe-managed)
   const checkSubscriptionStatus = async () => {
@@ -739,34 +803,94 @@ const Dashboard: React.FC = () => {
           </div>
         )}
 
+        {/* Date Range Selector */}
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6 mb-8">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-gray-500" />
+              <span className="font-medium text-gray-900 dark:text-white">Date Range:</span>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3 flex-1">
+              <select
+                value={selectedDateRange}
+                onChange={(e) => {
+                  setSelectedDateRange(e.target.value);
+                  if (e.target.value !== 'custom') {
+                    setShowCustomDatePicker(false);
+                  } else {
+                    setShowCustomDatePicker(true);
+                  }
+                }}
+                className="px-4 py-2 bg-background border border-border rounded-lg text-foreground focus:ring-2 focus:ring-ring focus:border-ring transition-colors"
+              >
+                <option value="today">Today</option>
+                <option value="yesterday">Yesterday</option>
+                <option value="last_7_days">Last 7 days</option>
+                <option value="last_30_days">Last 30 days</option>
+                <option value="this_month">This month</option>
+                <option value="last_month">Last month</option>
+                <option value="this_quarter">This quarter</option>
+                <option value="custom">Custom range</option>
+              </select>
+
+              {showCustomDatePicker && (
+                <div className="flex gap-2">
+                  <input
+                    type="date"
+                    value={customDateFrom}
+                    onChange={(e) => setCustomDateFrom(e.target.value)}
+                    className="px-3 py-2 bg-background border border-border rounded-lg text-foreground focus:ring-2 focus:ring-ring focus:border-ring transition-colors"
+                    placeholder="From"
+                  />
+                  <span className="flex items-center text-gray-500">to</span>
+                  <input
+                    type="date"
+                    value={customDateTo}
+                    onChange={(e) => setCustomDateTo(e.target.value)}
+                    className="px-3 py-2 bg-background border border-border rounded-lg text-foreground focus:ring-2 focus:ring-ring focus:border-ring transition-colors"
+                    placeholder="To"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="text-sm text-gray-600 dark:text-gray-400">
+              {currentDateRange.from === currentDateRange.to
+                ? `${currentDateRange.from}`
+                : `${currentDateRange.from} to ${currentDateRange.to}`}
+            </div>
+          </div>
+        </div>
+
         {/* Key Metrics Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
           <DashboardCard
             title="Total Sales"
-            value={eodStats ? formatCurrency(eodStats.total_sales) : "$0.00"}
+            value={eodStats ? currencyService.formatCurrency(eodStats.total_sales) : currencyService.formatCurrency(0)}
             icon={<TrendingUp className="w-5 h-5" />}
-            subtitle="This month"
+            subtitle={currentDateRange.label}
             change={{ value: 15.2, isPositive: true }}
           />
           <DashboardCard
             title="Total Expenses"
-            value={eodStats ? formatCurrency(eodStats.total_expenses) : formatCurrency(metrics.totalExpenses)}
+            value={eodStats ? currencyService.formatCurrency(eodStats.total_expenses) : currencyService.formatCurrency(metrics.totalExpenses)}
             icon={<DollarSign className="w-5 h-5" />}
-            subtitle="This month"
+            subtitle={currentDateRange.label}
             change={{ value: 12.5, isPositive: false }}
           />
           <DashboardCard
-            title="Pending Reports"
-            value={eodStats?.reports_by_status?.draft || 0}
-            icon={<Clock className="w-5 h-5" />}
-            subtitle="EOD reports awaiting"
-            change={{ value: 8.1, isPositive: false }}
+            title="Approved Reports"
+            value={eodStats?.reports_by_status?.approved || 0}
+            icon={<CheckCircle className="w-5 h-5" />}
+            subtitle={`${currentDateRange.label} completed`}
+            change={{ value: 8.1, isPositive: true }}
           />
           <DashboardCard
             title="Net Profit"
-            value={eodStats ? formatCurrency(eodStats.net_profit) : "$0.00"}
-            icon={<CheckCircle className="w-5 h-5" />}
-            subtitle="This month"
+            value={eodStats ? currencyService.formatCurrency(eodStats.net_profit) : currencyService.formatCurrency(0)}
+            icon={<BarChart3 className="w-5 h-5" />}
+            subtitle={currentDateRange.label}
             change={{ value: 23.4, isPositive: true }}
           />
         </div>
@@ -904,7 +1028,7 @@ const Dashboard: React.FC = () => {
                           <div className="flex justify-between items-center">
                             <span className="text-sm text-gray-600 dark:text-gray-400">Monthly Expenses</span>
                             <span className="font-semibold text-gray-900 dark:text-white">
-                              {formatCurrency(outletExpenses)}
+                              {currencyService.formatCurrency(outletExpenses)}
                             </span>
                           </div>
                           <div className="flex justify-between items-center">

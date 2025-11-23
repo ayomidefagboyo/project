@@ -163,6 +163,8 @@ async def get_eod_analytics(
 @router.get("/stats/overview")
 async def get_eod_stats_overview(
     outlet_id: Optional[str] = Query(None, description="Outlet ID"),
+    date_from: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
     current_user: Dict[str, Any] = Depends(require_auth())
 ):
     """Get EOD statistics overview for dashboard"""
@@ -174,7 +176,7 @@ async def get_eod_stats_overview(
         if not outlet_id:
             raise HTTPException(status_code=400, detail="No outlet specified")
 
-        stats = await eod_service.get_eod_stats_overview(outlet_id)
+        stats = await eod_service.get_eod_stats_overview(outlet_id, date_from, date_to)
         return stats
     except HTTPException:
         raise
