@@ -19,7 +19,7 @@ import { paymentPlans } from '@/lib/stripe';
 import { currencyService, type CurrencyInfo } from '@/lib/currencyService';
 import { trackEvent, trackUserJourney } from '@/lib/posthog';
 import LegalModal from '@/components/modals/LegalModal';
-import CompactOCRDemo from '@/components/demo/CompactOCRDemo';
+import BusinessScenarioDemo from '@/components/demo/BusinessScenarioDemo';
 import PublicHeader from '@/components/layout/PublicHeader';
 
 const LandingPage: React.FC = () => {
@@ -225,26 +225,26 @@ const LandingPage: React.FC = () => {
               </div>
             </div>
             
-            {/* Right side - Live Receipt Scanner */}
+            {/* Right side - Business Scenario Demo */}
             <div className="relative">
               <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 shadow-2xl border border-gray-200/50 dark:border-gray-800/50">
                 <div className="text-center mb-6">
                   <div className="inline-flex items-center space-x-2 bg-emerald-100 dark:bg-emerald-900/50 px-3 py-1 rounded-full text-emerald-700 dark:text-emerald-300 text-sm font-medium mb-3">
                     <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                    <span>Live Receipt Scanner</span>
+                    <span>Business Scenario Demo</span>
                   </div>
                   <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-                    Turn Photos Into Data
+                    Track a Full Business Day
                   </h3>
                   <p className="text-gray-600 dark:text-gray-400 text-sm">
-                    Upload any receipt and watch AI extract data instantly
+                    See how Sarah manages her café's daily finances
                   </p>
                 </div>
-                
-                {/* Interactive OCR Demo */}
-                <CompactOCRDemo />
+
+                {/* Interactive Business Demo */}
+                <BusinessScenarioDemo />
               </div>
-              
+
               {/* Subtle floating elements */}
               <div className="absolute -top-4 -right-4 w-20 h-20 bg-emerald-500/20 rounded-full opacity-60 animate-pulse"></div>
               <div className="absolute -bottom-4 -left-4 w-16 h-16 bg-blue-500/20 rounded-full opacity-60 animate-pulse delay-1000"></div>
