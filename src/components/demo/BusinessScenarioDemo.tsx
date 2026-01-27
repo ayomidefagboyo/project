@@ -23,7 +23,7 @@ const BusinessScenarioDemo: React.FC = () => {
       id: 'eod',
       time: '8PM',
       title: 'EOD Report',
-      description: 'Input cash register totals: Cash $540, Card/Transfer $890, POS transactions...',
+      description: 'Sarah enters her daily sales totals: Cash sales $540, Card/Transfer $890, POS system shows total daily revenue of $1,430. The system automatically validates totals and creates her end-of-day financial summary.',
       amount: '$1,430',
       type: 'income',
       icon: <Receipt className="w-4 h-4" />,
@@ -33,7 +33,7 @@ const BusinessScenarioDemo: React.FC = () => {
       id: 'receipt',
       time: '9PM',
       title: 'Scan Receipt',
-      description: 'Take photo of supply invoice. AI extracts: Merchant, amount, category, date...',
+      description: 'Sarah takes a photo of her supply invoice using the mobile app. Within seconds, the AI recognizes "Metro Restaurant Supplies" as the merchant, extracts the $89.50 amount, automatically categorizes it under "Kitchen Supplies", and captures today\'s date. The expense is instantly added to her books without any manual data entry.',
       amount: '-$89',
       type: 'expense',
       icon: <Package className="w-4 h-4" />,
@@ -43,7 +43,7 @@ const BusinessScenarioDemo: React.FC = () => {
       id: 'ai_check',
       time: '9PM',
       title: 'AI Analysis',
-      description: 'AI reviews expense patterns and flags any anomalies. This expense looks normal.',
+      description: 'The AI automatically reviews the expense against Sarah\'s spending patterns, vendor history, and typical amounts. It checks for duplicates, unusual amounts, and suspicious patterns. This $89 supply expense appears normal and within expected ranges.',
       amount: 'No Issues',
       type: 'balance',
       icon: <CheckCircle className="w-4 h-4" />,
@@ -53,7 +53,7 @@ const BusinessScenarioDemo: React.FC = () => {
       id: 'ask_ai',
       time: '9PM',
       title: 'Ask AI Assistant',
-      description: 'Chat with AI: "How is my profit trending?" AI responds with insights and comparisons.',
+      description: 'Sarah asks "How is my profit trending?" The AI analyzes her financial data and responds: "Your profit is up 12% compared to yesterday, driven by higher card transactions. Your expense ratio is healthy at 6.2%."',
       amount: '+12% vs yesterday',
       type: 'balance',
       icon: <TrendingUp className="w-4 h-4" />,
@@ -130,92 +130,82 @@ const BusinessScenarioDemo: React.FC = () => {
   };
 
   return (
-    <div className="w-full max-w-md mx-auto">
+    <div className="w-full max-w-lg mx-auto">
       {/* Demo Controls */}
-      <div className="flex justify-center space-x-2 mb-4">
+      <div className="flex justify-center mb-6">
         {currentStep === -1 ? (
           <button
             onClick={startDemo}
-            className="px-6 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
+            className="px-8 py-3 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 transition-colors"
           >
             Start Demo
           </button>
         ) : (
-          <>
-            <button
-              onClick={prevStep}
-              disabled={currentStep === -1}
-              className="px-4 py-2 bg-gray-600 text-white rounded-lg text-sm font-medium hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Previous
-            </button>
-            <button
-              onClick={nextStep}
-              disabled={currentStep >= demoSteps.length - 1}
-              className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Next
-            </button>
-            <button
-              onClick={resetDemo}
-              className="px-4 py-2 bg-gray-600 text-white rounded-lg text-sm font-medium hover:bg-gray-700 transition-colors"
-            >
-              Reset
-            </button>
-          </>
+          <button
+            onClick={nextStep}
+            disabled={currentStep >= demoSteps.length - 1}
+            className="px-8 py-3 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {currentStep >= demoSteps.length - 1 ? 'Demo Complete' : 'Continue'}
+          </button>
         )}
       </div>
 
-      {/* Timeline */}
+      {/* Active Step - Fully Expanded */}
       {currentStep >= 0 && (
-        <div className="space-y-2 mb-4">
-          {demoSteps.map((step, index) => {
-            const status = getStepStatus(index);
-            const isActive = index === currentStep;
-
+        <div className="mb-6">
+          {(() => {
+            const step = demoSteps[currentStep];
             return (
-              <div
-                key={step.id}
-                className={`rounded-lg transition-all duration-500 transform ${
-                  status === 'completed'
-                    ? 'bg-emerald-50 dark:bg-emerald-900/20 opacity-70'
-                    : status === 'processing'
-                    ? 'bg-orange-50 dark:bg-orange-900/20 scale-105 shadow-lg ring-2 ring-orange-300'
-                    : 'bg-gray-50 dark:bg-gray-800 opacity-60'
-                }`}
-              >
-                {/* Collapsed View */}
-                <div className="flex items-center justify-between p-3">
-                  <div className="flex items-center space-x-3">
-                    <span className="text-sm font-medium text-gray-600">{step.time}</span>
-                    <p className={`text-sm font-medium ${
-                      status === 'pending' ? 'text-gray-400' : 'text-gray-900 dark:text-white'
-                    }`}>
-                      {step.title}
-                    </p>
+              <div className="bg-gradient-to-r from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 rounded-xl p-6 shadow-lg ring-2 ring-orange-300">
+                {/* Header */}
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center text-white font-bold">
+                      {currentStep + 1}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">{step.time}</p>
+                      <h3 className="text-xl font-semibold text-gray-900 dark:text-white">{step.title}</h3>
+                    </div>
                   </div>
-
-                  <div className="flex items-center space-x-2">
-                    <span className={`text-sm font-bold ${
-                      status === 'pending' ? 'text-gray-300' : getAmountColor(step.type)
-                    }`}>
+                  <div className="text-right">
+                    <p className={`text-lg font-bold ${getAmountColor(step.type)}`}>
                       {step.amount}
-                    </span>
-                    {getStatusIcon(status)}
+                    </p>
                   </div>
                 </div>
 
-                {/* Expanded View - Only for Active Step */}
-                {status === 'processing' && (
-                  <div className="px-3 pb-3 border-t border-orange-200 dark:border-orange-800 mt-2 pt-2">
-                    <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
-                      {step.description}
-                    </p>
+                {/* Description */}
+                <div className="bg-white dark:bg-gray-800 rounded-lg p-4 mb-4">
+                  <p className="text-gray-700 dark:text-gray-300 leading-relaxed">
+                    {step.description}
+                  </p>
+                </div>
+
+                {/* Progress Indicator */}
+                <div className="flex items-center justify-between">
+                  <div className="flex space-x-2">
+                    {demoSteps.map((_, index) => (
+                      <div
+                        key={index}
+                        className={`w-3 h-3 rounded-full transition-colors ${
+                          index < currentStep
+                            ? 'bg-emerald-500'
+                            : index === currentStep
+                            ? 'bg-orange-500'
+                            : 'bg-gray-300'
+                        }`}
+                      />
+                    ))}
                   </div>
-                )}
+                  <span className="text-sm text-gray-600">
+                    Step {currentStep + 1} of {demoSteps.length}
+                  </span>
+                </div>
               </div>
             );
-          })}
+          })()}
         </div>
       )}
 
