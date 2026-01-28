@@ -5,7 +5,7 @@ Nigerian Supermarket Focus
 
 from pydantic import BaseModel, Field, validator
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, date
 from enum import Enum
 from decimal import Decimal
 
@@ -49,6 +49,31 @@ class SyncStatus(str, Enum):
     FAILED = "failed"
 
 
+class POSRole(str, Enum):
+    """POS user roles"""
+    INVENTORY = "inventory"
+    CASHIER = "cashier"
+    MANAGER = "manager"
+    OWNER = "owner"
+    ADMIN = "admin"
+
+
+class TransferStatus(str, Enum):
+    """Inventory transfer status"""
+    PENDING = "pending"
+    APPROVED = "approved"
+    IN_TRANSIT = "in_transit"
+    RECEIVED = "received"
+    CANCELLED = "cancelled"
+
+
+class LoyaltyTransactionType(str, Enum):
+    """Loyalty transaction types"""
+    EARN = "earn"
+    REDEEM = "redeem"
+    ADJUSTMENT = "adjustment"
+
+
 # ===============================================
 # PRODUCT SCHEMAS
 # ===============================================
@@ -70,6 +95,15 @@ class POSProductBase(BaseModel):
     vendor_id: Optional[str] = Field(None, description="Supplier vendor ID")
     image_url: Optional[str] = Field(None, description="Product image URL")
     display_order: int = Field(0, description="Display order in POS")
+    # Enhanced fields
+    expiry_date: Optional[date] = Field(None, description="Product expiry date")
+    batch_number: Optional[str] = Field(None, max_length=100, description="Batch number")
+    markup_percentage: Decimal = Field(30.00, ge=0, description="Markup percentage for auto-pricing")
+    auto_pricing: bool = Field(True, description="Auto-calculate price from cost + markup")
+    category_tax_rate: Optional[Decimal] = Field(None, ge=0, le=1, description="Category-specific tax rate")
+    reorder_notification_sent: bool = Field(False, description="Whether reorder notification was sent")
+    last_received: Optional[datetime] = Field(None, description="Last time stock was received")
+    min_shelf_life_days: int = Field(30, ge=0, description="Minimum shelf life required in days")
 
     @validator('unit_price', 'cost_price')
     def validate_prices(cls, v):
@@ -359,3 +393,383 @@ class ValidationErrorResponse(BaseModel):
     error: str = Field("validation_error", description="Error type")
     message: str = Field(..., description="Validation error message")
     field_errors: List[Dict[str, str]] = Field(..., description="Field-specific errors")
+
+
+# ===============================================
+# CUSTOMER LOYALTY SCHEMAS
+# ===============================================
+
+class CustomerBase(BaseModel):
+    """Base customer schema"""
+    name: str = Field(..., min_length=1, max_length=255, description="Customer name")
+    phone: str = Field(..., min_length=10, max_length=20, description="Customer phone number")
+    email: Optional[str] = Field(None, description="Customer email")
+    date_of_birth: Optional[date] = Field(None, description="Customer date of birth")
+    address: Optional[str] = Field(None, description="Customer address")
+
+    @validator('phone')
+    def validate_phone(cls, v):
+        # Basic Nigerian phone number validation
+        if v and not v.startswith(('+234', '234', '0')):
+            raise ValueError('Phone number must be a valid Nigerian number')
+        return v
+
+    @validator('name')
+    def validate_name(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Customer name cannot be empty')
+        return v.strip()
+
+
+class CustomerCreate(CustomerBase):
+    """Schema for creating a customer"""
+    outlet_id: str = Field(..., description="Outlet ID")
+
+
+class CustomerUpdate(BaseModel):
+    """Schema for updating a customer"""
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    phone: Optional[str] = Field(None, min_length=10, max_length=20)
+    email: Optional[str] = None
+    date_of_birth: Optional[date] = None
+    address: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class CustomerResponse(CustomerBase):
+    """Customer response schema"""
+    id: str = Field(..., description="Customer unique identifier")
+    outlet_id: str = Field(..., description="Outlet identifier")
+    loyalty_points: int = Field(..., description="Current loyalty points")
+    total_spent: Decimal = Field(..., description="Total amount spent")
+    visit_count: int = Field(..., description="Number of visits")
+    last_visit: Optional[datetime] = Field(None, description="Last visit date")
+    is_active: bool = Field(..., description="Whether customer is active")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Last update timestamp")
+
+    class Config:
+        from_attributes = True
+
+
+class LoyaltyTransactionCreate(BaseModel):
+    """Schema for creating loyalty transaction"""
+    customer_id: str = Field(..., description="Customer ID")
+    transaction_id: Optional[str] = Field(None, description="POS transaction ID")
+    transaction_amount: Decimal = Field(..., gt=0, description="Transaction amount")
+    points_earned: int = Field(0, ge=0, description="Points earned")
+    points_redeemed: int = Field(0, ge=0, description="Points redeemed")
+    transaction_type: LoyaltyTransactionType = Field(..., description="Transaction type")
+    notes: Optional[str] = Field(None, description="Additional notes")
+
+
+class LoyaltyTransactionResponse(BaseModel):
+    """Loyalty transaction response"""
+    id: str = Field(..., description="Transaction unique identifier")
+    customer_id: str = Field(..., description="Customer ID")
+    transaction_id: Optional[str] = Field(None, description="POS transaction ID")
+    outlet_id: str = Field(..., description="Outlet ID")
+    transaction_amount: Decimal = Field(..., description="Transaction amount")
+    points_earned: int = Field(..., description="Points earned")
+    points_redeemed: int = Field(..., description="Points redeemed")
+    transaction_type: LoyaltyTransactionType = Field(..., description="Transaction type")
+    notes: Optional[str] = Field(None, description="Notes")
+    created_at: datetime = Field(..., description="Creation timestamp")
+
+    class Config:
+        from_attributes = True
+
+
+class LoyaltySettingsUpdate(BaseModel):
+    """Schema for updating loyalty settings"""
+    points_per_naira: Optional[Decimal] = Field(None, ge=0, description="Points earned per naira spent")
+    redemption_rate: Optional[Decimal] = Field(None, ge=0, description="Naira value per point redeemed")
+    minimum_redemption_points: Optional[int] = Field(None, ge=0, description="Minimum points for redemption")
+    point_expiry_months: Optional[int] = Field(None, ge=0, description="Point expiry in months")
+    is_active: Optional[bool] = Field(None, description="Whether loyalty program is active")
+
+
+class LoyaltySettingsResponse(BaseModel):
+    """Loyalty settings response"""
+    id: str = Field(..., description="Settings unique identifier")
+    outlet_id: str = Field(..., description="Outlet ID")
+    points_per_naira: Decimal = Field(..., description="Points per naira")
+    redemption_rate: Decimal = Field(..., description="Redemption rate")
+    minimum_redemption_points: int = Field(..., description="Minimum redemption points")
+    point_expiry_months: int = Field(..., description="Point expiry months")
+    is_active: bool = Field(..., description="Whether active")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Update timestamp")
+
+    class Config:
+        from_attributes = True
+
+
+# ===============================================
+# INVENTORY TRANSFER SCHEMAS
+# ===============================================
+
+class InventoryTransferItemCreate(BaseModel):
+    """Schema for transfer item"""
+    product_id: str = Field(..., description="Product ID")
+    quantity_requested: int = Field(..., gt=0, description="Quantity requested")
+    batch_number: Optional[str] = Field(None, description="Batch number")
+    expiry_date: Optional[date] = Field(None, description="Expiry date")
+    notes: Optional[str] = Field(None, description="Item notes")
+
+
+class InventoryTransferCreate(BaseModel):
+    """Schema for creating inventory transfer"""
+    from_outlet_id: str = Field(..., description="Source outlet ID")
+    to_outlet_id: str = Field(..., description="Destination outlet ID")
+    transfer_reason: Optional[str] = Field(None, description="Reason for transfer")
+    items: List[InventoryTransferItemCreate] = Field(..., min_items=1, description="Items to transfer")
+    notes: Optional[str] = Field(None, description="Transfer notes")
+
+    @validator('from_outlet_id', 'to_outlet_id')
+    def validate_outlets_different(cls, v, values):
+        if 'from_outlet_id' in values and v == values['from_outlet_id']:
+            raise ValueError('Source and destination outlets cannot be the same')
+        return v
+
+
+class InventoryTransferUpdate(BaseModel):
+    """Schema for updating transfer"""
+    status: Optional[TransferStatus] = Field(None, description="Transfer status")
+    notes: Optional[str] = Field(None, description="Updated notes")
+
+
+class InventoryTransferApproval(BaseModel):
+    """Schema for approving transfer"""
+    approved: bool = Field(..., description="Whether to approve or reject")
+    notes: Optional[str] = Field(None, description="Approval notes")
+
+
+class InventoryTransferItemResponse(BaseModel):
+    """Transfer item response"""
+    id: str = Field(..., description="Item unique identifier")
+    product_id: str = Field(..., description="Product ID")
+    product_name: str = Field(..., description="Product name")
+    sku: str = Field(..., description="Product SKU")
+    quantity_requested: int = Field(..., description="Quantity requested")
+    quantity_sent: int = Field(..., description="Quantity sent")
+    quantity_received: int = Field(..., description="Quantity received")
+    unit_cost: Optional[Decimal] = Field(None, description="Unit cost")
+    batch_number: Optional[str] = Field(None, description="Batch number")
+    expiry_date: Optional[date] = Field(None, description="Expiry date")
+    notes: Optional[str] = Field(None, description="Notes")
+
+    class Config:
+        from_attributes = True
+
+
+class InventoryTransferResponse(BaseModel):
+    """Inventory transfer response"""
+    id: str = Field(..., description="Transfer unique identifier")
+    transfer_number: str = Field(..., description="Transfer number")
+    from_outlet_id: str = Field(..., description="Source outlet ID")
+    to_outlet_id: str = Field(..., description="Destination outlet ID")
+    from_outlet_name: str = Field(..., description="Source outlet name")
+    to_outlet_name: str = Field(..., description="Destination outlet name")
+    status: TransferStatus = Field(..., description="Transfer status")
+    transfer_reason: Optional[str] = Field(None, description="Transfer reason")
+    total_items: int = Field(..., description="Total items")
+    total_value: Decimal = Field(..., description="Total value")
+    requested_by: str = Field(..., description="Requested by user ID")
+    approved_by: Optional[str] = Field(None, description="Approved by user ID")
+    received_by: Optional[str] = Field(None, description="Received by user ID")
+    notes: Optional[str] = Field(None, description="Notes")
+    requested_at: datetime = Field(..., description="Request timestamp")
+    approved_at: Optional[datetime] = Field(None, description="Approval timestamp")
+    received_at: Optional[datetime] = Field(None, description="Receipt timestamp")
+    items: List[InventoryTransferItemResponse] = Field(..., description="Transfer items")
+
+    class Config:
+        from_attributes = True
+
+
+# ===============================================
+# ROLE & PERMISSION SCHEMAS
+# ===============================================
+
+class POSUserRoleCreate(BaseModel):
+    """Schema for creating POS user role"""
+    user_id: str = Field(..., description="User ID")
+    outlet_id: str = Field(..., description="Outlet ID")
+    role_name: POSRole = Field(..., description="Role name")
+    permissions: Dict[str, bool] = Field(default_factory=dict, description="Role permissions")
+
+
+class POSUserRoleUpdate(BaseModel):
+    """Schema for updating POS user role"""
+    role_name: Optional[POSRole] = Field(None, description="Role name")
+    permissions: Optional[Dict[str, bool]] = Field(None, description="Updated permissions")
+    is_active: Optional[bool] = Field(None, description="Whether role is active")
+
+
+class POSUserRoleResponse(BaseModel):
+    """POS user role response"""
+    id: str = Field(..., description="Role unique identifier")
+    user_id: str = Field(..., description="User ID")
+    outlet_id: str = Field(..., description="Outlet ID")
+    role_name: POSRole = Field(..., description="Role name")
+    permissions: Dict[str, bool] = Field(..., description="Role permissions")
+    is_active: bool = Field(..., description="Whether role is active")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Update timestamp")
+
+    class Config:
+        from_attributes = True
+
+
+# ===============================================
+# ENHANCED PRODUCT SCHEMAS
+# ===============================================
+
+class StockReceiptCreate(BaseModel):
+    """Schema for receiving stock"""
+    product_id: str = Field(..., description="Product ID")
+    quantity_received: int = Field(..., gt=0, description="Quantity received")
+    cost_price: Decimal = Field(..., gt=0, description="Cost price per unit")
+    batch_number: Optional[str] = Field(None, description="Batch number")
+    expiry_date: Optional[date] = Field(None, description="Expiry date")
+    supplier_invoice: Optional[str] = Field(None, description="Supplier invoice number")
+    received_by: str = Field(..., description="User who received the stock")
+    notes: Optional[str] = Field(None, description="Receipt notes")
+
+    @validator('expiry_date')
+    def validate_expiry_date(cls, v):
+        if v and v <= date.today():
+            raise ValueError('Expiry date must be in the future')
+        return v
+
+
+class ExpiringProductsResponse(BaseModel):
+    """Response for expiring products"""
+    outlet_id: str = Field(..., description="Outlet ID")
+    product_id: str = Field(..., description="Product ID")
+    product_name: str = Field(..., description="Product name")
+    sku: str = Field(..., description="Product SKU")
+    batch_number: Optional[str] = Field(None, description="Batch number")
+    expiry_date: Optional[date] = Field(None, description="Expiry date")
+    days_until_expiry: int = Field(..., description="Days until expiry")
+    quantity_on_hand: int = Field(..., description="Current quantity")
+
+    class Config:
+        from_attributes = True
+
+
+class LowStockProductsResponse(BaseModel):
+    """Response for low stock products"""
+    outlet_id: str = Field(..., description="Outlet ID")
+    product_id: str = Field(..., description="Product ID")
+    product_name: str = Field(..., description="Product name")
+    sku: str = Field(..., description="Product SKU")
+    quantity_on_hand: int = Field(..., description="Current quantity")
+    reorder_level: int = Field(..., description="Reorder level")
+    reorder_quantity: int = Field(..., description="Suggested reorder quantity")
+    supplier_id: Optional[str] = Field(None, description="Supplier ID")
+
+    class Config:
+        from_attributes = True
+
+
+# ===============================================
+# ENHANCED TRANSACTION SCHEMAS
+# ===============================================
+
+class EnhancedTransactionItemCreate(TransactionItemCreate):
+    """Enhanced transaction item with loyalty support"""
+    loyalty_points_earned: int = Field(0, ge=0, description="Points earned for this item")
+
+
+class EnhancedPOSTransactionCreate(POSTransactionCreate):
+    """Enhanced transaction with customer and loyalty support"""
+    customer_id: Optional[str] = Field(None, description="Customer ID for loyalty")
+    loyalty_points_redeemed: int = Field(0, ge=0, description="Loyalty points redeemed")
+    loyalty_discount: Decimal = Field(0, ge=0, description="Discount from loyalty points")
+    split_payments: Optional[List[Dict[str, Any]]] = Field(None, description="Split payment details")
+
+    @validator('split_payments')
+    def validate_split_payments(cls, v, values):
+        if v and len(v) > 1:
+            # Validate that split payment amounts sum to total
+            total_split = sum(payment.get('amount', 0) for payment in v)
+            # Note: We can't easily access the calculated total here, so this is a placeholder
+            pass
+        return v
+
+
+# ===============================================
+# RECEIPT CUSTOMIZATION SCHEMAS
+# ===============================================
+
+class ReceiptSettingsUpdate(BaseModel):
+    """Schema for updating receipt settings"""
+    header_text: Optional[str] = Field(None, description="Receipt header text")
+    footer_text: Optional[str] = Field(None, description="Receipt footer text")
+    logo_url: Optional[str] = Field(None, description="Logo URL")
+    show_qr_code: Optional[bool] = Field(None, description="Whether to show QR code")
+    show_customer_points: Optional[bool] = Field(None, description="Show customer points")
+    show_tax_breakdown: Optional[bool] = Field(None, description="Show tax breakdown")
+    receipt_width: Optional[int] = Field(None, ge=40, le=80, description="Receipt width in mm")
+    font_size: Optional[str] = Field(None, description="Font size (small, normal, large)")
+
+
+class ReceiptSettingsResponse(BaseModel):
+    """Receipt settings response"""
+    id: str = Field(..., description="Settings unique identifier")
+    outlet_id: str = Field(..., description="Outlet ID")
+    header_text: Optional[str] = Field(None, description="Header text")
+    footer_text: Optional[str] = Field(None, description="Footer text")
+    logo_url: Optional[str] = Field(None, description="Logo URL")
+    show_qr_code: bool = Field(..., description="Show QR code")
+    show_customer_points: bool = Field(..., description="Show customer points")
+    show_tax_breakdown: bool = Field(..., description="Show tax breakdown")
+    receipt_width: int = Field(..., description="Receipt width")
+    font_size: str = Field(..., description="Font size")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Update timestamp")
+
+    class Config:
+        from_attributes = True
+
+
+# ===============================================
+# ANALYTICS & REPORTING SCHEMAS
+# ===============================================
+
+class EnhancedInventoryStatsResponse(InventoryStatsResponse):
+    """Enhanced inventory statistics"""
+    expiring_soon_count: int = Field(..., description="Products expiring within 30 days")
+    expired_count: int = Field(..., description="Expired products")
+    total_batches: int = Field(..., description="Total product batches")
+    categories_count: int = Field(..., description="Number of categories")
+
+
+class CustomerAnalyticsResponse(BaseModel):
+    """Customer analytics response"""
+    total_customers: int = Field(..., description="Total customers")
+    active_customers: int = Field(..., description="Active customers")
+    total_loyalty_points_issued: int = Field(..., description="Total points issued")
+    total_loyalty_points_redeemed: int = Field(..., description="Total points redeemed")
+    average_points_per_customer: Decimal = Field(..., description="Average points per customer")
+    top_customers: List[Dict[str, Any]] = Field(..., description="Top customers by spending")
+
+
+# ===============================================
+# BULK OPERATION SCHEMAS
+# ===============================================
+
+class BulkProductUpdate(BaseModel):
+    """Schema for bulk product updates"""
+    product_ids: List[str] = Field(..., min_items=1, description="Product IDs to update")
+    updates: Dict[str, Any] = Field(..., description="Updates to apply")
+    apply_to_all: bool = Field(False, description="Apply to all products in outlet")
+
+
+class BulkStockAdjustment(BaseModel):
+    """Schema for bulk stock adjustments"""
+    adjustments: List[Dict[str, Any]] = Field(..., min_items=1, description="Stock adjustments")
+    reason: str = Field(..., description="Reason for adjustments")
+    performed_by: str = Field(..., description="User performing adjustments")
