@@ -10,14 +10,13 @@
 
 ## 📋 **Executive Summary**
 
-Building an integrated Point of Sale system for Nigerian supermarkets with offline-first architecture, sophisticated inventory management, and seamless integration with existing Compazz financial platform.
+Building an integrated Point of Sale system for Nigerian supermarkets with offline-first architecture. **Crucially, the POS will be a standalone application separate from the financial dashboard**, ensuring maximum performance, security, and offline reliability.
 
 ### **Key Objectives**
-- Enable 3+ days offline operation during internet outages
-- Support 5-9 concurrent POS terminals per location
-- Integrate barcode scanning for inventory and sales
-- Provide real-time multi-location synchronization
-- Deliver QuickBooks-level inventory sophistication
+- **Architecture**: Separate POS Application (pos.compazz.com) vs Financial Dashboard (app.compazz.com)
+- **Offline**: Enable 3+ days offline operation during internet outages
+- **Scale**: Support 5-9 concurrent POS terminals per location
+- **Integration**: Seamless API-level integration with backend
 
 ---
 
@@ -42,7 +41,25 @@ Building an integrated Point of Sale system for Nigerian supermarkets with offli
 
 ## 🏗️ **Technical Architecture**
 
-### **Hybrid Cloud-Local Architecture**
+### **Separated Application Architecture**
+```
+POS TERMINAL (pos.compazz.app)         ADMIN DASHBOARD (app.compazz.app)
+[Standalone React PWA]                 [Existing React App]
+├── Offline-First (SQLite/IDB)         ├── Financial Reporting
+├── Barcode Scanning Optimized         ├── Inventory Management
+├── Cashier Interface                  ├── Staff Management
+└── Local Receipt Printing             └── Global Analytics
+          │                                      │
+          └────────────┐           ┌─────────────┘
+                       │           │
+                 SHARED BACKEND API (api.compazz.app)
+                 [FastAPI + Python]
+                       │
+                 SUPABASE DATABASE
+                 [PostgreSQL]
+```
+
+### **Hybrid Cloud-Local Strategy**
 ```
 CLOUD (Supabase PostgreSQL)
 ├── Master inventory database

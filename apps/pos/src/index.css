@@ -1,0 +1,146 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Premium Swiss spa palette - Neutral grays with accent */
+    --background: 0 0% 100%;
+    --foreground: 0 0% 9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 9%;
+
+    /* Primary - Sophisticated deep blue-gray */
+    --primary: 215 28% 17%;
+    --primary-foreground: 0 0% 98%;
+
+    /* Secondary - Warm minimal beige */
+    --secondary: 20 14% 96%;
+    --secondary-foreground: 215 25% 27%;
+
+    /* Muted - Light neutral */
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 45%;
+
+    /* Accent - Subtle warm accent */
+    --accent: 25 100% 97%;
+    --accent-foreground: 215 25% 27%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 215 28% 17%;
+
+    /* Premium spacing scale */
+    --space-xs: 0.25rem;
+    --space-sm: 0.5rem;
+    --space-md: 0.75rem;
+    --space-lg: 1rem;
+    --space-xl: 1.5rem;
+    --space-2xl: 2rem;
+    --space-3xl: 3rem;
+    --space-4xl: 4rem;
+    --space-5xl: 6rem;
+    --space-6xl: 8rem;
+
+    /* Typography scale */
+    --text-xs: 0.75rem;
+    --text-sm: 0.875rem;
+    --text-base: 1rem;
+    --text-lg: 1.125rem;
+    --text-xl: 1.25rem;
+    --text-2xl: 1.5rem;
+    --text-3xl: 1.875rem;
+    --text-4xl: 2.25rem;
+    --text-5xl: 3rem;
+    --text-6xl: 3.75rem;
+  }
+ 
+  .dark {
+    --background: 215 28% 17%;
+    --foreground: 0 0% 98%;
+
+    --card: 215 28% 17%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 215 28% 17%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 0 0% 98%;
+    --primary-foreground: 215 28% 17%;
+
+    --secondary: 215 27% 24%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 215 27% 24%;
+    --muted-foreground: 0 0% 65%;
+
+    --accent: 215 27% 24%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 62% 31%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 215 27% 24%;
+    --input: 215 27% 24%;
+    --ring: 0 0% 83%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-medium;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight;
+    line-height: 1.2;
+  }
+}
+
+/* Premium component styles */
+@layer components {
+  .btn-primary {
+    @apply bg-primary text-primary-foreground hover:bg-primary/90 
+           inline-flex items-center justify-center rounded-lg 
+           font-medium transition-all duration-200 
+           focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2
+           active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
+  }
+  
+  .btn-secondary {
+    @apply bg-secondary text-secondary-foreground hover:bg-secondary/80 
+           border border-border inline-flex items-center justify-center 
+           rounded-lg font-medium transition-all duration-200 
+           focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2
+           active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
+  }
+  
+  .card {
+    @apply bg-card text-card-foreground rounded-lg border border-border 
+           shadow-sm hover:shadow-md transition-shadow duration-200;
+  }
+  
+  .section-padding {
+    @apply px-6 sm:px-8 lg:px-12 py-12 sm:py-16 lg:py-20;
+  }
+  
+  .container-width {
+    @apply max-w-6xl mx-auto;
+  }
+  
+  .text-balance {
+    text-wrap: balance;
+  }
+}
