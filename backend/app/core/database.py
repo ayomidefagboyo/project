@@ -2,7 +2,7 @@
 Database configuration and connection management
 """
 
-from supabase import create_client, Client
+from supabase import create_client, Client, ClientOptions
 from app.core.config import settings
 from typing import Optional
 import logging
@@ -30,16 +30,20 @@ async def init_db() -> None:
 
         logger.info(f"🔗 Connecting to Supabase at: {settings.SUPABASE_URL}")
 
-        # Create regular Supabase client
+        # Create regular Supabase client with compatible options
+        client_options = ClientOptions()
         supabase = create_client(
             settings.SUPABASE_URL,
-            settings.SUPABASE_ANON_KEY
+            settings.SUPABASE_ANON_KEY,
+            client_options
         )
 
         # Create admin client for server-side operations
+        admin_options = ClientOptions()
         supabase_admin = create_client(
             settings.SUPABASE_URL,
-            settings.SUPABASE_SERVICE_ROLE_KEY
+            settings.SUPABASE_SERVICE_ROLE_KEY,
+            admin_options
         )
 
         logger.info("✅ Database connections initialized successfully")
@@ -84,6 +88,16 @@ class Tables:
     APPROVALS = "approvals"
     FILES = "files"
     OCR_PROCESSING = "ocr_processing"
+    POS_PRODUCTS = "pos_products"
+    POS_TRANSACTIONS = "pos_transactions"
+    POS_TRANSACTION_ITEMS = "pos_transaction_items"
+    STOCK_MOVEMENTS = "stock_movements"
+    CASH_DRAWER_SESSIONS = "cash_drawer_sessions"
+    LOYALTY_TRANSACTIONS = "loyalty_transactions"
+    LOYALTY_SETTINGS = "loyalty_settings"
+    INVENTORY_TRANSFERS = "inventory_transfers"
+    INVENTORY_TRANSFER_ITEMS = "inventory_transfer_items"
+    RECEIPT_SETTINGS = "receipt_settings"
 
 
 # RLS Policy names

@@ -1,10 +1,11 @@
-# Compazz - Financial Management
-
-A modern financial management application built with React, TypeScript, and Tailwind CSS.
-
+# Compazz POS - Financial Management
+ 
+A modern financial management and POS application built with React, TypeScript, and Tailwind CSS.
+ 
 ## Features
-
+ 
 - 📊 Dashboard with financial overview
+- 🛒 Point of Sale (POS) system
 - 🧾 Invoice management (create, view, edit)
 - 💰 Expense tracking
 - 📈 Daily reports
@@ -13,9 +14,9 @@ A modern financial management application built with React, TypeScript, and Tail
 - ⚙️ Settings management
 - 🌙 Dark mode support
 - 📱 Responsive design
-
+ 
 ## Tech Stack
-
+ 
 - **Frontend**: React 18 + TypeScript
 - **Styling**: Tailwind CSS
 - **Build Tool**: Vite
@@ -23,20 +24,20 @@ A modern financial management application built with React, TypeScript, and Tail
 - **Routing**: React Router DOM
 - **State Management**: React hooks
 - **UI Components**: Custom component library
-
+ 
 ## Getting Started
-
+ 
 ### Prerequisites
-
+ 
 - Node.js 18+ 
 - npm or yarn
-
+ 
 ### Installation
-
+ 
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd project
+cd compazz-pos
 ```
 
 2. Install dependencies:

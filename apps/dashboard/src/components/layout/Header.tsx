@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
-import { 
-  Bell, 
-  Search, 
-  Sun, 
-  Moon, 
-  User, 
-  LogOut, 
-  Settings as SettingsIcon, 
-  UserPlus, 
+import {
+  Bell,
+  Search,
+  Sun,
+  Moon,
+  User,
+  LogOut,
+  Settings as SettingsIcon,
+  UserPlus,
   Menu,
   ChevronDown,
   Building2
@@ -112,11 +112,11 @@ const Header: React.FC<HeaderProps> = ({ isDarkMode, toggleDarkMode, onToggleSid
           {/* Center Section - Search */}
           <div className="flex-1 max-w-md mx-8">
             <div className="relative">
-              <div 
+              <div
                 className={`
                   flex items-center bg-gray-50 dark:bg-gray-800 rounded-xl transition-all duration-200
-                  ${isSearchFocused 
-                    ? 'ring-2 ring-gray-900 dark:ring-white bg-white dark:bg-gray-700' 
+                  ${isSearchFocused
+                    ? 'ring-2 ring-gray-900 dark:ring-white bg-white dark:bg-gray-700'
                     : 'hover:bg-gray-100 dark:hover:bg-gray-700'
                   }
                   w-full
@@ -143,6 +143,16 @@ const Header: React.FC<HeaderProps> = ({ isDarkMode, toggleDarkMode, onToggleSid
 
           {/* Right Section */}
           <div className="flex items-center space-x-3">
+
+            {/* Launch POS Button */}
+            <a
+              href="http://localhost:5174"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hidden md:flex items-center space-x-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors font-medium text-sm"
+            >
+              <span>Launch POS</span>
+            </a>
 
             {/* Notifications */}
             <button className="relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors group">
@@ -249,8 +259,8 @@ const Header: React.FC<HeaderProps> = ({ isDarkMode, toggleDarkMode, onToggleSid
 
       {/* Click away listener for dropdown */}
       {isUserMenuOpen && (
-        <div 
-          className="fixed inset-0 z-20" 
+        <div
+          className="fixed inset-0 z-20"
           onClick={() => setIsUserMenuOpen(false)}
         />
       )}

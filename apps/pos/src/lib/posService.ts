@@ -348,24 +348,29 @@ class POSService {
 
       return response.data;
     } catch (error) {
-      console.error('Error fetching products online, trying offline cache:', error);
+      // Silently handle API errors when backend is not available
+      if ((error as any)?.message?.includes('Network error') ||
+        (error as any)?.message?.includes('401') ||
+        (error as any)?.message?.includes('Unauthorized')) {
+        console.debug('Backend not available, using offline data');
+      } else {
+        console.error('Error fetching products online, trying offline cache:', error);
+      }
 
       // Fallback to offline cache
       if (this.isInitialized) {
         try {
-          const offlineProducts = await offlineDatabase.getProducts(outletId);
-          let filteredProducts = offlineProducts;
+          let filteredProducts: POSProduct[] = [];
 
-          // Apply filters
           if (options.search) {
-            const searchLower = options.search.toLowerCase();
-            filteredProducts = filteredProducts.filter(p =>
-              p.name.toLowerCase().includes(searchLower) ||
-              p.sku.toLowerCase().includes(searchLower) ||
-              p.barcode?.toLowerCase().includes(searchLower)
-            );
+            // Use optimized indexed search
+            filteredProducts = await offlineDatabase.searchProducts(outletId, options.search);
+          } else {
+            // Get all products (optimized in Dexie to return all for outlet)
+            filteredProducts = await offlineDatabase.getProducts(outletId);
           }
 
+          // Apply remaining filters (Category, Active)
           if (options.category) {
             filteredProducts = filteredProducts.filter(p => p.category === options.category);
           }
@@ -395,6 +400,15 @@ class POSService {
       throw this.handleError(error);
     }
   }
+
+  /**
+   * Search products locally (Optimized for instant search)
+   */
+  async searchLocalProducts(outletId: string, query: string): Promise<POSProduct[]> {
+    if (!this.isInitialized || !query) return [];
+    return await offlineDatabase.searchProducts(outletId, query);
+  }
+
 
   /**
    * Get product by barcode scan

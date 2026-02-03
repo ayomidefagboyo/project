@@ -27,7 +27,7 @@ export interface AppConfig {
 
 const config: AppConfig = {
   api: {
-    baseUrl: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1',
+    baseUrl: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002/api/v1',
     timeout: parseInt(import.meta.env.VITE_API_TIMEOUT || '30000'),
     retryAttempts: parseInt(import.meta.env.VITE_API_RETRY_ATTEMPTS || '3'),
     retryDelay: parseInt(import.meta.env.VITE_API_RETRY_DELAY || '1000')
