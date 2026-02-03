@@ -9,17 +9,13 @@ import {
   WifiOff,
   AlertCircle,
   Plus,
-  TruckIcon,
   RotateCcw,
-  Package2,
-  ClipboardList,
-  Menu,
-  X,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useOutlet } from '@/contexts/OutletContext';
-import { posService, PaymentMethod } from '@/lib/posService';
-import type { POSProduct } from '@/lib/posService';
+import { useOutlet } from '../../contexts/OutletContext';
+import { posService, PaymentMethod } from '../../lib/posService';
+import type { POSProduct } from '../../lib/posService';
+import { offlineDatabase } from '../../lib/offlineDatabase';
 
 // Sub-components (we'll create these next)
 import POSProductGrid from './POSProductGrid';
@@ -47,6 +43,7 @@ const POSDashboard: React.FC = () => {
 
   // POS State
   const [products, setProducts] = useState<POSProduct[]>([]);
+  const [displayedProducts, setDisplayedProducts] = useState<POSProduct[]>([]); // New state for search results
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedCategory] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -57,7 +54,10 @@ const POSDashboard: React.FC = () => {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showAdminSidebar, setShowAdminSidebar] = useState(false);
+  const [showCashInput, setShowCashInput] = useState(false);
+  const [cashAmount, setCashAmount] = useState('');
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const [searchResults, setSearchResults] = useState<POSProduct[]>([]);
 
   // Inventory Management Modal States
   const [showAddProductModal, setShowAddProductModal] = useState(false);
@@ -66,12 +66,50 @@ const POSDashboard: React.FC = () => {
   const [showStockAdjustmentModal, setShowStockAdjustmentModal] = useState(false);
   const [showStockReportModal, setShowStockReportModal] = useState(false);
 
+  // Helper function to format currency
+  const formatCurrency = (amount: number): string => {
+    return new Intl.NumberFormat('en-NG', {
+      style: 'currency',
+      currency: 'NGN',
+      minimumFractionDigits: 2
+    }).format(amount);
+  };
+
+  // Search function
+  const handleSearchChange = async (query: string) => {
+    setSearchQuery(query);
+    if (query.length > 2 && currentOutlet?.id) {
+      try {
+        const response = await posService.getProducts(currentOutlet.id, {
+          search: query,
+          size: 10
+        });
+        setSearchResults(response?.items || []);
+        setShowSearchDropdown(true);
+      } catch (error) {
+        console.error('Search error:', error);
+        setSearchResults([]);
+      }
+    } else {
+      setSearchResults([]);
+      setShowSearchDropdown(false);
+    }
+  };
+
+  // Add product from search dropdown
+  const addProductFromSearch = (product: POSProduct) => {
+    addToCart(product);
+    setSearchQuery('');
+    setShowSearchDropdown(false);
+    setSearchResults([]);
+  };
+
   // Load products on mount
   useEffect(() => {
     if (currentOutlet?.id) {
       loadProducts();
     }
-  }, [currentOutlet?.id, selectedCategory, searchQuery]);
+  }, [currentOutlet?.id, selectedCategory]);
 
   // Monitor online status
   useEffect(() => {
@@ -97,22 +135,38 @@ const POSDashboard: React.FC = () => {
    * Load products from API
    */
   const loadProducts = async () => {
-    if (!currentOutlet?.id) return;
+    if (!currentOutlet?.id) {
+      console.warn('No active outlet found for POS');
+      setIsLoading(false);
+      return;
+    }
 
     try {
       setIsLoading(true);
       const response = await posService.getProducts(currentOutlet.id, {
-        search: searchQuery || undefined,
         category: selectedCategory || undefined,
         activeOnly: true,
-        size: 100
+        size: 1000 // Load more products for local search
       });
 
       setProducts(response?.items || []);
       setError(null);
     } catch (err) {
-      setError('Failed to load products. Please try again.');
-      console.error('Error loading products:', err);
+      console.error('Error loading products online, trying offline:', err);
+      // Fallback to offline DB explicitly
+      try {
+        const offlineProducts = await offlineDatabase.getProducts(currentOutlet.id);
+        if (offlineProducts && offlineProducts.length > 0) {
+          setProducts(offlineProducts);
+          setError(null);
+          console.log('Loaded products from offline database');
+        } else {
+          setError('No products found. Please connect to internet to sync.');
+        }
+      } catch (offlineErr) {
+        console.error('Offline load failed:', offlineErr);
+        setError('Failed to load products from both online and offline sources.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -148,11 +202,11 @@ const POSDashboard: React.FC = () => {
             : item
         );
       } else {
-        // Add new item
+        // Add new item with tax-inclusive pricing
         return [...prevCart, {
           product,
           quantity,
-          unitPrice: product.unit_price,
+          unitPrice: product.unit_price * (1 + product.tax_rate),
           discount: 0
         }];
       }
@@ -254,82 +308,54 @@ const POSDashboard: React.FC = () => {
   const handleDirectPayment = async (paymentMethod: PaymentMethod) => {
     if (!currentUser?.id || !currentOutlet?.id) return;
 
+    // For cash payments, show calculator interface
+    if (paymentMethod === PaymentMethod.CASH) {
+      setShowCashInput(true);
+      return;
+    }
+
+    // For CARD and TRANSFER, auto-process with exact amount
     try {
       const totals = calculateCartTotals();
 
-      // For cash payments, we might want to ask for tendered amount
-      let tenderedAmount: number | undefined;
-      if (paymentMethod === 'cash') {
-        const input = prompt(`Total: ₦${totals.total.toLocaleString()}\nEnter cash amount received:`);
-        if (input === null) return; // User cancelled
-        tenderedAmount = parseFloat(input);
-        if (isNaN(tenderedAmount) || tenderedAmount < totals.total) {
-          alert('Invalid amount or insufficient cash');
-          return;
-        }
+      // Prepare transaction items
+      const items = cart.map(item => ({
+        product_id: item.product.id,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        discount_amount: item.discount * item.quantity
+      }));
+
+      // Create transaction request with exact amount
+      const transactionRequest = {
+        outlet_id: currentOutlet.id,
+        cashier_id: currentUser.id,
+        items,
+        payment_method: paymentMethod,
+        tendered_amount: totals.total, // Exact amount for card/transfer
+        discount_amount: totals.totalDiscount
+      };
+
+      // Process transaction (online or offline)
+      if (isOnline) {
+        await posService.createTransaction(transactionRequest);
+        alert(`${paymentMethod.toUpperCase()} payment completed successfully!`);
+      } else {
+        const offlineId = await posService.storeOfflineTransaction(transactionRequest);
+        setOfflineTransactionCount(prev => prev + 1);
+        alert(`Transaction stored offline (ID: ${offlineId})`);
       }
 
-      await handlePayment(paymentMethod, tenderedAmount);
+      // Clear cart
+      clearCart();
+
     } catch (error) {
-      console.error('Direct payment error:', error);
+      console.error('Payment error:', error);
       alert('Payment failed. Please try again.');
     }
   };
 
-  /**
-   * Handle receipt printing
-   */
-  const handlePrintReceipt = () => {
-    if (cart.length === 0) {
-      alert('Cart is empty');
-      return;
-    }
 
-    // Create a simple receipt for printing
-    const totals = calculateCartTotals();
-    const receiptContent = `
-=== ${currentOutlet?.name} ===
-Date: ${new Date().toLocaleString()}
-Cashier: ${currentUser?.name}
-
-${cart.map(item =>
-      `${item.product.name}\n${item.quantity} x ₦${item.unitPrice} = ₦${(item.quantity * item.unitPrice).toLocaleString()}`
-    ).join('\n\n')}
-
-----------------------------
-Subtotal: ₦${totals.subtotal.toLocaleString()}
-Discount: -₦${totals.totalDiscount.toLocaleString()}
-Tax (7.5%): ₦${totals.totalTax.toLocaleString()}
-----------------------------
-TOTAL: ₦${totals.total.toLocaleString()}
-
-Thank you for shopping with us!
-    `;
-
-    // Open print dialog
-    const printWindow = window.open('', '_blank', 'width=300,height=600');
-    if (printWindow) {
-      printWindow.document.write(`
-        <html>
-          <head>
-            <title>Receipt</title>
-            <style>
-              body {
-                font-family: 'Courier New', monospace;
-                font-size: 12px;
-                white-space: pre-line;
-                margin: 10px;
-              }
-            </style>
-          </head>
-          <body>${receiptContent}</body>
-        </html>
-      `);
-      printWindow.document.close();
-      printWindow.print();
-      printWindow.close();
-    }
-  };
 
   /**
    * Process payment
@@ -383,253 +409,349 @@ Thank you for shopping with us!
     }
   };
 
-  // Get unique categories for filter
 
+
+  /**
+   * Handle cash payment with amount
+   */
+  const handleCashPayment = async () => {
+    const amount = parseFloat(cashAmount);
+    const totals = calculateCartTotals();
+
+    if (isNaN(amount) || amount < totals.total) {
+      alert('Invalid amount or insufficient cash');
+      return;
+    }
+
+    if (!currentUser?.id || !currentOutlet?.id) return;
+
+    try {
+      // Prepare transaction items
+      const items = cart.map(item => ({
+        product_id: item.product.id,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        discount_amount: item.discount * item.quantity
+      }));
+
+      // Create transaction request
+      const transactionRequest = {
+        outlet_id: currentOutlet.id,
+        cashier_id: currentUser.id,
+        items,
+        payment_method: PaymentMethod.CASH,
+        tendered_amount: amount,
+        discount_amount: totals.totalDiscount
+      };
+
+      // Process transaction (online or offline)
+      if (isOnline) {
+        await posService.createTransaction(transactionRequest);
+        alert('Cash payment completed successfully!');
+      } else {
+        const offlineId = await posService.storeOfflineTransaction(transactionRequest);
+        setOfflineTransactionCount(prev => prev + 1);
+        alert(`Transaction stored offline (ID: ${offlineId})`);
+      }
+
+      // Clear cart and close cash input
+      clearCart();
+      setShowCashInput(false);
+      setCashAmount('');
+
+    } catch (error) {
+      console.error('Payment error:', error);
+      alert('Payment failed. Please try again.');
+    }
+  };
+
+  // Get unique categories for filter
 
   const cartTotals = calculateCartTotals();
 
+  // Handle search with Debounce and Hybrid Strategy (Memory + Dexie)
+  useEffect(() => {
+    const performSearch = async () => {
+      if (!searchQuery.trim()) {
+        // No search: Show top 50 from loaded products
+        setDisplayedProducts(products.slice(0, 50));
+        return;
+      }
+
+      if (currentOutlet?.id) {
+        try {
+          // Query Dexie for fast indexed search
+          const results = await posService.searchLocalProducts(currentOutlet.id, searchQuery);
+          setDisplayedProducts(results);
+        } catch (err) {
+          console.error("Local search failed, falling back to memory:", err);
+          // Fallback: Filter in-memory products
+          const lowerQuery = searchQuery.toLowerCase();
+          setDisplayedProducts(
+            products.filter(p =>
+              p.name.toLowerCase().includes(lowerQuery) ||
+              p.sku.toLowerCase().includes(lowerQuery) ||
+              p.barcode?.includes(lowerQuery)
+            ).slice(0, 50)
+          );
+        }
+      }
+    };
+
+    const timeoutId = setTimeout(performSearch, 150); // 150ms debounce for typing comfort
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery, products, currentOutlet?.id]);
+
+  /* 
+  // Old memory-only filter (Removed in favor of hybrid approach)
+  const displayedProducts = searchQuery
+    ? products.filter(product =>
+      product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      product.barcode?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      product.category?.toLowerCase().includes(searchQuery.toLowerCase())
+    ).slice(0, 50)
+    : products.slice(0, 50);
+  */
+
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      {/* Admin Sidebar - Hidden by default */}
-      {showAdminSidebar && (
-        <>
-          {/* Overlay */}
-          <div
-            className="fixed inset-0 bg-black bg-opacity-50 z-40"
-            onClick={() => setShowAdminSidebar(false)}
-          />
-
-          {/* Sidebar */}
-          <div className="fixed left-0 top-0 h-full w-80 bg-white shadow-lg z-50 transform transition-transform">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-gray-900">Admin Panel</h2>
-                <button
-                  onClick={() => setShowAdminSidebar(false)}
-                  className="p-2 hover:bg-gray-100 rounded-lg"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Inventory Management */}
-              <div className="mb-8">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Inventory Management</h3>
-                <div className="space-y-3">
-                  <Link
-                    to="/dashboard/products"
-                    className="w-full flex items-center p-3 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors text-left"
-                  >
-                    <Plus className="w-5 h-5 text-blue-600 mr-3" />
-                    <span className="text-sm font-medium text-blue-900">Manage Products (Excel View)</span>
-                  </Link>
-
-                  <button
-                    onClick={() => {
-                      setShowReceiveStockModal(true);
-                      setShowAdminSidebar(false);
-                    }}
-                    className="w-full flex items-center p-3 bg-green-50 hover:bg-green-100 rounded-lg transition-colors text-left"
-                  >
-                    <TruckIcon className="w-5 h-5 text-green-600 mr-3" />
-                    <span className="text-sm font-medium text-green-900">Receive Stock Delivery</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setShowStockTransferModal(true);
-                      setShowAdminSidebar(false);
-                    }}
-                    className="w-full flex items-center p-3 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors text-left"
-                  >
-                    <RotateCcw className="w-5 h-5 text-purple-600 mr-3" />
-                    <span className="text-sm font-medium text-purple-900">Transfer Between Outlets</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setShowStockAdjustmentModal(true);
-                      setShowAdminSidebar(false);
-                    }}
-                    className="w-full flex items-center p-3 bg-orange-50 hover:bg-orange-100 rounded-lg transition-colors text-left"
-                  >
-                    <Package2 className="w-5 h-5 text-orange-600 mr-3" />
-                    <span className="text-sm font-medium text-orange-900">Stock Adjustment</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setShowStockReportModal(true);
-                      setShowAdminSidebar(false);
-                    }}
-                    className="w-full flex items-center p-3 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors text-left"
-                  >
-                    <ClipboardList className="w-5 h-5 text-gray-600 mr-3" />
-                    <span className="text-sm font-medium text-gray-900">Inventory Reports</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Admin Stats */}
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold text-gray-900">Quick Stats</h3>
-                <div className="space-y-3">
-                  <div className="bg-blue-50 p-3 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-blue-600">Products</span>
-                      <span className="text-lg font-bold text-blue-900">{products.length}</span>
-                    </div>
-                  </div>
-                  <div className="bg-green-50 p-3 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-green-600">Today's Sales</span>
-                      <span className="text-lg font-bold text-green-900">₦0</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Main Sales Terminal */}
-      <div className="flex-1 p-4">
-        {/* Simple Header */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              {/* Admin Menu Button */}
-              <button
-                onClick={() => setShowAdminSidebar(true)}
-                className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
-              >
-                <Menu className="w-6 h-6 text-gray-600" />
-              </button>
-
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">Sales Terminal</h1>
-                <p className="text-gray-600">{currentOutlet?.name}</p>
-              </div>
-            </div>
-
-            {/* Status indicators */}
-            <div className="flex items-center space-x-4">
-              {/* Online/Offline status */}
-              <div className={`flex items-center space-x-2 px-3 py-1 rounded-full text-sm font-medium ${isOnline
-                ? 'bg-green-100 text-green-800'
-                : 'bg-red-100 text-red-800'
-                }`}>
-                {isOnline ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
-                <span>{isOnline ? 'Online' : 'Offline'}</span>
-              </div>
-
-              {/* Offline transaction count */}
-              {offlineTransactionCount > 0 && (
-                <div className="flex items-center space-x-2 px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm font-medium">
-                  <AlertCircle className="h-4 w-4" />
-                  <span>{offlineTransactionCount} offline</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Main POS Interface - No Scroll Layout */}
-        <div className="grid grid-cols-12 gap-4 h-[calc(100vh-12rem)]">
-          {/* Left side - Product selection + Payment */}
-          <div className="col-span-8 space-y-4">
-            {/* Search only */}
-            <div className="bg-white rounded-lg shadow p-3">
+    <div className="p-4 bg-gray-50 min-h-screen">
+        {/* Search Bar */}
+        <div className="mb-4">
+          <div className="bg-white rounded-lg shadow p-4">
+            {/* Center: Search Bar with Dropdown */}
+            <div className="relative">
               <input
                 type="text"
-                placeholder="Search products or scan barcode..."
+                placeholder="Find Products - Enter barcode or product name..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => handleSearchChange(e.target.value)}
                 onKeyPress={(e) => {
                   if (e.key === 'Enter' && searchQuery.length > 8) {
                     handleBarcodeScan(searchQuery);
                     setSearchQuery('');
+                    setShowSearchDropdown(false);
                   }
                 }}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                onFocus={() => {
+                  if (searchResults.length > 0) setShowSearchDropdown(true);
+                }}
+                className="w-full px-4 py-2.5 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                autoFocus
               />
-            </div>
 
-            {/* Product grid - fixed height with scroll */}
-            <div className="bg-white rounded-lg shadow flex-1 overflow-hidden">
-              <POSProductGrid
-                products={products}
-                onProductSelect={(product) => addToCart(product)}
-                isLoading={isLoading}
-                error={error}
-              />
-            </div>
+              {/* Search Dropdown */}
+              {showSearchDropdown && searchResults.length > 0 && (
+                <>
+                  {/* Overlay to close dropdown */}
+                  <div
+                    className="fixed inset-0 z-10"
+                    onClick={() => setShowSearchDropdown(false)}
+                  />
 
-            {/* Payment buttons under products */}
-            <div className="bg-white rounded-lg shadow p-4">
-              {/* Payment Method Buttons */}
-              <div className="grid grid-cols-3 gap-4">
-                <button
-                  onClick={() => handleDirectPayment(PaymentMethod.CASH)}
-                  disabled={cart.length === 0}
-                  className="flex items-center justify-center p-6 bg-orange-600 text-white font-bold rounded-lg hover:bg-orange-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-                >
-                  <span className="text-lg">CASH</span>
-                </button>
+                  {/* Dropdown Results */}
+                  <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg z-20 mt-1 max-h-80 overflow-y-auto">
+                    {searchResults.map((product) => (
+                      <button
+                        key={product.id}
+                        onClick={() => addProductFromSearch(product)}
+                        className="w-full flex items-center p-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-100 last:border-b-0"
+                      >
+                        <div className="flex-1">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <h4 className="text-sm font-medium text-gray-900">{product.name}</h4>
+                              <p className="text-xs text-gray-600">{product.sku}</p>
+                              {product.barcode && (
+                                <p className="text-xs text-gray-500">Barcode: {product.barcode}</p>
+                              )}
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm font-bold text-orange-600">{formatCurrency(product.unit_price)}</p>
+                              <p className="text-xs text-gray-500">Stock: {product.quantity_on_hand}</p>
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
 
-                <button
-                  onClick={() => handleDirectPayment(PaymentMethod.POS)}
-                  disabled={cart.length === 0}
-                  className="flex items-center justify-center p-6 bg-orange-600 text-white font-bold rounded-lg hover:bg-orange-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-                >
-                  <span className="text-lg">CARD</span>
-                </button>
+              {/* Status Indicators */}
+              <div className="flex items-center justify-end space-x-3 mt-3">
+                {/* Online/Offline status */}
+                <div className={`flex items-center space-x-2 px-3 py-1.5 rounded-full text-sm font-medium ${isOnline
+                  ? 'bg-green-100 text-green-800'
+                  : 'bg-red-100 text-red-800'
+                  }`}>
+                  {isOnline ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
+                  <span>{isOnline ? 'Online' : 'Offline'}</span>
+                </div>
 
-                <button
-                  onClick={() => handleDirectPayment(PaymentMethod.TRANSFER)}
-                  disabled={cart.length === 0}
-                  className="flex items-center justify-center p-6 bg-orange-600 text-white font-bold rounded-lg hover:bg-orange-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-                >
-                  <span className="text-lg">TRANSFER</span>
-                </button>
+                {/* Offline transaction count */}
+                {offlineTransactionCount > 0 && (
+                  <div className="flex items-center space-x-2 px-3 py-1.5 bg-yellow-100 text-yellow-800 rounded-full text-sm font-medium">
+                    <AlertCircle className="h-4 w-4" />
+                    <span>{offlineTransactionCount} offline</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Right side - Cart only */}
-          <div className="col-span-4 flex flex-col space-y-4">
-            {/* Shopping cart with integrated payment info */}
-            <div className="bg-white rounded-lg shadow flex-1 overflow-hidden">
-              <POSShoppingCart
-                cart={cart}
-                totals={cartTotals}
-                onUpdateQuantity={updateCartItemQuantity}
-                onUpdateDiscount={updateCartItemDiscount}
-                onRemoveItem={removeFromCart}
-                onClearCart={clearCart}
-              />
+
+        {/* Main POS Interface - Full Width Cart */}
+        <div className="h-[calc(100vh-10rem)] overflow-hidden">
+          {/* Full Width Cart & Payment */}
+          <div className="w-full h-full flex flex-col gap-4">
+
+            {/* Cart Section - Scrollable */}
+            <div className="bg-white rounded-lg shadow p-4 flex-1 overflow-hidden flex flex-col mb-4">
+              <div className="flex items-center justify-end mb-4">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-sm font-medium text-gray-600">Amount Due:</span>
+                  <span className="text-2xl font-bold text-orange-600">{formatCurrency(cartTotals.total)}</span>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto">
+                <POSShoppingCart
+                  cart={cart}
+                  totals={cartTotals}
+                  onUpdateQuantity={updateCartItemQuantity}
+                  onUpdateDiscount={updateCartItemDiscount}
+                  onRemoveItem={removeFromCart}
+                  onClearCart={clearCart}
+                />
+              </div>
             </div>
 
-            {/* Action Buttons */}
-            <div className="bg-white rounded-lg shadow p-4">
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={handlePrintReceipt}
-                  disabled={cart.length === 0}
-                  className="flex items-center justify-center p-4 bg-orange-600 text-white font-bold rounded-lg hover:bg-orange-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-                >
-                  <span className="text-sm">PRINT RECEIPT</span>
-                </button>
+            {/* Fixed Payment Section */}
+            <div className="bg-white rounded-lg shadow p-4 flex-shrink-0">
+              {showCashInput ? (
+                /* Cash Calculator Interface */
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-gray-900">Cash Payment</h3>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-sm font-medium text-gray-600">Amount Due:</span>
+                      <span className="text-xl font-bold text-orange-600">{formatCurrency(cartTotals.total)}</span>
+                    </div>
+                  </div>
 
-                <button
-                  onClick={clearCart}
-                  disabled={cart.length === 0}
-                  className="flex items-center justify-center p-4 bg-orange-600 text-white font-bold rounded-lg hover:bg-orange-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-                >
-                  <span className="text-sm">CLEAR CART</span>
-                </button>
-              </div>
+                  {/* Quick Amount Buttons */}
+                  <div className="grid grid-cols-4 gap-2">
+                    {/* Exact Amount */}
+                    <button
+                      onClick={() => setCashAmount(cartTotals.total.toString())}
+                      className="px-4 py-3 bg-blue-100 hover:bg-blue-200 text-blue-900 font-semibold rounded-lg transition-colors"
+                    >
+                      Exact
+                    </button>
+
+                    {/* Common denominations */}
+                    {[1000, 2000, 5000, 10000, 20000].map((amount) => (
+                      <button
+                        key={amount}
+                        onClick={() => setCashAmount(amount.toString())}
+                        className="px-4 py-3 bg-green-100 hover:bg-green-200 text-green-900 font-semibold rounded-lg transition-colors"
+                      >
+                        ₦{amount.toLocaleString()}
+                      </button>
+                    ))}
+
+                    {/* Round up options */}
+                    <button
+                      onClick={() => setCashAmount((Math.ceil(cartTotals.total / 1000) * 1000).toString())}
+                      className="px-4 py-3 bg-purple-100 hover:bg-purple-200 text-purple-900 font-semibold rounded-lg transition-colors"
+                    >
+                      Round ₦1k
+                    </button>
+                    <button
+                      onClick={() => setCashAmount((Math.ceil(cartTotals.total / 5000) * 5000).toString())}
+                      className="px-4 py-3 bg-purple-100 hover:bg-purple-200 text-purple-900 font-semibold rounded-lg transition-colors"
+                    >
+                      Round ₦5k
+                    </button>
+                  </div>
+
+                  {/* Manual Input */}
+                  <div className="flex items-center space-x-4">
+                    <div className="flex-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Amount Tendered
+                      </label>
+                      <input
+                        type="number"
+                        value={cashAmount}
+                        onChange={(e) => setCashAmount(e.target.value)}
+                        placeholder="Enter cash amount"
+                        className="w-full px-4 py-3 text-lg border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                        autoFocus
+                      />
+                    </div>
+
+                    {/* Change Display */}
+                    {cashAmount && parseFloat(cashAmount) >= cartTotals.total && (
+                      <div className="flex-shrink-0 bg-green-50 px-4 py-3 rounded-lg">
+                        <div className="text-xs text-green-600 font-medium">Change</div>
+                        <div className="text-lg font-bold text-green-900">
+                          {formatCurrency(parseFloat(cashAmount) - cartTotals.total)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => {
+                        setShowCashInput(false);
+                        setCashAmount('');
+                      }}
+                      className="px-4 py-3 bg-gray-500 text-white font-medium rounded-lg hover:bg-gray-600 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleCashPayment}
+                      disabled={!cashAmount || parseFloat(cashAmount) < cartTotals.total}
+                      className="flex-1 px-6 py-3 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Complete Payment
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* Regular Payment Buttons */
+                <div className="flex items-center justify-between space-x-4">
+                  {/* Payment Methods */}
+                  <div className="flex space-x-3">
+                    <button
+                      onClick={() => handleDirectPayment(PaymentMethod.CASH)}
+                      disabled={cart.length === 0}
+                      className="px-6 py-3 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      CASH
+                    </button>
+                    <button
+                      onClick={() => handleDirectPayment(PaymentMethod.TRANSFER)}
+                      disabled={cart.length === 0}
+                      className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      TRANSFER
+                    </button>
+                    <button
+                      onClick={() => handleDirectPayment(PaymentMethod.POS)}
+                      disabled={cart.length === 0}
+                      className="px-6 py-3 bg-purple-600 text-white font-bold rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      CARD
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -682,7 +804,7 @@ Thank you for shopping with us!
         isOpen={showStockReportModal}
         onClose={() => setShowStockReportModal(false)}
       />
-    </div>
+    </div >
   );
 };
 

@@ -1,20 +1,21 @@
 {
-  "name": "pos",
+  "name": "compazz-pos",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev": "ROLLUP_DISABLE_NATIVE=1 vite",
+    "build": "ROLLUP_DISABLE_NATIVE=1 tsc -b && ROLLUP_DISABLE_NATIVE=1 vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "ROLLUP_DISABLE_NATIVE=1 vite preview"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.93.2",
     "axios": "^1.13.4",
     "clsx": "^2.1.1",
     "dayjs": "^1.11.19",
-    "dexie": "^4.2.1",
+    "dexie": "^4.3.0",
+    "dexie-react-hooks": "^4.2.0",
     "lucide-react": "^0.563.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
