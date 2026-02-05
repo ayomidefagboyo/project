@@ -773,3 +773,45 @@ class BulkStockAdjustment(BaseModel):
     adjustments: List[Dict[str, Any]] = Field(..., min_items=1, description="Stock adjustments")
     reason: str = Field(..., description="Reason for adjustments")
     performed_by: str = Field(..., description="User performing adjustments")
+
+
+# ===============================================
+# HELD RECEIPT SCHEMAS
+# ===============================================
+
+class HeldReceiptItemCreate(BaseModel):
+    """Schema for held receipt item"""
+    product_id: str = Field(..., description="Product ID")
+    quantity: int = Field(..., ge=1, description="Quantity")
+    unit_price: Decimal = Field(..., gt=0, description="Unit price")
+    discount: Decimal = Field(0, ge=0, description="Discount per item")
+
+
+class HeldReceiptCreate(BaseModel):
+    """Schema for creating a held receipt"""
+    outlet_id: str = Field(..., description="Outlet ID")
+    cashier_id: str = Field(..., description="Cashier ID")
+    items: List[HeldReceiptItemCreate] = Field(..., min_items=1, description="Cart items")
+    total: Decimal = Field(..., gt=0, description="Total amount")
+
+
+class HeldReceiptResponse(BaseModel):
+    """Schema for held receipt response"""
+    id: str = Field(..., description="Held receipt ID")
+    outlet_id: str = Field(..., description="Outlet ID")
+    cashier_id: str = Field(..., description="Cashier ID")
+    cashier_name: str = Field(..., description="Cashier name")
+    items: List[Dict[str, Any]] = Field(..., description="Cart items (stored as JSON)")
+    total: Decimal = Field(..., description="Total amount")
+    saved_at: datetime = Field(..., description="When receipt was held")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Update timestamp")
+
+    class Config:
+        from_attributes = True
+
+
+class HeldReceiptListResponse(BaseModel):
+    """Response for list of held receipts"""
+    receipts: List[HeldReceiptResponse] = Field(..., description="List of held receipts")
+    total: int = Field(..., description="Total count")

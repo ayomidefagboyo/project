@@ -10,7 +10,7 @@ import uuid
 import logging
 from decimal import Decimal
 
-from app.core.database import get_supabase_admin
+from app.core.database import get_supabase_admin, Tables
 from app.core.security import CurrentUser
 from app.schemas.pos import (
     # Products
@@ -25,6 +25,8 @@ from app.schemas.pos import (
     CashDrawerSessionCreate, CashDrawerSessionClose, CashDrawerSessionResponse,
     # Statistics
     InventoryStatsResponse, SalesStatsResponse,
+    # Held Receipts
+    HeldReceiptCreate, HeldReceiptResponse, HeldReceiptListResponse,
     # Base types
     PaymentMethod, TransactionStatus, MovementType, SyncStatus
 )
@@ -52,7 +54,7 @@ async def get_products(
         supabase = get_supabase_admin()
 
         # Build query
-        query = supabase.table('pos_products').select('*').eq('outlet_id', outlet_id)
+        query = supabase.table(Tables.POS_PRODUCTS).select('*').eq('outlet_id', outlet_id)
 
         if active_only:
             query = query.eq('is_active', True)
@@ -105,10 +107,10 @@ async def create_product(
         # Generate product ID
         product_id = str(uuid.uuid4())
 
-        # Prepare product data
+        # Prepare product data with proper Decimal serialization
         product_data = {
             'id': product_id,
-            **product.dict(),
+            **product.model_dump(mode='json'),
             'created_at': datetime.utcnow().isoformat(),
             'updated_at': datetime.utcnow().isoformat()
         }
@@ -729,4 +731,158 @@ async def get_sales_stats(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch sales stats: {str(e)}"
+        )
+
+
+# ===============================================
+# HELD RECEIPT ENDPOINTS
+# ===============================================
+
+@router.post("/held-receipts", response_model=HeldReceiptResponse)
+async def create_held_receipt(
+    receipt: HeldReceiptCreate,
+    current_user=Depends(CurrentUser())
+):
+    """Create a held receipt (put sale on hold)"""
+    try:
+        supabase = get_supabase_admin()
+        
+        # Get cashier name
+        user_result = supabase.table('users').select('name').eq('id', receipt.cashier_id).execute()
+        cashier_name = user_result.data[0]['name'] if user_result.data else 'Cashier'
+        
+        # Prepare held receipt data
+        receipt_id = str(uuid.uuid4())
+        receipt_data = {
+            'id': receipt_id,
+            'outlet_id': receipt.outlet_id,
+            'cashier_id': receipt.cashier_id,
+            'cashier_name': cashier_name,
+            'items': [item.dict() for item in receipt.items],
+            'total': float(receipt.total),
+            'saved_at': datetime.utcnow().isoformat(),
+            'created_at': datetime.utcnow().isoformat(),
+            'updated_at': datetime.utcnow().isoformat()
+        }
+        
+        # Insert held receipt
+        result = supabase.table(Tables.POS_HELD_RECEIPTS).insert(receipt_data).execute()
+        
+        if not result.data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to create held receipt"
+            )
+        
+        return HeldReceiptResponse(**result.data[0])
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating held receipt: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create held receipt: {str(e)}"
+        )
+
+
+@router.get("/held-receipts", response_model=HeldReceiptListResponse)
+async def get_held_receipts(
+    outlet_id: str,
+    current_user=Depends(CurrentUser())
+):
+    """Get all held receipts for an outlet"""
+    try:
+        supabase = get_supabase_admin()
+        
+        # Get held receipts for outlet
+        result = supabase.table(Tables.POS_HELD_RECEIPTS)\
+            .select('*')\
+            .eq('outlet_id', outlet_id)\
+            .order('saved_at', desc=True)\
+            .execute()
+        
+        receipts = [HeldReceiptResponse(**r) for r in result.data] if result.data else []
+        
+        return HeldReceiptListResponse(
+            receipts=receipts,
+            total=len(receipts)
+        )
+        
+    except Exception as e:
+        logger.error(f"Error fetching held receipts: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch held receipts: {str(e)}"
+        )
+
+
+@router.get("/held-receipts/{receipt_id}", response_model=HeldReceiptResponse)
+async def get_held_receipt(
+    receipt_id: str,
+    current_user=Depends(CurrentUser())
+):
+    """Get a specific held receipt"""
+    try:
+        supabase = get_supabase_admin()
+        
+        result = supabase.table(Tables.POS_HELD_RECEIPTS)\
+            .select('*')\
+            .eq('id', receipt_id)\
+            .execute()
+        
+        if not result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Held receipt not found"
+            )
+        
+        return HeldReceiptResponse(**result.data[0])
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching held receipt: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch held receipt: {str(e)}"
+        )
+
+
+@router.delete("/held-receipts/{receipt_id}")
+async def delete_held_receipt(
+    receipt_id: str,
+    current_user=Depends(CurrentUser())
+):
+    """Delete a held receipt"""
+    try:
+        supabase = get_supabase_admin()
+        
+        # Check if receipt exists
+        check_result = supabase.table(Tables.POS_HELD_RECEIPTS)\
+            .select('id')\
+            .eq('id', receipt_id)\
+            .execute()
+        
+        if not check_result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Held receipt not found"
+            )
+        
+        # Delete receipt
+        supabase.table(Tables.POS_HELD_RECEIPTS)\
+            .delete()\
+            .eq('id', receipt_id)\
+            .execute()
+        
+        return {"message": "Held receipt deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting held receipt: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete held receipt: {str(e)}"
         )
