@@ -1216,6 +1216,76 @@ class POSService {
   }
 
   /**
+   * HELD RECEIPT METHODS
+   */
+
+  /**
+   * Create a held receipt (put sale on hold)
+   */
+  async createHeldReceipt(data: {
+    outlet_id: string;
+    cashier_id: string;
+    items: Array<{
+      product_id: string;
+      quantity: number;
+      unit_price: number;
+      discount: number;
+    }>;
+    total: number;
+  }): Promise<any> {
+    try {
+      const response = await apiClient.post<any>(`${this.baseUrl}/held-receipts`, data);
+      if (!response.data) throw new Error(response.error || 'Failed to create held receipt');
+      return response.data;
+    } catch (error) {
+      console.error('Error creating held receipt:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Get all held receipts for an outlet
+   */
+  async getHeldReceipts(outletId: string): Promise<any[]> {
+    try {
+      const response = await apiClient.get<any>(`${this.baseUrl}/held-receipts?outlet_id=${outletId}`);
+      if (!response.data) throw new Error(response.error || 'Failed to fetch held receipts');
+      return response.data.receipts || [];
+    } catch (error) {
+      console.error('Error fetching held receipts:', error);
+      // Return empty array on error to allow offline fallback
+      return [];
+    }
+  }
+
+  /**
+   * Get a specific held receipt
+   */
+  async getHeldReceipt(receiptId: string): Promise<any> {
+    try {
+      const response = await apiClient.get<any>(`${this.baseUrl}/held-receipts/${receiptId}`);
+      if (!response.data) throw new Error(response.error || 'Failed to fetch held receipt');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching held receipt:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Delete a held receipt
+   */
+  async deleteHeldReceipt(receiptId: string): Promise<void> {
+    try {
+      const response = await apiClient.delete<any>(`${this.baseUrl}/held-receipts/${receiptId}`);
+      if (response.error) throw new Error(response.error);
+    } catch (error) {
+      console.error('Error deleting held receipt:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
    * Handle API errors consistently
    */
   private handleError(error: any): Error {

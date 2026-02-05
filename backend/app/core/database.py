@@ -98,6 +98,7 @@ class Tables:
     INVENTORY_TRANSFERS = "inventory_transfers"
     INVENTORY_TRANSFER_ITEMS = "inventory_transfer_items"
     RECEIPT_SETTINGS = "receipt_settings"
+    POS_HELD_RECEIPTS = "pos_held_receipts"
 
 
 # RLS Policy names
