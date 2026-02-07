@@ -3,7 +3,7 @@
  * Available throughout the entire application
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Menu,
   X,
@@ -13,9 +13,11 @@ import {
   Package,
   Plus,
   RotateCcw,
+  Calendar,
 } from 'lucide-react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useOutlet } from '../../contexts/OutletContext';
+import { authService } from '@/lib/auth';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -26,6 +28,30 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent }) => {
   const { currentUser, currentOutlet } = useOutlet();
   const [showSidebar, setShowSidebar] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+
+  // Simple clock out handler (logs user out and returns to auth screen)
+  const handleClockOut = async () => {
+    try {
+      const { error } = await authService.signOut();
+      if (!error) {
+        navigate('/auth', { replace: true });
+      } else {
+        console.error('Clock out error:', error);
+      }
+    } catch (err) {
+      console.error('Clock out error:', err);
+    }
+  };
+
+  // Allow header cashier button to trigger clock-out via custom event
+  useEffect(() => {
+    const listener = () => {
+      handleClockOut();
+    };
+    window.addEventListener('pos-clock-out', listener);
+    return () => window.removeEventListener('pos-clock-out', listener);
+  }, []);
 
   return (
     // POS invariant shell: fills viewport and prevents outer scrolling.
@@ -90,6 +116,25 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent }) => {
                   </div>
                 </Link>
 
+                {/* EOD - End of Day (moved from admin dashboard) */}
+                <Link
+                  to="/eod"
+                  onClick={() => setShowSidebar(false)}
+                  className={`w-full flex items-center p-4 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-sm ${
+                    location.pathname === '/eod'
+                      ? 'bg-gradient-to-r from-amber-100 to-amber-200'
+                      : 'bg-gradient-to-r from-amber-50 to-amber-100 hover:from-amber-100 hover:to-amber-200'
+                  }`}
+                >
+                  <div className="w-12 h-12 bg-amber-500 rounded-lg flex items-center justify-center mr-4">
+                    <Calendar className="w-6 h-6 text-white" />
+                  </div>
+                  <div className="text-left">
+                    <span className="text-lg font-semibold text-amber-900 block">End of Day</span>
+                    <span className="text-sm text-amber-700">Daily Cash & Sales</span>
+                  </div>
+                </Link>
+
                 <button
                   onClick={() => setShowSidebar(false)}
                   className="w-full flex items-center p-4 bg-gradient-to-r from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-sm"
@@ -122,13 +167,21 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent }) => {
             <div className="p-6 border-t border-gray-200">
               <div className="space-y-3">
                 {/* Clock In/Out */}
-                <button className="w-full flex items-center p-3 bg-gradient-to-r from-indigo-50 to-indigo-100 hover:from-indigo-100 hover:to-indigo-200 rounded-lg transition-all duration-200">
+                <button
+                  className="w-full flex items-center p-3 bg-gradient-to-r from-indigo-50 to-indigo-100 hover:from-indigo-100 hover:to-indigo-200 rounded-lg transition-all duration-200"
+                  type="button"
+                  onClick={handleClockOut}
+                >
                   <div className="w-10 h-10 bg-indigo-500 rounded-lg flex items-center justify-center mr-3">
                     <Clock className="w-5 h-5 text-white" />
                   </div>
                   <div className="text-left flex-1">
-                    <span className="text-sm font-semibold text-indigo-900 block">Clock In</span>
-                    <span className="text-xs text-indigo-700">Start Shift</span>
+                    <span className="text-sm font-semibold text-indigo-900 block">
+                      {currentUser ? 'Clock Out' : 'Clock In'}
+                    </span>
+                    <span className="text-xs text-indigo-700">
+                      {currentUser ? 'End Shift' : 'Start Shift'}
+                    </span>
                   </div>
                 </button>
 

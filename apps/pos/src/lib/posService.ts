@@ -1395,6 +1395,61 @@ class POSService {
   }
 
   /**
+   * EOD SALES BREAKDOWN METHODS
+   */
+
+  /**
+   * Get detailed sales breakdown for EOD reconciliation
+   */
+  async getSalesBreakdown(
+    outletId: string,
+    dateFrom: string,
+    dateTo: string = dateFrom,
+    cashierId?: string
+  ): Promise<any> {
+    try {
+      let url = `${this.baseUrl}/sales-breakdown?outlet_id=${outletId}&date_from=${dateFrom}&date_to=${dateTo}`;
+      if (cashierId) {
+        url += `&cashier_id=${cashierId}`;
+      }
+
+      const response = await apiClient.get<any>(url);
+      if (response.error) throw new Error(response.error);
+      return response.data;
+    } catch (error) {
+      console.error('Error getting sales breakdown:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Get list of cashiers who had transactions on a specific date
+   */
+  async getCashiersForDate(outletId: string, date: string): Promise<any[]> {
+    try {
+      // Get breakdown for all cashiers, then extract unique cashiers
+      const breakdown = await this.getSalesBreakdown(outletId, date);
+      const cashiers = [];
+
+      if (breakdown?.breakdown?.by_cashier) {
+        for (const [cashierId, cashierData] of Object.entries(breakdown.breakdown.by_cashier)) {
+          cashiers.push({
+            id: cashierId,
+            name: (cashierData as any).name,
+            transaction_count: (cashierData as any).transaction_count,
+            total_amount: (cashierData as any).total_amount
+          });
+        }
+      }
+
+      return cashiers.sort((a, b) => b.total_amount - a.total_amount);
+    } catch (error) {
+      console.error('Error getting cashiers for date:', error);
+      return [];
+    }
+  }
+
+  /**
    * Handle API errors consistently
    */
   private handleError(error: any): Error {

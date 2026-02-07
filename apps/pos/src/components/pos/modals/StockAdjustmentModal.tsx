@@ -51,7 +51,7 @@ const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({ isOpen, onC
 
     try {
       const response = await posService.getProducts(currentOutlet.id, {
-        size: 1000,
+        size: 100,
         activeOnly: true
       });
       setProducts(response?.items || []);

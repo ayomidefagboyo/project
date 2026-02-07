@@ -46,7 +46,7 @@ const StockTransferModal: React.FC<StockTransferModalProps> = ({ isOpen, onClose
 
     try {
       const response = await posService.getProducts(currentOutlet.id, {
-        size: 1000,
+        size: 100,
         activeOnly: true
       });
       if (response?.items) {

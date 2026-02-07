@@ -40,7 +40,7 @@ const StockReportModal: React.FC<StockReportModalProps> = ({ isOpen, onClose }) 
     setIsLoading(true);
     try {
       // Get all products
-      const productsResponse = await posService.getProducts(currentOutlet.id, { size: 1000 });
+      const productsResponse = await posService.getProducts(currentOutlet.id, { size: 100 });
       const products = productsResponse?.items || [];
 
       // Calculate various metrics
