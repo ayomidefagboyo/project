@@ -75,9 +75,9 @@ class ApiClient {
     const token = await this.getStoredToken();
     if (token) {
       headers.Authorization = `Bearer ${token}`;
-      console.log('🔐 Auth token found and added to headers');
+      console.debug('🔐 Auth token found and added to headers');
     } else {
-      console.warn('⚠️ No auth token found in localStorage or Supabase session');
+      console.debug('⚠️ No auth token found in localStorage or Supabase session');
     }
 
     return headers;

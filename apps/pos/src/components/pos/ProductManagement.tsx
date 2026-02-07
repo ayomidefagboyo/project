@@ -3,7 +3,7 @@
  * Swiss Premium Design with touch optimization
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import {
   Plus,
   Save,
@@ -22,7 +22,15 @@ import { posService, type POSProduct } from '../../lib/posService';
 import { useOutlet } from '../../contexts/OutletContext';
 import { Link } from 'react-router-dom';
 
-const ProductManagement: React.FC = () => {
+interface ProductManagementProps {
+  onShowNewRow?: () => void;
+}
+
+export interface ProductManagementHandle {
+  handleShowNewRow: () => void;
+}
+
+const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementProps>(({ onShowNewRow }, ref) => {
   const { currentOutlet } = useOutlet();
   const [products, setProducts] = useState<POSProduct[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -250,45 +258,24 @@ const ProductManagement: React.FC = () => {
     }
   };
 
+  // Handle add product via prop or internal state
+  const handleShowNewRow = () => {
+    if (onShowNewRow) {
+      onShowNewRow();
+    }
+    setShowNewRow(true);
+  };
+
+  // Expose method to parent component
+  useImperativeHandle(ref, () => ({
+    handleShowNewRow
+  }));
+
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Header */}
+      {/* Filters */}
       <div className="bg-white border-b border-slate-200 px-8 py-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <Link
-              to="/"
-              className="touch-target-sm bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-            >
-              <ArrowLeft className="w-6 h-6 text-slate-600" />
-            </Link>
-            <div>
-              <h1 className="text-3xl font-bold text-slate-900">Product Management</h1>
-              <p className="text-slate-600 mt-1">Manage your inventory with Excel-like efficiency</p>
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-3">
-            <button className="btn-action">
-              <Upload className="w-5 h-5" />
-              <span>Import</span>
-            </button>
-            <button className="btn-action">
-              <Download className="w-5 h-5" />
-              <span>Export</span>
-            </button>
-            <button
-              onClick={() => setShowNewRow(true)}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center space-x-2 transition-colors"
-            >
-              <Plus className="w-5 h-5" />
-              <span>Add Product</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Filters */}
-        <div className="flex items-center space-x-4 mt-6">
+        <div className="flex items-center space-x-4">
           <div className="flex-1">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
@@ -659,6 +646,8 @@ const ProductManagement: React.FC = () => {
       </div>
     </div>
   );
-};
+});
+
+ProductManagement.displayName = 'ProductManagement';
 
 export default ProductManagement;

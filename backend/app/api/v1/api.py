@@ -3,7 +3,31 @@ Main API router that includes all endpoint routers
 """
 
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth, vendors, outlets, invoices, expenses, reports, users, audit, payments, ocr, anomalies, stripe_payments, eod, email_expenses, pos, pos_enhanced
+
+# Note:
+# - `pos_enhanced` currently depends on modules that are not yet implemented
+#   (e.g. `app.core.deps`), which prevents the backend from starting.
+# - To keep the API server healthy for development, we only import the stable
+#   POS router here. Advanced POS features will be re-enabled once their
+#   dependencies are wired up.
+from app.api.v1.endpoints import (
+    auth,
+    vendors,
+    outlets,
+    invoices,
+    expenses,
+    reports,
+    users,
+    audit,
+    payments,
+    ocr,
+    anomalies,
+    stripe_payments,
+    eod,
+    email_expenses,
+    pos,
+    test_auth,
+)
 
 # Create main API router
 api_router = APIRouter()
@@ -11,7 +35,6 @@ api_router = APIRouter()
 # Include all endpoint routers
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 api_router.include_router(pos.router, prefix="/pos", tags=["POS System"])
-api_router.include_router(pos_enhanced.router, prefix="/pos", tags=["POS Advanced Features"])
 api_router.include_router(vendors.router, prefix="/vendors", tags=["Vendors"])
 api_router.include_router(payments.router, prefix="/payments", tags=["Payments"])
 api_router.include_router(ocr.router, prefix="/ocr", tags=["OCR & File Upload"])
@@ -25,3 +48,4 @@ api_router.include_router(users.router, prefix="/users", tags=["Users"])
 api_router.include_router(audit.router, prefix="/audit", tags=["Audit"])
 api_router.include_router(stripe_payments.router, prefix="/stripe", tags=["Stripe Payments"])
 api_router.include_router(email_expenses.router, prefix="/email-expenses", tags=["Email Expense Integration"])
+api_router.include_router(test_auth.router, prefix="/test", tags=["Testing"])

@@ -62,7 +62,15 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
         }
 
         // Check if user is already authenticated
-        const { session } = await authService.getCurrentSession();
+        const { session, error: sessionError } = await authService.getCurrentSession();
+
+        // If there's a refresh token error, clear invalid session and continue
+        if (sessionError && sessionError.includes('Invalid Refresh Token')) {
+          console.warn('Invalid refresh token detected, clearing session');
+          await authService.signOut();
+          setIsLoading(false);
+          return;
+        }
 
         if (session?.user) {
           // Get current user profile (this handles OAuth user creation)
@@ -96,12 +104,20 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
                 console.error('Error loading outlets:', outletsError);
               }
             }
+          } else if (error && error.includes('Invalid Refresh Token')) {
+            console.warn('Invalid refresh token in getCurrentUser, clearing session');
+            await authService.signOut();
           } else if (error) {
             console.error('Error getting current user:', error);
           }
         }
       } catch (error) {
         console.error('Error initializing auth:', error);
+        // If any authentication error occurs, clear the session
+        if (error instanceof Error && error.message.includes('Invalid Refresh Token')) {
+          console.warn('Clearing invalid session due to refresh token error');
+          await authService.signOut();
+        }
       } finally {
         setIsLoading(false);
       }

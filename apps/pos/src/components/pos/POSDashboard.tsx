@@ -5,17 +5,19 @@
 
 import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import {
-  Wifi,
-  WifiOff,
   AlertCircle,
   Plus,
   RotateCcw,
+  X,
+  User,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import { useOutlet } from '../../contexts/OutletContext';
 import { posService, PaymentMethod } from '../../lib/posService';
 import type { POSProduct } from '../../lib/posService';
+import { staffService } from '../../lib/staffService';
+import type { StaffProfile, StaffAuthResponse } from '../../types';
 import { offlineDatabase } from '../../lib/offlineDatabase';
+import { ToastContainer, useToast } from '../ui/Toast';
 
 // Sub-components (we'll create these next)
 import POSProductGrid from './POSProductGrid';
@@ -30,6 +32,12 @@ import StockTransferModal from './modals/StockTransferModal';
 import StockAdjustmentModal from './modals/StockAdjustmentModal';
 import StockReportModal from './modals/StockReportModal';
 
+// Staff Management Modals
+import StaffManagementModal from './modals/StaffManagementModal';
+import PinEntryModal from './PinEntryModal';
+import LoginForm from '../auth/LoginForm';
+import TransactionHistory from './TransactionHistory';
+
 export interface CartItem {
   product: POSProduct;
   quantity: number;
@@ -39,6 +47,8 @@ export interface CartItem {
 
 export interface POSDashboardHandle {
   addToCart: (product: POSProduct, quantity?: number) => void;
+  openCustomerSearch: () => void;
+  openTransactionHistory: () => void;
 }
 
 interface HeldSale {
@@ -50,9 +60,10 @@ interface HeldSale {
   cashier_name: string;
 }
 
-const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
+const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
   // Context and state
   const { currentUser, currentOutlet } = useOutlet();
+  const { toasts, success, error, removeToast } = useToast();
 
   // POS State
   const [products, setProducts] = useState<POSProduct[]>([]);
@@ -66,7 +77,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
   // UI State
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [posError, setPosError] = useState<string | null>(null);
   const [showCashInput, setShowCashInput] = useState(false);
   const [cashAmount, setCashAmount] = useState('');
 
@@ -77,12 +88,29 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
     transfer?: number;
   }>({});
 
+  // Customer State
+  const [selectedCustomer, setSelectedCustomer] = useState<{ id: string; name: string; phone?: string } | null>(null);
+  const [showCustomerSearch, setShowCustomerSearch] = useState(false);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [customerSearchResults, setCustomerSearchResults] = useState<any[]>([]);
+  const [isSearchingCustomers, setIsSearchingCustomers] = useState(false);
+
   // Inventory Management Modal States
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [showReceiveStockModal, setShowReceiveStockModal] = useState(false);
   const [showStockTransferModal, setShowStockTransferModal] = useState(false);
   const [showStockAdjustmentModal, setShowStockAdjustmentModal] = useState(false);
   const [showStockReportModal, setShowStockReportModal] = useState(false);
+  
+  // Transaction History
+  const [showTransactionHistory, setShowTransactionHistory] = useState(false);
+
+  // Staff Management States
+  const [staffProfiles, setStaffProfiles] = useState<StaffProfile[]>([]);
+  const [currentStaff, setCurrentStaff] = useState<StaffProfile | null>(null);
+  const [showStaffManagement, setShowStaffManagement] = useState(false);
+  const [showManagerLogin, setShowManagerLogin] = useState(false);
+  const [isStaffAuthenticated, setIsStaffAuthenticated] = useState(false);
 
   // Helper function to format currency
   const formatCurrency = (amount: number): string => {
@@ -93,6 +121,27 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
     }).format(amount);
   };
 
+  // Determine what screen to show based on authentication state
+  const getScreenToShow = (): 'manager_login' | 'staff_setup' | 'pin_entry' | 'pos_dashboard' => {
+    // If no user is authenticated, show manager login
+    if (!currentUser) {
+      return 'manager_login';
+    }
+
+    // If user is authenticated but no staff profiles exist, show staff setup
+    if (currentUser && staffProfiles.length === 0) {
+      return 'staff_setup';
+    }
+
+    // If staff profiles exist but staff not authenticated, show PIN entry
+    if (currentUser && staffProfiles.length > 0 && !isStaffAuthenticated) {
+      return 'pin_entry';
+    }
+
+    // If everything is ready, show POS dashboard
+    return 'pos_dashboard';
+  };
+
 
   // Load products on mount
   useEffect(() => {
@@ -100,6 +149,55 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
       loadProducts();
     }
   }, [currentOutlet?.id, selectedCategory]);
+
+  // Handle global keyboard shortcuts and barcode scanning
+  useEffect(() => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      // Don't interfere with input fields
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      // F1-F12 shortcuts (can be added later)
+      // For now, focus search on F1
+      if (e.key === 'F1') {
+        e.preventDefault();
+        // Focus search input (handled by App.tsx)
+      }
+
+      // Escape to clear cart
+      if (e.key === 'Escape' && cart.length > 0) {
+        if (confirm('Clear cart?')) {
+          clearCart();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [cart]);
+
+  // Initialize cash drawer session on mount
+  useEffect(() => {
+    const initializeCashDrawer = async () => {
+      if (!currentOutlet?.id || !currentUser?.id || !isOnline) return;
+
+      try {
+        // Check if there's an active session
+        const terminalId = `terminal-${currentOutlet.id}`;
+        const activeSession = await posService.getActiveCashDrawerSession(currentOutlet.id, terminalId);
+        
+        if (!activeSession) {
+          // Prompt to open session (can be made automatic later)
+          // For now, we'll just check - UI can prompt user to open session
+        }
+      } catch (err) {
+        console.error('Error checking cash drawer session:', err);
+      }
+    };
+
+    initializeCashDrawer();
+  }, [currentOutlet?.id, currentUser?.id, isOnline]);
 
   // Monitor online status
   useEffect(() => {
@@ -121,6 +219,21 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
     };
   }, []);
 
+  // Load staff profiles when outlet changes
+  useEffect(() => {
+    if (currentOutlet?.id) {
+      loadStaffProfiles();
+      checkExistingStaffSession();
+    }
+  }, [currentOutlet?.id]);
+
+  // Clear staff session when outlet changes
+  useEffect(() => {
+    if (currentOutlet?.id && currentStaff?.outlet_id !== currentOutlet.id) {
+      handleStaffLogout();
+    }
+  }, [currentOutlet?.id, currentStaff?.outlet_id]);
+
   /**
    * Load products from API
    */
@@ -136,11 +249,11 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
       const response = await posService.getProducts(currentOutlet.id, {
         category: selectedCategory || undefined,
         activeOnly: true,
-        size: 1000 // Load more products for local search
+        size: 100 // Load products for local search
       });
 
       setProducts(response?.items || []);
-      setError(null);
+      setPosError(null);
     } catch (err) {
       console.error('Error loading products online, trying offline:', err);
       // Fallback to offline DB explicitly
@@ -148,17 +261,106 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
         const offlineProducts = await offlineDatabase.getProducts(currentOutlet.id);
         if (offlineProducts && offlineProducts.length > 0) {
           setProducts(offlineProducts);
-          setError(null);
+          setPosError(null);
           console.log('Loaded products from offline database');
         } else {
-          setError('No products found. Please connect to internet to sync.');
+          setPosError('No products found. Please connect to internet to sync.');
         }
       } catch (offlineErr) {
         console.error('Offline load failed:', offlineErr);
-        setError('Failed to load products from both online and offline sources.');
+        setPosError('Failed to load products from both online and offline sources.');
       }
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  /**
+   * Load staff profiles for PIN authentication
+   */
+  const loadStaffProfiles = async () => {
+    if (!currentOutlet?.id) return;
+
+    try {
+      const response = await staffService.getOutletStaff(currentOutlet.id);
+      setStaffProfiles(response.profiles);
+    } catch (err) {
+      console.error('Error loading staff profiles:', err);
+      // Don't show error to user for staff loading
+    }
+  };
+
+  /**
+   * Handle successful PIN authentication
+   */
+  const handleStaffAuthentication = (authResponse: StaffAuthResponse) => {
+    setCurrentStaff(authResponse.staff_profile);
+    setIsStaffAuthenticated(true);
+    setShowPinEntry(false);
+
+    // Store staff session info
+    localStorage.setItem('staff_session', JSON.stringify({
+      staff_profile: authResponse.staff_profile,
+      session_token: authResponse.session_token,
+      expires_at: authResponse.expires_at,
+      outlet_id: currentOutlet?.id
+    }));
+
+    // Load products and initialize POS
+    loadProducts();
+  };
+
+  /**
+   * Handle staff logout
+   */
+  const handleStaffLogout = () => {
+    setCurrentStaff(null);
+    setIsStaffAuthenticated(false);
+
+    // Clear staff session
+    localStorage.removeItem('staff_session');
+
+    // Clear cart and reset POS state
+    setCart([]);
+    setSelectedCustomer(null);
+  };
+
+  // Handle manager login success
+  const handleManagerLoginSuccess = () => {
+    setShowManagerLogin(false);
+    // The OutletContext will update currentUser automatically
+    // This will trigger a re-render with proper authentication state
+  };
+
+  // Handle manager login from PIN entry
+  const handleManagerLoginFromPIN = () => {
+    setShowManagerLogin(true);
+  };
+
+  /**
+   * Check for existing staff session on load
+   */
+  const checkExistingStaffSession = () => {
+    const staffSession = localStorage.getItem('staff_session');
+    if (staffSession) {
+      try {
+        const session = JSON.parse(staffSession);
+        const expiresAt = new Date(session.expires_at);
+        const now = new Date();
+
+        // Check if session is still valid and for current outlet
+        if (expiresAt > now && session.outlet_id === currentOutlet?.id) {
+          setCurrentStaff(session.staff_profile);
+          setIsStaffAuthenticated(true);
+          setShowPinEntry(false);
+        } else {
+          // Session expired or different outlet, clear it
+          localStorage.removeItem('staff_session');
+        }
+      } catch (err) {
+        console.error('Error parsing staff session:', err);
+        localStorage.removeItem('staff_session');
+      }
     }
   };
 
@@ -172,8 +374,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
         setOfflineTransactionCount(0);
         // silently reset count; UI stays ready for next sale
       }
-    } catch (error) {
-      console.error('Error syncing offline transactions:', error);
+    } catch (err) {
+      console.error('Error syncing offline transactions:', err);
     }
   };
 
@@ -205,7 +407,9 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
 
   // Expose addToCart method to parent component
   useImperativeHandle(ref, () => ({
-    addToCart
+    addToCart,
+    openCustomerSearch: () => setShowCustomerSearch(true),
+    openTransactionHistory: () => setShowTransactionHistory(true),
   }));
 
   /**
@@ -699,8 +903,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
       clearCart();
       setShowPaymentModal(false);
 
-    } catch (error) {
-      console.error('Payment error:', error);
+    } catch (err) {
+      console.error('Payment error:', err);
       // keep cart as-is so cashier can retry or adjust
     }
   };
@@ -742,6 +946,11 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
       }
 
       // Use enhanced transaction with split payments
+      // Store split payments in notes field as JSON (temporary until schema is updated)
+      const notes = splitPayments.length > 1 
+        ? JSON.stringify({ split_payments: splitPayments.map(sp => ({ method: sp.method, amount: sp.amount })) })
+        : undefined;
+      
       const transactionRequest: any = {
         outlet_id: currentOutlet.id,
         cashier_id: currentUser.id,
@@ -749,21 +958,50 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
         payment_method: splitPayments.length === 1 ? splitPayments[0].method : PaymentMethod.CASH, // Primary method
         tendered_amount: totalPaid,
         discount_amount: totals.totalDiscount,
-        split_payments: splitPayments.length > 1 ? splitPayments : undefined
+        notes,
+        customer_id: selectedCustomer?.id,
+        customer_name: selectedCustomer?.name,
       };
 
+      let transaction;
       if (isOnline) {
-        const transaction = await posService.createTransaction(transactionRequest);
+        transaction = await posService.createTransaction(transactionRequest);
+        
+        // Show success message
+        success(`Transaction completed! Total: ${formatCurrency(totals.total)}`, 4000);
+        
+        // Handle receipt printing
         if (mode === 'save_and_print' && transaction?.id) {
           try {
-            await posService.printReceipt(transaction.id);
-          } catch (printError) {
+            const printResult = await posService.printReceipt(transaction.id);
+            // Open print dialog with receipt content
+            if (printResult?.receipt_content) {
+              const printWindow = window.open('', '_blank');
+              if (printWindow) {
+                printWindow.document.write(`
+                  <html>
+                    <head><title>Receipt</title></head>
+                    <body style="font-family: monospace; padding: 20px;">
+                      <pre style="white-space: pre-wrap;">${printResult.receipt_content}</pre>
+                      <script>window.onload = () => window.print();</script>
+                    </body>
+                  </html>
+                `);
+                printWindow.document.close();
+              }
+            }
+          } catch (printError: any) {
             console.error('Receipt print error:', printError);
+            error(`Receipt printing failed: ${printError.message || 'Unknown error'}`, 5000);
           }
         }
+        
+        // Reload products to update stock quantities
+        loadProducts();
       } else {
         await posService.storeOfflineTransaction(transactionRequest);
         setOfflineTransactionCount(prev => prev + 1);
+        success(`Transaction saved offline. Will sync when online.`, 4000);
       }
 
       // Delete held receipt if this sale was restored from one
@@ -787,9 +1025,12 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
       setShowCashInput(false);
       setCashAmount('');
       setRestoredHeldReceiptId(null);
+      setSelectedCustomer(null); // Clear customer after transaction
 
-    } catch (error) {
-      console.error('Split payment error:', error);
+    } catch (err: any) {
+      console.error('Split payment error:', err);
+      const errorMessage = err?.response?.data?.detail || err?.message || 'Transaction failed. Please try again.';
+      error(errorMessage, 6000);
     }
   };
 
@@ -825,24 +1066,51 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
         items,
         payment_method: PaymentMethod.CASH,
         tendered_amount: amount,
-        discount_amount: totals.totalDiscount
+        discount_amount: totals.totalDiscount,
+        customer_id: selectedCustomer?.id,
+        customer_name: selectedCustomer?.name,
       };
 
       // Process transaction (online or offline)
+      let transaction;
       if (isOnline) {
-        const transaction = await posService.createTransaction(transactionRequest);
-
+        transaction = await posService.createTransaction(transactionRequest);
+        
+        // Show success message
+        success(`Transaction completed! Total: ${formatCurrency(totals.total)}`, 4000);
+        
         // Optionally print receipt
         if (mode === 'save_and_print' && transaction?.id) {
           try {
-            await posService.printReceipt(transaction.id);
-          } catch (printError) {
+            const printResult = await posService.printReceipt(transaction.id);
+            // Open print dialog with receipt content
+            if (printResult?.receipt_content) {
+              const printWindow = window.open('', '_blank');
+              if (printWindow) {
+                printWindow.document.write(`
+                  <html>
+                    <head><title>Receipt</title></head>
+                    <body style="font-family: monospace; padding: 20px;">
+                      <pre style="white-space: pre-wrap;">${printResult.receipt_content}</pre>
+                      <script>window.onload = () => window.print();</script>
+                    </body>
+                  </html>
+                `);
+                printWindow.document.close();
+              }
+            }
+          } catch (printError: any) {
             console.error('Receipt print error:', printError);
+            error(`Receipt printing failed: ${printError.message || 'Unknown error'}`, 5000);
           }
         }
+        
+        // Reload products to update stock quantities
+        loadProducts();
       } else {
         const offlineId = await posService.storeOfflineTransaction(transactionRequest);
         setOfflineTransactionCount(prev => prev + 1);
+        success(`Transaction saved offline. Will sync when online.`, 4000);
       }
 
       // Delete held receipt if this sale was restored from one
@@ -864,9 +1132,11 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
       clearCart();
       setShowCashInput(false);
       setCashAmount('');
+      setRestoredHeldReceiptId(null);
+      setSelectedCustomer(null); // Clear customer after transaction
 
-    } catch (error) {
-      console.error('Payment error:', error);
+    } catch (err) {
+      console.error('Payment error:', err);
       // keep cart and cash input so cashier can retry
     }
   };
@@ -919,10 +1189,62 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
     : products.slice(0, 50);
   */
 
+  // Determine what screen to show
+  const screenToShow = getScreenToShow();
+
+  // Show Manager Login Screen
+  if (screenToShow === 'manager_login') {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <LoginForm
+          onSuccess={handleManagerLoginSuccess}
+          onSwitchToSignup={() => {
+            // Redirect to signup page or show signup
+            window.location.href = '/signup';
+          }}
+        />
+      </div>
+    );
+  }
+
+  // Show Staff Setup Screen (when manager is logged in but no staff profiles)
+  if (screenToShow === 'staff_setup') {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg shadow-lg max-w-md w-full p-6 text-center">
+          <User className="w-16 h-16 text-blue-600 mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Set Up Staff Access</h2>
+          <p className="text-gray-600 mb-6">
+            Create staff profiles with PIN access to get started with your POS system.
+          </p>
+          <button
+            onClick={() => setShowStaffManagement(true)}
+            className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+          >
+            Create Staff Profiles
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Show PIN Entry Screen
+  if (screenToShow === 'pin_entry') {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <PinEntryModal
+          isOpen={true}
+          onClose={() => {}} // Can't close PIN entry
+          onSuccess={handleStaffAuthentication}
+          staffProfiles={staffProfiles}
+          onManagerLogin={handleManagerLoginFromPIN}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="p-4 bg-gray-50 min-h-screen">
-
-
         {/* Main POS Interface - Full Width Cart */}
         <div className="h-[calc(100vh-10rem)] overflow-hidden">
           {/* Full Width Cart & Payment */}
@@ -945,6 +1267,27 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
 
             {/* Fixed Payment Section */}
             <div className="bg-white rounded-lg shadow px-4 pt-4 pb-1 flex-shrink-0">
+              {/* Customer Selection */}
+              {selectedCustomer && (
+                <div className="mb-3 pb-3 border-b border-gray-200">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs text-gray-500">Customer:</span>
+                      <span className="ml-2 text-sm font-semibold text-gray-900">{selectedCustomer.name}</span>
+                      {selectedCustomer.phone && (
+                        <span className="ml-2 text-xs text-gray-500">({selectedCustomer.phone})</span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setSelectedCustomer(null)}
+                      className="text-xs text-red-600 hover:text-red-700 font-medium"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Total Section - at top of payment section */}
               <div className="mb-4 pb-4 border-b border-gray-200">
                 <div className="flex flex-col items-end gap-1">
@@ -1301,6 +1644,163 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((props, ref) => {
           isOpen={showStockReportModal}
           onClose={() => setShowStockReportModal(false)}
         />
+        
+        {/* Transaction History Modal */}
+        {showTransactionHistory && currentOutlet?.id && (
+          <TransactionHistory
+            outletId={currentOutlet.id}
+            isOpen={showTransactionHistory}
+            onClose={() => setShowTransactionHistory(false)}
+          />
+        )}
+
+        {/* Staff Management Modal */}
+        <StaffManagementModal
+          isOpen={showStaffManagement}
+          onClose={() => setShowStaffManagement(false)}
+        />
+
+        {/* Manager Login Modal */}
+        {showManagerLogin && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
+              <div className="flex justify-end mb-4">
+                <button
+                  onClick={() => setShowManagerLogin(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <LoginForm
+                isModal={true}
+                onSuccess={handleManagerLoginSuccess}
+                onSwitchToSignup={() => {
+                  setShowManagerLogin(false);
+                  window.location.href = '/signup';
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Toast Notifications */}
+        <ToastContainer toasts={toasts} onClose={removeToast} />
+
+        {/* Customer Search Modal */}
+        {showCustomerSearch && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-900">Search Customer</h2>
+                <button
+                  onClick={() => {
+                    setShowCustomerSearch(false);
+                    setCustomerSearchQuery('');
+                    setCustomerSearchResults([]);
+                  }}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="mb-4">
+                <input
+                  type="text"
+                  value={customerSearchQuery}
+                  onChange={async (e) => {
+                    const query = e.target.value;
+                    setCustomerSearchQuery(query);
+                    if (query.length >= 2 && currentOutlet?.id) {
+                      setIsSearchingCustomers(true);
+                      try {
+                        const results = await posService.searchCustomers(currentOutlet.id, query);
+                        setCustomerSearchResults(results);
+                      } catch (err) {
+                        console.error('Customer search error:', err);
+                      } finally {
+                        setIsSearchingCustomers(false);
+                      }
+                    } else {
+                      setCustomerSearchResults([]);
+                    }
+                  }}
+                  placeholder="Search by name or phone..."
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  autoFocus
+                />
+              </div>
+
+              {isSearchingCustomers && (
+                <div className="text-center py-4 text-sm text-gray-500">Searching...</div>
+              )}
+
+              {customerSearchResults.length > 0 && (
+                <div className="max-h-60 overflow-y-auto space-y-2">
+                  {customerSearchResults.map((customer) => (
+                    <button
+                      key={customer.id}
+                      onClick={() => {
+                        setSelectedCustomer({
+                          id: customer.id,
+                          name: customer.name,
+                          phone: customer.phone
+                        });
+                        setShowCustomerSearch(false);
+                        setCustomerSearchQuery('');
+                        setCustomerSearchResults([]);
+                      }}
+                      className="w-full text-left px-4 py-2 hover:bg-gray-50 rounded-lg border border-gray-200"
+                    >
+                      <div className="font-semibold text-gray-900">{customer.name}</div>
+                      {customer.phone && (
+                        <div className="text-sm text-gray-500">{customer.phone}</div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {customerSearchQuery.length >= 2 && !isSearchingCustomers && (
+                <div className="text-center py-4">
+                  <p className="text-sm text-gray-500 mb-3">
+                    {customerSearchResults.length === 0
+                      ? 'No customers found'
+                      : 'Can’t find the right customer?'}
+                  </p>
+                  <button
+                    onClick={async () => {
+                      if (currentOutlet?.id) {
+                        try {
+                          const newCustomer = await posService.createCustomer({
+                            outlet_id: currentOutlet.id,
+                            name: customerSearchQuery,
+                            phone: customerSearchQuery.replace(/\D/g, '').slice(0, 11) || customerSearchQuery
+                          });
+                          setSelectedCustomer({
+                            id: newCustomer.id,
+                            name: newCustomer.name,
+                            phone: newCustomer.phone
+                          });
+                          setShowCustomerSearch(false);
+                          setCustomerSearchQuery('');
+                          setCustomerSearchResults([]);
+                          success('Customer created successfully!');
+                        } catch (err: any) {
+                          error(err.message || 'Failed to create customer');
+                        }
+                      }
+                    }}
+                    className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-semibold text-sm"
+                  >
+                    Create New Customer
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
   );
 });

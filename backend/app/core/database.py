@@ -92,13 +92,14 @@ class Tables:
     POS_TRANSACTIONS = "pos_transactions"
     POS_TRANSACTION_ITEMS = "pos_transaction_items"
     STOCK_MOVEMENTS = "stock_movements"
-    CASH_DRAWER_SESSIONS = "cash_drawer_sessions"
+    CASH_DRAWER_SESSIONS = "pos_cash_drawer_sessions"
     LOYALTY_TRANSACTIONS = "loyalty_transactions"
     LOYALTY_SETTINGS = "loyalty_settings"
     INVENTORY_TRANSFERS = "inventory_transfers"
     INVENTORY_TRANSFER_ITEMS = "inventory_transfer_items"
     RECEIPT_SETTINGS = "receipt_settings"
     POS_HELD_RECEIPTS = "pos_held_receipts"
+    STAFF_PROFILES = "staff_profiles"
 
 
 # RLS Policy names

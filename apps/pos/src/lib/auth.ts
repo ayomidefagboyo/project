@@ -306,7 +306,7 @@ class AuthService {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${import.meta.env.VITE_APP_URL}/dashboard`
+          redirectTo: `${import.meta.env.VITE_APP_URL}/`
         }
       });
 
@@ -491,9 +491,25 @@ class AuthService {
   async getCurrentSession() {
     try {
       const { data: { session }, error } = await supabase.auth.getSession();
+
+      // If there's an invalid refresh token error, clear the session
+      if (error && error.message.includes('Invalid Refresh Token')) {
+        console.warn('Invalid refresh token detected, clearing session');
+        await supabase.auth.signOut();
+        return { session: null, error: null }; // Return null instead of error to allow fresh login
+      }
+
       return { session, error: error ? error.message : null };
     } catch (error) {
       console.error('Get session error:', error);
+
+      // Handle refresh token errors
+      if (error instanceof Error && error.message.includes('Invalid Refresh Token')) {
+        console.warn('Invalid refresh token in catch block, clearing session');
+        await supabase.auth.signOut();
+        return { session: null, error: null };
+      }
+
       return {
         session: null,
         error: error instanceof Error ? error.message : 'Failed to get session'
@@ -505,6 +521,14 @@ class AuthService {
   async getCurrentUser(): Promise<AuthResponse> {
     try {
       const { data: { user }, error } = await supabase.auth.getUser();
+
+      // Handle refresh token errors
+      if (error && error.message.includes('Invalid Refresh Token')) {
+        console.warn('Invalid refresh token in getCurrentUser, clearing session');
+        await supabase.auth.signOut();
+        return { user: null, error: null };
+      }
+
       if (error) throw error;
 
       if (user) {
@@ -558,6 +582,14 @@ class AuthService {
       return { user: null, error: 'No user found' };
     } catch (error) {
       console.error('Get current user error:', error);
+
+      // Handle refresh token errors in catch block
+      if (error instanceof Error && error.message.includes('Invalid Refresh Token')) {
+        console.warn('Invalid refresh token in catch, clearing session');
+        await supabase.auth.signOut();
+        return { user: null, error: null };
+      }
+
       return {
         user: null,
         error: error instanceof Error ? error.message : 'Failed to get user'

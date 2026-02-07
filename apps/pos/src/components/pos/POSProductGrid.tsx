@@ -64,28 +64,28 @@ const POSProductGrid: React.FC<POSProductGridProps> = ({
 
   return (
     <div className="h-full flex flex-col">
-      {/* Combined Header with Search */}
-      <div className="p-4 border-b border-gray-200 bg-white">
-        <div className="flex items-center space-x-2 mb-3">
-          <Package className="h-5 w-5 text-gray-600" />
-          <h2 className="text-lg font-semibold text-gray-900">
+      {/* Premium Header */}
+      <div className="p-6 border-b border-slate-200 bg-white">
+        <div className="flex items-center space-x-3">
+          <Package className="h-6 w-6 text-slate-600" />
+          <h2 className="text-xl font-semibold text-slate-900">
             Products ({products.length})
           </h2>
         </div>
       </div>
 
-      {/* Product Grid */}
-      <div className="flex-1 p-4 overflow-y-auto bg-white">
+      {/* Fixed Product Grid */}
+      <div className="flex-1 p-6 bg-white scroll-area">
         {products.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
-              <Search className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-500 font-medium">No products found</p>
-              <p className="text-gray-400 text-sm mt-1">Search for products or add inventory</p>
+              <Search className="h-16 w-16 text-slate-400 mx-auto mb-4" />
+              <p className="text-slate-600 font-medium text-lg">No products found</p>
+              <p className="text-slate-500 text-sm mt-2">Search for products or add inventory</p>
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+          <div className="product-grid">
             {products.map((product) => {
               const stockInfo = getStockStatus(product.quantity_on_hand, product.reorder_level);
 
@@ -95,15 +95,15 @@ const POSProductGrid: React.FC<POSProductGridProps> = ({
                   onClick={() => onProductSelect(product)}
                   disabled={!product.is_active || product.quantity_on_hand === 0}
                   className={`
-                  group relative p-3 rounded-lg border-2 transition-all duration-150 text-left
+                  product-card group relative p-4 text-left
                   ${product.is_active && product.quantity_on_hand > 0
-                      ? 'border-gray-200 hover:border-blue-300 hover:shadow-md active:scale-95 cursor-pointer bg-white'
-                      : 'border-gray-100 bg-gray-50 cursor-not-allowed opacity-60'
+                      ? 'disabled:opacity-50 disabled:cursor-not-allowed'
+                      : 'opacity-50 cursor-not-allowed'
                     }
                 `}
                 >
-                  {/* Product Image Placeholder */}
-                  <div className="aspect-square w-full mb-2 bg-gray-100 rounded-md flex items-center justify-center overflow-hidden">
+                  {/* Product Image */}
+                  <div className="h-24 w-full mb-3 bg-slate-100 rounded-lg flex items-center justify-center overflow-hidden">
                     {product.image_url ? (
                       <img
                         src={product.image_url}
@@ -118,45 +118,33 @@ const POSProductGrid: React.FC<POSProductGridProps> = ({
                       />
                     ) : null}
                     <div className={`${product.image_url ? 'hidden' : 'flex'} items-center justify-center h-full`}>
-                      <Package className="h-8 w-8 text-gray-400" />
+                      <Package className="h-8 w-8 text-slate-400" />
                     </div>
                   </div>
 
                   {/* Product Info */}
-                  <div className="space-y-1">
-                    <h3 className="font-medium text-sm text-gray-900 leading-tight line-clamp-2 group-hover:text-blue-600">
+                  <div className="space-y-2">
+                    <h3 className="font-semibold text-sm text-slate-900 leading-tight line-clamp-2 group-hover:text-indigo-600 transition-colors">
                       {product.name}
                     </h3>
 
-                    <p className="text-xs text-gray-500 font-mono">
-                      {product.sku}
-                    </p>
-
-                    {product.category && (
-                      <p className="text-xs text-gray-500 capitalize">
-                        {product.category}
-                      </p>
-                    )}
-
-                    <div className="flex items-center justify-between pt-1">
-                      <span className="text-sm font-bold text-gray-900">
+                    <div className="flex items-center justify-between">
+                      <span className="text-price">
                         {formatCurrency(product.unit_price)}
                       </span>
+                      <div className={`w-2 h-2 rounded-full ${
+                        stockInfo.status === 'good' ? 'bg-emerald-400' :
+                        stockInfo.status === 'low' ? 'bg-amber-400' : 'bg-red-400'
+                      }`} />
                     </div>
 
-                    {/* Stock Status */}
-                    <div className="flex items-center justify-between">
-                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${stockInfo.color}`}>
-                        {stockInfo.text}
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        {product.quantity_on_hand}
-                      </span>
+                    <div className="flex items-center justify-between text-xs text-slate-500">
+                      <span>Stock: {product.quantity_on_hand}</span>
+                      {product.category && (
+                        <span className="capitalize">{product.category}</span>
+                      )}
                     </div>
                   </div>
-
-                  {/* Hover Effect */}
-                  <div className="absolute inset-0 rounded-lg bg-blue-500 opacity-0 group-hover:opacity-5 transition-opacity"></div>
                 </button>
               );
             })}
@@ -164,10 +152,10 @@ const POSProductGrid: React.FC<POSProductGridProps> = ({
         )}
       </div>
 
-      {/* Footer */}
+      {/* Premium Footer */}
       {products.length > 0 && (
-        <div className="p-4 border-t border-gray-200 bg-gray-50">
-          <p className="text-sm text-gray-600 text-center">
+        <div className="p-4 border-t border-slate-200 bg-slate-50">
+          <p className="text-sm text-slate-600 text-center font-medium">
             Tap any product to add to cart
           </p>
         </div>

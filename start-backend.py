@@ -20,9 +20,9 @@ def main():
     
     print("🚀 Starting Compass FastAPI Backend Server...")
     print("📍 Backend Directory:", backend_dir)
-    print("🌐 Server will be available at: http://localhost:8000")
-    print("📚 API Documentation: http://localhost:8000/docs")
-    print("🔧 Admin Interface: http://localhost:8000/redoc")
+    print("🌐 Server will be available at: http://localhost:8002")
+    print("📚 API Documentation: http://localhost:8002/docs")
+    print("🔧 Admin Interface: http://localhost:8002/redoc")
     print("\n" + "="*50)
     
     try:
@@ -30,7 +30,7 @@ def main():
         uvicorn.run(
             "main:app",  # Assuming main.py exists with app instance
             host="0.0.0.0",
-            port=8000,
+            port=8002,
             reload=True,  # Enable auto-reload for development
             log_level="info"
         )
