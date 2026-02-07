@@ -1,8 +1,8 @@
-
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useState, useRef, useEffect } from 'react';
 import POSDashboard, { type POSDashboardHandle } from './components/pos/POSDashboard';
 import ProductManagement, { type ProductManagementHandle } from './components/pos/ProductManagement';
+import POSEODDashboard from './pages/EODDashboard';
 import AppLayout from './components/layout/AppLayout';
 import { OutletProvider, useOutlet } from './contexts/OutletContext';
 import { Upload, Download, Plus, Wifi, WifiOff } from 'lucide-react';
@@ -10,7 +10,7 @@ import { posService, type POSProduct } from './lib/posService';
 
 function AppContent() {
   const location = useLocation();
-  const { currentOutlet } = useOutlet();
+  const { currentOutlet, currentUser } = useOutlet();
   const productManagementRef = useRef<ProductManagementHandle>(null);
   const posDashboardRef = useRef<POSDashboardHandle>(null);
 
@@ -181,16 +181,45 @@ function AppContent() {
         )}
       </div>
 
-      {/* Status Indicators */}
-      <div className="flex items-center gap-3 flex-shrink-0">
-        {/* Online/Offline status */}
-        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${isOnline
-          ? 'bg-green-100 text-green-800'
-          : 'bg-red-100 text-red-800'
-          }`}>
+      {/* Status Indicators - single row: + Add Customer | Cashier | Online icon (at far edge) */}
+      <div className="flex items-center gap-3 flex-shrink-0 flex-wrap justify-end">
+        {/* Add Customer */}
+        <button
+          type="button"
+          onClick={() => posDashboardRef.current?.openCustomerSearch()}
+          className="px-4 py-2 rounded-full bg-blue-50 text-blue-700 text-sm font-semibold whitespace-nowrap active:scale-95 transition-transform"
+        >
+          + Add Customer
+        </button>
+
+        {/* Cashier - first name only, clickable for clock-out (reuses sidebar Clock Out logic) */}
+        {currentUser && (
+          <button
+            type="button"
+            className="px-4 py-2 rounded-full bg-gray-100 text-gray-700 text-sm font-semibold whitespace-nowrap active:scale-95 transition-transform"
+            onClick={() => {
+              // Delegate to sidebar clock in/out button via custom event
+              window.dispatchEvent(new CustomEvent('pos-clock-out'));
+            }}
+          >
+            Cashier:{' '}
+            <span className="font-semibold">
+              {currentUser.name?.split(' ')[0] || currentUser.name}
+            </span>
+          </button>
+        )}
+
+        {/* Online/Offline icon only - last at the edge */}
+        <button
+          type="button"
+          className={`flex items-center justify-center w-8 h-8 rounded-full border ${isOnline
+            ? 'border-green-500 text-green-600 bg-green-50'
+            : 'border-red-500 text-red-600 bg-red-50'
+            }`}
+          title={isOnline ? 'Online' : 'Offline'}
+        >
           {isOnline ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
-          <span>{isOnline ? 'Online' : 'Offline'}</span>
-        </div>
+        </button>
       </div>
     </div>
   );
@@ -233,17 +262,19 @@ function AppContent() {
     </div>
   );
 
-  const headerContent = location.pathname === '/products'
-    ? productManagementHeader
-    : location.pathname === '/'
-    ? posTerminalHeader
-    : null;
+  const headerContent =
+    location.pathname === '/products'
+      ? productManagementHeader
+      : location.pathname === '/'
+        ? posTerminalHeader
+        : null;
 
   return (
     <AppLayout headerContent={headerContent}>
       <Routes>
         <Route path="/" element={<POSDashboard ref={posDashboardRef} />} />
         <Route path="/products" element={<ProductManagement ref={productManagementRef} />} />
+        <Route path="/eod" element={<POSEODDashboard />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppLayout>

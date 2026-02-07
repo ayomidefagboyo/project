@@ -42,7 +42,7 @@ const ReceiveStockModal: React.FC<ReceiveStockModalProps> = ({ isOpen, onClose, 
     if (!currentOutlet?.id) return;
 
     try {
-      const response = await posService.getProducts(currentOutlet.id, { size: 1000 });
+      const response = await posService.getProducts(currentOutlet.id, { size: 100 });
       setProducts(response?.items || []);
     } catch (error) {
       console.error('Error loading products:', error);
