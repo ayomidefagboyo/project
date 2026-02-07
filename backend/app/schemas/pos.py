@@ -815,3 +815,67 @@ class HeldReceiptListResponse(BaseModel):
     """Response for list of held receipts"""
     receipts: List[HeldReceiptResponse] = Field(..., description="List of held receipts")
     total: int = Field(..., description="Total count")
+
+
+# ===============================================
+# STAFF PROFILES SCHEMAS
+# ===============================================
+
+class StaffProfileCreate(BaseModel):
+    """Schema for creating staff profile"""
+    display_name: str = Field(..., max_length=100, description="Staff display name")
+    pin: str = Field(..., min_length=6, max_length=6, pattern=r'^\d{6}$', description="6-digit PIN")
+    role: str = Field(..., description="Staff role")
+    outlet_id: str = Field(..., description="Outlet ID")
+    permissions: Optional[List[str]] = Field(default=[], description="Custom permissions")
+
+
+class StaffProfileUpdate(BaseModel):
+    """Schema for updating staff profile"""
+    display_name: Optional[str] = Field(None, max_length=100, description="Staff display name")
+    pin: Optional[str] = Field(None, min_length=6, max_length=6, pattern=r'^\d{6}$', description="6-digit PIN")
+    role: Optional[str] = Field(None, description="Staff role")
+    permissions: Optional[List[str]] = Field(None, description="Custom permissions")
+    is_active: Optional[bool] = Field(None, description="Active status")
+
+
+class StaffProfileResponse(BaseModel):
+    """Schema for staff profile response"""
+    id: str = Field(..., description="Staff profile ID")
+    parent_account_id: str = Field(..., description="Parent account ID")
+    staff_code: str = Field(..., description="Unique staff code")
+    display_name: str = Field(..., description="Staff display name")
+    role: str = Field(..., description="Staff role")
+    permissions: List[str] = Field(..., description="Staff permissions")
+    outlet_id: str = Field(..., description="Outlet ID")
+    is_active: bool = Field(..., description="Active status")
+    last_login: Optional[datetime] = Field(None, description="Last login timestamp")
+    failed_login_attempts: int = Field(..., description="Failed login attempts")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Update timestamp")
+
+    class Config:
+        from_attributes = True
+
+
+class StaffProfileListResponse(BaseModel):
+    """Response for list of staff profiles"""
+    profiles: List[StaffProfileResponse] = Field(..., description="List of staff profiles")
+    total: int = Field(..., description="Total count")
+
+
+class StaffPinAuth(BaseModel):
+    """Schema for PIN authentication"""
+    staff_code: str = Field(..., max_length=10, description="Staff code")
+    pin: str = Field(..., min_length=6, max_length=6, pattern=r'^\d{6}$', description="6-digit PIN")
+    outlet_id: str = Field(..., description="Outlet ID")
+
+
+class StaffAuthResponse(BaseModel):
+    """Schema for staff authentication response"""
+    staff_profile: StaffProfileResponse = Field(..., description="Staff profile")
+    session_token: str = Field(..., description="Session token")
+    expires_at: datetime = Field(..., description="Token expiration")
+
+    class Config:
+        from_attributes = True

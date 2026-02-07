@@ -19,15 +19,17 @@ import { useOutlet } from '../../contexts/OutletContext';
 
 interface AppLayoutProps {
   children: React.ReactNode;
+  headerContent?: React.ReactNode;
 }
 
-const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
+const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent }) => {
   const { currentUser, currentOutlet } = useOutlet();
   const [showSidebar, setShowSidebar] = useState(false);
   const location = useLocation();
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    // POS invariant shell: fills viewport and prevents outer scrolling.
+    <div className="w-screen h-screen overflow-hidden bg-gray-50 flex">
       {/* Global Sidebar */}
       {showSidebar && (
         <>
@@ -161,13 +163,13 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         </>
       )}
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-h-screen">
+      {/* Main Content Area - constrained to viewport height */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden">
         {/* Global Header */}
-        <div className="bg-white shadow-sm border-b border-gray-200 px-4 py-3">
-          <div className="flex items-center justify-between">
+        <div className="bg-white shadow-sm border-b border-gray-200 px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             {/* Left: Menu + Title */}
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-3 flex-shrink-0">
               <button
                 onClick={() => setShowSidebar(true)}
                 className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
@@ -176,21 +178,21 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
               </button>
 
               <div>
-                <h1 className="text-xl font-bold text-gray-900 leading-tight capitalize">
+                <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight capitalize">
                   {currentOutlet?.name || 'Outlet'}
                 </h1>
               </div>
             </div>
 
-            {/* Right: Could add global status indicators here */}
-            <div className="flex items-center space-x-3">
-              {/* Add global status indicators if needed */}
+            {/* Right: Dynamic page content */}
+            <div className="flex-1 lg:flex-initial lg:max-w-4xl w-full">
+              {headerContent}
             </div>
           </div>
         </div>
 
-        {/* Page Content */}
-        <div className="flex-1">
+        {/* Page Content - children must manage their own internal scroll areas */}
+        <div className="flex-1 overflow-hidden">
           {children}
         </div>
       </div>

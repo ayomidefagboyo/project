@@ -615,3 +615,47 @@ export interface AuthResponse {
   user: AuthUser | null;
   error: string | null;
 }
+
+// Staff Profile Types
+export interface StaffProfile {
+  id: string;
+  parent_account_id: string;
+  staff_code: string;
+  display_name: string;
+  role: UserRole;
+  permissions: Permission[];
+  outlet_id: string;
+  is_active: boolean;
+  last_login?: string;
+  failed_login_attempts: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StaffProfileCreate {
+  display_name: string;
+  pin: string;
+  role: UserRole;
+  outlet_id: string;
+  permissions?: Permission[];
+}
+
+export interface StaffProfileUpdate {
+  display_name?: string;
+  pin?: string;
+  role?: UserRole;
+  permissions?: Permission[];
+  is_active?: boolean;
+}
+
+export interface StaffPinAuth {
+  staff_code: string;
+  pin: string;
+  outlet_id: string;
+}
+
+export interface StaffAuthResponse {
+  staff_profile: StaffProfile;
+  session_token: string;
+  expires_at: string;
+}

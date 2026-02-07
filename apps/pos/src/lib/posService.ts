@@ -485,6 +485,19 @@ class POSService {
   }
 
   /**
+   * Void a transaction
+   */
+  async voidTransaction(transactionId: string, reason: string): Promise<void> {
+    try {
+      const response = await apiClient.put<any>(`${this.baseUrl}/transactions/${transactionId}/void`, { void_reason: reason });
+      if (response.error) throw new Error(response.error);
+    } catch (error) {
+      console.error('Error voiding transaction:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
    * Get transactions with optional filtering
    */
   async getTransactions(
@@ -1109,16 +1122,14 @@ class POSService {
    */
   async printReceipt(
     transactionId: string,
-    printerId?: string,
     copies: number = 1
-  ): Promise<{ message: string; print_job_id: string }> {
+  ): Promise<{ message: string; transaction_id: string; receipt_content: string; copies: number; format: string }> {
     try {
       const params = new URLSearchParams({
-        copies: copies.toString(),
-        ...printerId && { printer_id: printerId }
+        copies: copies.toString()
       });
 
-      const response = await apiClient.post<{ message: string; print_job_id: string }>(`${this.baseUrl}/receipts/${transactionId}/print?${params}`);
+      const response = await apiClient.post<{ message: string; transaction_id: string; receipt_content: string; copies: number; format: string }>(`${this.baseUrl}/receipts/${transactionId}/print?${params}`);
       if (!response.data) throw new Error(response.error || 'Failed to create print job');
       return response.data;
     } catch (error) {
@@ -1281,6 +1292,104 @@ class POSService {
       if (response.error) throw new Error(response.error);
     } catch (error) {
       console.error('Error deleting held receipt:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * CASH DRAWER METHODS
+   */
+
+  /**
+   * Open a cash drawer session
+   */
+  async openCashDrawerSession(data: {
+    outlet_id: string;
+    terminal_id: string;
+    cashier_id: string;
+    opening_balance: number;
+    opening_notes?: string;
+  }): Promise<any> {
+    try {
+      const response = await apiClient.post<any>(`${this.baseUrl}/cash-drawer/sessions`, data);
+      if (!response.data) throw new Error(response.error || 'Failed to open cash drawer session');
+      return response.data;
+    } catch (error) {
+      console.error('Error opening cash drawer session:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Get active cash drawer session
+   */
+  async getActiveCashDrawerSession(outletId: string, terminalId: string): Promise<any | null> {
+    try {
+      const response = await apiClient.get<any>(`${this.baseUrl}/cash-drawer/sessions/active?outlet_id=${outletId}&terminal_id=${terminalId}`);
+      if (response.error && response.status !== 404) throw new Error(response.error);
+      return response.data || null;
+    } catch (error) {
+      console.error('Error fetching active cash drawer session:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Close a cash drawer session
+   */
+  async closeCashDrawerSession(sessionId: string, data: {
+    actual_balance: number;
+    closing_notes?: string;
+  }): Promise<any> {
+    try {
+      const response = await apiClient.put<any>(`${this.baseUrl}/cash-drawer/sessions/${sessionId}/close`, data);
+      if (!response.data) throw new Error(response.error || 'Failed to close cash drawer session');
+      return response.data;
+    } catch (error) {
+      console.error('Error closing cash drawer session:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * CUSTOMER METHODS
+   */
+
+  /**
+   * Search customers by name or phone
+   */
+  async searchCustomers(outletId: string, query: string, limit: number = 10): Promise<any[]> {
+    try {
+      const response = await apiClient.get<any>(`${this.baseUrl}/customers/search?outlet_id=${outletId}&query=${encodeURIComponent(query)}&limit=${limit}`);
+      if (response.error) throw new Error(response.error);
+      return response.data || [];
+    } catch (error) {
+      console.error('Error searching customers:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Create a new customer
+   */
+  async createCustomer(data: {
+    outlet_id: string;
+    name: string;
+    phone: string;
+    email?: string;
+    address?: string;
+  }): Promise<any> {
+    try {
+      const response = await apiClient.post<any>(`${this.baseUrl}/customers?outlet_id=${data.outlet_id}`, {
+        name: data.name,
+        phone: data.phone,
+        email: data.email,
+        address: data.address
+      });
+      if (!response.data) throw new Error(response.error || 'Failed to create customer');
+      return response.data;
+    } catch (error) {
+      console.error('Error creating customer:', error);
       throw this.handleError(error);
     }
   }

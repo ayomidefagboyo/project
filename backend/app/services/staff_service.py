@@ -1,0 +1,274 @@
+"""
+Staff profile management service
+"""
+import bcrypt
+import secrets
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta
+from app.core.database import get_supabase_admin, Tables
+from app.schemas.pos import StaffProfileCreate, StaffProfileUpdate, StaffProfileResponse
+
+
+class StaffService:
+    """Service for managing staff profiles"""
+
+    @staticmethod
+    def hash_pin(pin: str) -> str:
+        """Hash a PIN using bcrypt"""
+        return bcrypt.hashpw(pin.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+    @staticmethod
+    def verify_pin(pin: str, pin_hash: str) -> bool:
+        """Verify a PIN against its hash"""
+        return bcrypt.checkpw(pin.encode('utf-8'), pin_hash.encode('utf-8'))
+
+    @staticmethod
+    def generate_session_token() -> str:
+        """Generate a secure session token"""
+        return secrets.token_urlsafe(32)
+
+    @staticmethod
+    async def generate_staff_code(outlet_id: str) -> str:
+        """Generate a unique staff code for the outlet"""
+        supabase = get_supabase_admin()
+
+        try:
+            # Call the database function
+            response = supabase.rpc('generate_staff_code', {'outlet_id_param': outlet_id}).execute()
+
+            if response.data:
+                return response.data
+            else:
+                # Fallback to simple generation
+                count_response = supabase.table(Tables.STAFF_PROFILES)\
+                    .select('id', count='exact')\
+                    .eq('outlet_id', outlet_id)\
+                    .execute()
+
+                count = count_response.count or 0
+                return f"STF{str(count + 1).zfill(3)}"
+
+        except Exception as e:
+            print(f"Error generating staff code: {e}")
+            # Fallback to timestamp-based code
+            import time
+            return f"STF{str(int(time.time()))[-3:]}"
+
+    @staticmethod
+    async def create_staff_profile(
+        parent_account_id: str,
+        staff_data: StaffProfileCreate
+    ) -> StaffProfileResponse:
+        """Create a new staff profile"""
+        supabase = get_supabase_admin()
+
+        # Generate unique staff code
+        staff_code = await StaffService.generate_staff_code(staff_data.outlet_id)
+
+        # Hash the PIN
+        pin_hash = StaffService.hash_pin(staff_data.pin)
+
+        # Create staff profile
+        profile_data = {
+            'parent_account_id': parent_account_id,
+            'staff_code': staff_code,
+            'pin_hash': pin_hash,
+            'display_name': staff_data.display_name,
+            'role': staff_data.role,
+            'permissions': staff_data.permissions or [],
+            'outlet_id': staff_data.outlet_id,
+            'is_active': True,
+            'failed_login_attempts': 0,
+            'created_by': parent_account_id
+        }
+
+        response = supabase.table(Tables.STAFF_PROFILES)\
+            .insert(profile_data)\
+            .select()\
+            .single()\
+            .execute()
+
+        if response.data:
+            return StaffProfileResponse(**response.data)
+        else:
+            raise Exception(f"Failed to create staff profile: {response}")
+
+    @staticmethod
+    async def get_staff_profiles(
+        parent_account_id: str,
+        outlet_id: Optional[str] = None,
+        active_only: bool = True
+    ) -> List[StaffProfileResponse]:
+        """Get staff profiles for a parent account"""
+        supabase = get_supabase_admin()
+
+        query = supabase.table(Tables.STAFF_PROFILES)\
+            .select('*')\
+            .eq('parent_account_id', parent_account_id)
+
+        if outlet_id:
+            query = query.eq('outlet_id', outlet_id)
+
+        if active_only:
+            query = query.eq('is_active', True)
+
+        response = query.order('created_at', desc=True).execute()
+
+        if response.data:
+            return [StaffProfileResponse(**profile) for profile in response.data]
+        return []
+
+    @staticmethod
+    async def get_staff_profile(profile_id: str) -> Optional[StaffProfileResponse]:
+        """Get a single staff profile by ID"""
+        supabase = get_supabase_admin()
+
+        response = supabase.table(Tables.STAFF_PROFILES)\
+            .select('*')\
+            .eq('id', profile_id)\
+            .single()\
+            .execute()
+
+        if response.data:
+            return StaffProfileResponse(**response.data)
+        return None
+
+    @staticmethod
+    async def get_staff_profile_by_code(staff_code: str, outlet_id: str) -> Optional[Dict[str, Any]]:
+        """Get staff profile by staff code and outlet"""
+        supabase = get_supabase_admin()
+
+        response = supabase.table(Tables.STAFF_PROFILES)\
+            .select('*')\
+            .eq('staff_code', staff_code)\
+            .eq('outlet_id', outlet_id)\
+            .eq('is_active', True)\
+            .single()\
+            .execute()
+
+        return response.data if response.data else None
+
+    @staticmethod
+    async def update_staff_profile(
+        profile_id: str,
+        update_data: StaffProfileUpdate
+    ) -> Optional[StaffProfileResponse]:
+        """Update a staff profile"""
+        supabase = get_supabase_admin()
+
+        # Prepare update data
+        update_dict = {}
+
+        if update_data.display_name is not None:
+            update_dict['display_name'] = update_data.display_name
+
+        if update_data.pin is not None:
+            update_dict['pin_hash'] = StaffService.hash_pin(update_data.pin)
+            update_dict['failed_login_attempts'] = 0  # Reset failed attempts on PIN change
+
+        if update_data.role is not None:
+            update_dict['role'] = update_data.role
+
+        if update_data.permissions is not None:
+            update_dict['permissions'] = update_data.permissions
+
+        if update_data.is_active is not None:
+            update_dict['is_active'] = update_data.is_active
+
+        if not update_dict:
+            # No updates to make
+            return await StaffService.get_staff_profile(profile_id)
+
+        response = supabase.table(Tables.STAFF_PROFILES)\
+            .update(update_dict)\
+            .eq('id', profile_id)\
+            .select()\
+            .single()\
+            .execute()
+
+        if response.data:
+            return StaffProfileResponse(**response.data)
+        return None
+
+    @staticmethod
+    async def delete_staff_profile(profile_id: str) -> bool:
+        """Delete a staff profile"""
+        supabase = get_supabase_admin()
+
+        # Soft delete by marking as inactive
+        response = supabase.table(Tables.STAFF_PROFILES)\
+            .update({'is_active': False})\
+            .eq('id', profile_id)\
+            .execute()
+
+        return response.data is not None
+
+    @staticmethod
+    async def authenticate_staff(staff_code: str, pin: str, outlet_id: str) -> Optional[Dict[str, Any]]:
+        """Authenticate staff with PIN"""
+        supabase = get_supabase_admin()
+
+        # Get staff profile
+        profile = await StaffService.get_staff_profile_by_code(staff_code, outlet_id)
+        if not profile:
+            return None
+
+        # Check if account is locked (too many failed attempts)
+        if profile.get('failed_login_attempts', 0) >= 5:
+            return None
+
+        # Verify PIN
+        if not StaffService.verify_pin(pin, profile['pin_hash']):
+            # Increment failed attempts
+            await supabase.table(Tables.STAFF_PROFILES)\
+                .update({'failed_login_attempts': profile.get('failed_login_attempts', 0) + 1})\
+                .eq('id', profile['id'])\
+                .execute()
+            return None
+
+        # Successful authentication - reset failed attempts and update last login
+        await supabase.table(Tables.STAFF_PROFILES)\
+            .update({
+                'failed_login_attempts': 0,
+                'last_login': datetime.utcnow().isoformat()
+            })\
+            .eq('id', profile['id'])\
+            .execute()
+
+        # Generate session token
+        session_token = StaffService.generate_session_token()
+        expires_at = datetime.utcnow() + timedelta(hours=8)  # 8-hour session
+
+        return {
+            'profile': profile,
+            'session_token': session_token,
+            'expires_at': expires_at
+        }
+
+    @staticmethod
+    async def reset_failed_attempts(profile_id: str) -> bool:
+        """Reset failed login attempts for a staff profile"""
+        supabase = get_supabase_admin()
+
+        response = supabase.table(Tables.STAFF_PROFILES)\
+            .update({'failed_login_attempts': 0})\
+            .eq('id', profile_id)\
+            .execute()
+
+        return response.data is not None
+
+    @staticmethod
+    async def get_staff_by_outlet(outlet_id: str) -> List[StaffProfileResponse]:
+        """Get all active staff for an outlet"""
+        supabase = get_supabase_admin()
+
+        response = supabase.table(Tables.STAFF_PROFILES)\
+            .select('*')\
+            .eq('outlet_id', outlet_id)\
+            .eq('is_active', True)\
+            .order('display_name')\
+            .execute()
+
+        if response.data:
+            return [StaffProfileResponse(**profile) for profile in response.data]
+        return []
