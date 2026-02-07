@@ -20,7 +20,8 @@ class Settings(BaseSettings):
     
     # Supabase Settings - Required for database connection
     SUPABASE_URL: str
-    SUPABASE_ANON_KEY: str
+    SUPABASE_KEY: str  # This will be the anon key for frontend
+    SUPABASE_ANON_KEY: str = ""  # Optional, defaults to SUPABASE_KEY
     SUPABASE_SERVICE_ROLE_KEY: str
     
     # JWT Settings
