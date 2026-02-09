@@ -106,16 +106,17 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     { name: 'POS Terminal', href: '/dashboard/pos', icon: ShoppingCart },
     { name: 'Product Management', href: '/dashboard/products', icon: Package },
+    { name: 'Staff Management', href: '/dashboard/staff', icon: Users },
     { name: 'Compazz Insights', href: '/dashboard/ai-assistant', icon: Bot },
     { name: 'Daily Reports', href: '/dashboard/daily-reports', icon: BarChart3 },
     { name: 'Invoices', href: '/dashboard/invoices', icon: FileText },
     { name: 'Expenses', href: '/dashboard/expenses', icon: CreditCard },
-    { name: 'Vendors', href: '/dashboard/vendors', icon: Users },
+    { name: 'Vendors', href: '/dashboard/vendors', icon: Building2 },
     { name: 'Audit Trail', href: '/dashboard/audit-trail', icon: Shield },
   ];
 
   const createReportItems = [
-    { name: 'End of Day', href: '/dashboard/eod', icon: Clock, color: 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/20' },
+    // EOD moved to POS app
     { name: 'Create Invoice', href: '/dashboard/invoices/create', icon: Receipt, color: 'text-emerald-600 bg-emerald-50 dark:text-emerald-400 dark:bg-emerald-900/20' },
     { name: 'Add Expense', href: '/dashboard/expenses/create', icon: DollarSign, color: 'text-purple-600 bg-purple-50 dark:text-purple-400 dark:bg-purple-900/20' },
   ];

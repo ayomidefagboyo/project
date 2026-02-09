@@ -20,6 +20,7 @@ import {
 import { useOutlet } from '../contexts/OutletContext';
 import { posEodService, type POSEODCreateData } from '../lib/eodService';
 import { posService } from '../lib/posService';
+import logger from '../lib/logger';
 
 const POSEODDashboard: React.FC = () => {
   const { currentOutlet } = useOutlet();
@@ -126,7 +127,7 @@ const POSEODDashboard: React.FC = () => {
         setAvailableCashiers(cashiers);
 
       } catch (error) {
-        console.error('Failed to fetch sales breakdown:', error);
+        logger.error('Failed to fetch sales breakdown:', error);
         setErrorMessage('Failed to load sales data. Please try again.');
       } finally {
         setLoadingSalesData(false);

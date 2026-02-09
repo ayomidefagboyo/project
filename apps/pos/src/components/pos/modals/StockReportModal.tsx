@@ -3,6 +3,7 @@ import { X, ClipboardList, Download, RefreshCw, AlertTriangle, Package, Trending
 import type { POSProduct } from '@/lib/posService';
 import { posService } from '@/lib/posService';
 import { useOutlet } from '@/contexts/OutletContext';
+import { useToast } from '../../ui/Toast';
 
 interface StockReportData {
   totalProducts: number;
@@ -20,6 +21,7 @@ interface StockReportModalProps {
 
 const StockReportModal: React.FC<StockReportModalProps> = ({ isOpen, onClose }) => {
   const { currentOutlet } = useOutlet();
+  const { error } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [reportData, setReportData] = useState<StockReportData | null>(null);
   const [selectedTab, setSelectedTab] = useState<'overview' | 'lowstock' | 'expiring' | 'outofstock'>('overview');
@@ -83,7 +85,7 @@ const StockReportModal: React.FC<StockReportModalProps> = ({ isOpen, onClose }) 
       });
     } catch (error) {
       console.error('Error generating report:', error);
-      alert('Failed to generate stock report');
+      error('Failed to generate stock report');
     } finally {
       setIsLoading(false);
     }

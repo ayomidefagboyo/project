@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Building2, MapPin, Phone, Mail, Globe } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import logger from '../../../lib/logger';
 import type { Outlet as OutletType, BusinessType } from '@/types';
 
 interface EditBusinessInfoModalProps {
@@ -66,7 +67,7 @@ const EditBusinessInfoModal: React.FC<EditBusinessInfoModalProps> = ({
 
     try {
       // Convert zipCode to zip to match the database schema
-      console.log('Form data before save:', formData);
+      logger.log('Form data before save:', formData);
 
       const dataToSave: any = {
         name: formData.name,
@@ -94,12 +95,12 @@ const EditBusinessInfoModal: React.FC<EditBusinessInfoModalProps> = ({
         dataToSave.website = formData.website.trim();
       }
 
-      console.log('Data to save:', dataToSave);
+      logger.log('Data to save:', dataToSave);
 
       await onSave(dataToSave);
       onClose();
     } catch (error) {
-      console.error('Failed to update business info:', error);
+      logger.error('Failed to update business info:', error);
     } finally {
       setIsSubmitting(false);
     }

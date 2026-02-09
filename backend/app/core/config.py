@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     
     # CORS Settings - Add your production frontend URL
-    BACKEND_CORS_ORIGINS: str = os.getenv("BACKEND_CORS_ORIGINS", "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:3000,https://compazz.app")
+    BACKEND_CORS_ORIGINS: str = os.getenv("BACKEND_CORS_ORIGINS", "http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:5176,http://localhost:5177,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175,http://127.0.0.1:5176,http://127.0.0.1:5177,http://localhost:3000,https://compazz.app")
     
     # Supabase Settings - Required for database connection
     SUPABASE_URL: str

@@ -82,16 +82,27 @@ class StaffService:
             'created_by': parent_account_id
         }
 
-        response = supabase.table(Tables.STAFF_PROFILES)\
-            .insert(profile_data)\
-            .select()\
-            .single()\
-            .execute()
+        try:
+            response = supabase.table(Tables.STAFF_PROFILES)\
+                .insert(profile_data)\
+                .execute()
 
-        if response.data:
-            return StaffProfileResponse(**response.data)
-        else:
-            raise Exception(f"Failed to create staff profile: {response}")
+            if response.data and len(response.data) > 0:
+                # Fetch the created profile
+                created_profile = supabase.table(Tables.STAFF_PROFILES)\
+                    .select('*')\
+                    .eq('staff_code', staff_code)\
+                    .single()\
+                    .execute()
+
+                if created_profile.data:
+                    return StaffProfileResponse(**created_profile.data)
+                else:
+                    raise Exception("Failed to fetch created staff profile")
+            else:
+                raise Exception(f"Failed to create staff profile: {response}")
+        except Exception as e:
+            raise Exception(f"Failed to create staff profile: {str(e)}")
 
     @staticmethod
     async def get_staff_profiles(
@@ -134,7 +145,7 @@ class StaffService:
         return None
 
     @staticmethod
-    async def get_staff_profile_by_code(staff_code: str, outlet_id: str) -> Optional[Dict[str, Any]]:
+    def get_staff_profile_by_code(staff_code: str, outlet_id: str) -> Optional[Dict[str, Any]]:
         """Get staff profile by staff code and outlet"""
         supabase = get_supabase_admin()
 
@@ -209,7 +220,7 @@ class StaffService:
         supabase = get_supabase_admin()
 
         # Get staff profile
-        profile = await StaffService.get_staff_profile_by_code(staff_code, outlet_id)
+        profile = StaffService.get_staff_profile_by_code(staff_code, outlet_id)
         if not profile:
             return None
 
@@ -220,14 +231,14 @@ class StaffService:
         # Verify PIN
         if not StaffService.verify_pin(pin, profile['pin_hash']):
             # Increment failed attempts
-            await supabase.table(Tables.STAFF_PROFILES)\
+            supabase.table(Tables.STAFF_PROFILES)\
                 .update({'failed_login_attempts': profile.get('failed_login_attempts', 0) + 1})\
                 .eq('id', profile['id'])\
                 .execute()
             return None
 
         # Successful authentication - reset failed attempts and update last login
-        await supabase.table(Tables.STAFF_PROFILES)\
+        supabase.table(Tables.STAFF_PROFILES)\
             .update({
                 'failed_login_attempts': 0,
                 'last_login': datetime.utcnow().isoformat()

@@ -24,7 +24,6 @@ import Expenses from '@/pages/expenses/Expenses';
 import CreateExpense from '@/pages/expenses/CreateExpense';
 import DailyReports from '@/pages/reports/DailyReports';
 import CreateReport from '@/pages/reports/CreateReport';
-import EODDashboard from '@/pages/reports/EODDashboard';
 import Vendors from '@/pages/vendors/Vendors';
 import AIAssistant from '@/pages/AIAssistant';
 import AuditTrail from '@/pages/AuditTrail';
@@ -34,6 +33,9 @@ import AcceptInvitation from '@/pages/AcceptInvitation';
 
 // POS System import
 import ProductManagement from '@/pages/products/ProductManagement';
+
+// Staff Management import
+import StaffManagement from '@/components/staff/StaffManagement';
 
 
 // Calculator imports
@@ -111,12 +113,12 @@ const AppRoutes = () => {
         <Route path="expenses/create" element={<CreateExpense />} />
         <Route path="daily-reports" element={<DailyReports />} />
         <Route path="daily-reports/create" element={<CreateReport />} />
-        <Route path="eod" element={<EODDashboard />} />
         <Route path="vendors" element={<Vendors />} />
         <Route path="ai-assistant" element={<AIAssistant />} />
         <Route path="audit-trail" element={<AuditTrail />} />
         <Route path="settings" element={<Settings />} />
         <Route path="products" element={<ProductManagement />} />
+        <Route path="staff" element={<StaffManagement />} />
 
       </Route>
 
