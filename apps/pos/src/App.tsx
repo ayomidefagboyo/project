@@ -1,9 +1,10 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useRef, useEffect } from 'react';
 import POSDashboard, { type POSDashboardHandle } from './components/pos/POSDashboard';
 import ProductManagement, { type ProductManagementHandle } from './components/pos/ProductManagement';
 import POSEODDashboard from './pages/EODDashboard';
 import TransactionsPage from './pages/TransactionsPage';
+import ReceiveItemsPage from './pages/ReceiveItemsPage';
 import AppLayout from './components/layout/AppLayout';
 import { OutletProvider, useOutlet } from './contexts/OutletContext';
 import { Upload, Download, Plus, Wifi, WifiOff, ChevronDown } from 'lucide-react';
@@ -34,7 +35,8 @@ interface StaffProfile {
 
 function AppContent() {
   const location = useLocation();
-  const { currentOutlet, currentUser, isLoading } = useOutlet();
+  const navigate = useNavigate();
+  const { currentOutlet, currentUser, isLoading, reInitAuth } = useOutlet();
   const productManagementRef = useRef<ProductManagementHandle>(null);
   const posDashboardRef = useRef<POSDashboardHandle>(null);
   const { error } = useToast();
@@ -109,6 +111,18 @@ function AppContent() {
     };
   }, []);
 
+  // Listen for staff logout events (from sidebar Clock Out button)
+  useEffect(() => {
+    const handleStaffLogoutEvent = () => {
+      localStorage.removeItem('pos_staff_session');
+      setCurrentStaff(null);
+      setTerminalPhase('staff_auth');
+    };
+
+    window.addEventListener('pos-staff-logout', handleStaffLogoutEvent);
+    return () => window.removeEventListener('pos-staff-logout', handleStaffLogoutEvent);
+  }, []);
+
   // Helper functions
   const handleTerminalSetup = (config: TerminalConfig) => {
     setTerminalConfig(config);
@@ -136,7 +150,7 @@ function AppContent() {
 
   // Handle authentication routing
   if (location.pathname === '/auth') {
-    return <AuthWrapper onAuthSuccess={() => window.location.href = '/'} />;
+    return <AuthWrapper onAuthSuccess={() => { reInitAuth(); navigate('/', { replace: true }); }} />;
   }
 
   // Show loading state
@@ -153,8 +167,7 @@ function AppContent() {
 
   // Redirect to auth if not authenticated (except for auth page)
   if (!currentUser) {
-    window.location.href = '/auth';
-    return null;
+    return <Navigate to="/auth" replace />;
   }
 
   // Format currency helper
@@ -455,7 +468,7 @@ function AppContent() {
       ? productManagementHeader
       : location.pathname === '/'
         ? posTerminalHeader
-        : null;
+        : null; // Other pages handle their own headers internally
 
   return (
     <AppLayout headerContent={headerContent}>
@@ -463,6 +476,7 @@ function AppContent() {
         <Route path="/" element={<POSDashboard ref={posDashboardRef} />} />
         <Route path="/transactions" element={<TransactionsPage />} />
         <Route path="/products" element={<ProductManagement ref={productManagementRef} />} />
+        <Route path="/receive" element={<ReceiveItemsPage />} />
         <Route path="/eod" element={<POSEODDashboard />} />
         <Route path="/auth" element={<AuthWrapper onAuthSuccess={() => window.location.href = '/'} />} />
         <Route path="*" element={<Navigate to="/" replace />} />

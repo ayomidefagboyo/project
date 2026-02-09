@@ -14,10 +14,10 @@ import {
   Receipt,
   Calendar,
   LogOut,
+  Truck,
 } from 'lucide-react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useOutlet } from '../../contexts/OutletContext';
-import { authService } from '@/lib/auth';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -48,6 +48,13 @@ const navItems = [
     color: 'purple',
   },
   {
+    path: '/receive',
+    label: 'Receive Items',
+    sublabel: 'Vendor Invoices',
+    icon: Truck,
+    color: 'teal',
+  },
+  {
     path: '/eod',
     label: 'End of Day',
     sublabel: 'Close & Reconcile',
@@ -60,6 +67,7 @@ const colorMap: Record<string, { active: string; idle: string; icon: string; tex
   green:  { active: 'bg-green-100  border-green-300', idle: 'hover:bg-green-50',  icon: 'bg-green-600',  text: 'text-green-900',  sub: 'text-green-600' },
   blue:   { active: 'bg-blue-100   border-blue-300',  idle: 'hover:bg-blue-50',   icon: 'bg-blue-600',   text: 'text-blue-900',   sub: 'text-blue-600' },
   purple: { active: 'bg-purple-100 border-purple-300', idle: 'hover:bg-purple-50', icon: 'bg-purple-600', text: 'text-purple-900', sub: 'text-purple-600' },
+  teal:   { active: 'bg-teal-100   border-teal-300',  idle: 'hover:bg-teal-50',   icon: 'bg-teal-600',   text: 'text-teal-900',   sub: 'text-teal-600' },
   amber:  { active: 'bg-amber-100  border-amber-300', idle: 'hover:bg-amber-50',  icon: 'bg-amber-600',  text: 'text-amber-900',  sub: 'text-amber-600' },
 };
 
@@ -67,20 +75,12 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent }) => {
   const { currentUser, currentOutlet } = useOutlet();
   const [showSidebar, setShowSidebar] = useState(false);
   const location = useLocation();
-  const navigate = useNavigate();
 
-  // Clock out handler
-  const handleClockOut = async () => {
-    try {
-      const { error } = await authService.signOut();
-      if (!error) {
-        navigate('/auth', { replace: true });
-      } else {
-        console.error('Clock out error:', error);
-      }
-    } catch (err) {
-      console.error('Clock out error:', err);
-    }
+  // Clock out handler – returns to staff auth (PIN entry), NOT main sign-in
+  const handleClockOut = () => {
+    localStorage.removeItem('pos_staff_session');
+    // Dispatch event so App.tsx can reset terminal phase to staff_auth
+    window.dispatchEvent(new CustomEvent('pos-staff-logout'));
   };
 
   // Allow header cashier button to trigger clock-out via custom event

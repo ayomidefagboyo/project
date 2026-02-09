@@ -1026,51 +1026,105 @@ async def print_receipt(
         
         transaction = tx_result.data[0]
         
-        # Get outlet and business info
+        # Get outlet info
         outlet_result = supabase.table('outlets').select('*').eq('id', transaction['outlet_id']).execute()
         outlet = outlet_result.data[0] if outlet_result.data else None
-        
+
+        # Get business settings (logo, tax number, business name)
+        biz_settings = None
+        if outlet:
+            biz_result = supabase.table('business_settings').select('*').eq('outlet_id', outlet['id']).execute()
+            biz_settings = biz_result.data[0] if biz_result.data else None
+
         # Get cashier info
         cashier_result = supabase.table('users').select('name').eq('id', transaction['cashier_id']).execute()
         cashier_name = cashier_result.data[0]['name'] if cashier_result.data else 'Cashier'
-        
-        # Generate receipt content (formatted for thermal printer)
+
+        # Determine currency symbol
+        currency = (biz_settings or {}).get('currency', (outlet or {}).get('currency', 'NGN'))
+        currency_symbol = {'NGN': '₦', 'USD': '$', 'GBP': '£', 'EUR': '€', 'GHS': '₵', 'KES': 'KSh'}.get(currency, currency + ' ')
+
+        # Format amounts with currency
+        def fmt(amount):
+            return f"{currency_symbol}{amount:,.2f}"
+
+        # Generate receipt content (formatted for thermal printer 58mm / 42 chars)
+        W = 42
         receipt_lines = []
-        receipt_lines.append("=" * 42)  # 42 chars for 58mm thermal printer
-        receipt_lines.append(f"{outlet['name'] if outlet else 'STORE'}")
+        receipt_lines.append("=" * W)
+
+        # Business header
+        biz_name = (biz_settings or {}).get('business_name') or (outlet or {}).get('name', 'STORE')
+        receipt_lines.append(biz_name.center(W))
         if outlet and outlet.get('address'):
-            receipt_lines.append(f"{outlet['address'].get('street', '')}")
-            receipt_lines.append(f"{outlet['address'].get('city', '')}")
-        receipt_lines.append(f"Tel: {outlet['phone'] if outlet else 'N/A'}")
-        receipt_lines.append("=" * 42)
+            addr = outlet['address']
+            street = addr.get('street', '')
+            city = addr.get('city', '')
+            state = addr.get('state', '')
+            if street:
+                receipt_lines.append(street.center(W))
+            if city or state:
+                receipt_lines.append(f"{city}{', ' + state if state else ''}".center(W))
+        if outlet and outlet.get('phone'):
+            receipt_lines.append(f"Tel: {outlet['phone']}".center(W))
+        if outlet and outlet.get('email'):
+            receipt_lines.append(outlet['email'].center(W))
+        tax_number = (biz_settings or {}).get('tax_number')
+        if tax_number:
+            receipt_lines.append(f"TIN: {tax_number}".center(W))
+
+        receipt_lines.append("=" * W)
         receipt_lines.append(f"Receipt: {transaction['transaction_number']}")
-        receipt_lines.append(f"Date: {datetime.fromisoformat(transaction['transaction_date'].replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M:%S')}")
+        try:
+            tx_dt = datetime.fromisoformat(transaction['transaction_date'].replace('Z', '+00:00'))
+            receipt_lines.append(f"Date: {tx_dt.strftime('%d/%m/%Y  %I:%M %p')}")
+        except (ValueError, KeyError):
+            receipt_lines.append(f"Date: {transaction.get('transaction_date', 'N/A')}")
         receipt_lines.append(f"Cashier: {cashier_name}")
-        receipt_lines.append("-" * 42)
-        
+        if transaction.get('customer_name'):
+            receipt_lines.append(f"Customer: {transaction['customer_name']}")
+        receipt_lines.append("-" * W)
+
+        # Column header
+        receipt_lines.append(f"{'Item':<20} {'Qty':>4} {'Price':>7} {'Total':>8}")
+        receipt_lines.append("-" * W)
+
         # Items
         for item in transaction.get('pos_transaction_items', []):
-            item_name = item['product_name'][:20]  # Truncate for thermal printer
-            qty = item['quantity']
-            price = item['unit_price']
-            total = item['line_total']
-            receipt_lines.append(f"{item_name}")
-            receipt_lines.append(f"  {qty} x {price:,.2f} = {total:,.2f}")
-        
-        receipt_lines.append("-" * 42)
-        receipt_lines.append(f"Subtotal:        {transaction['subtotal']:>10,.2f}")
-        if transaction['discount_amount'] > 0:
-            receipt_lines.append(f"Discount:        {transaction['discount_amount']:>10,.2f}")
-        receipt_lines.append(f"Tax:             {transaction['tax_amount']:>10,.2f}")
-        receipt_lines.append("=" * 42)
-        receipt_lines.append(f"TOTAL:           {transaction['total_amount']:>10,.2f}")
-        receipt_lines.append("=" * 42)
+            item_name = item['product_name'][:20]
+            qty = float(item['quantity'])
+            price = float(item['unit_price'])
+            total = float(item['line_total'])
+            # If name is long, put it on its own line
+            if len(item['product_name']) > 20:
+                receipt_lines.append(item['product_name'][:W])
+                receipt_lines.append(f"{'':20} {qty:>4g} {price:>7,.2f} {total:>8,.2f}")
+            else:
+                receipt_lines.append(f"{item_name:<20} {qty:>4g} {price:>7,.2f} {total:>8,.2f}")
+
+        receipt_lines.append("-" * W)
+        receipt_lines.append(f"{'Subtotal:':<22} {fmt(transaction['subtotal']):>18}")
+        if float(transaction.get('discount_amount', 0)) > 0:
+            receipt_lines.append(f"{'Discount:':<22} {'-' + fmt(transaction['discount_amount']):>18}")
+        if float(transaction.get('tax_amount', 0)) > 0:
+            receipt_lines.append(f"{'Tax:':<22} {fmt(transaction['tax_amount']):>18}")
+        receipt_lines.append("=" * W)
+        receipt_lines.append(f"{'TOTAL:':<22} {fmt(transaction['total_amount']):>18}")
+        receipt_lines.append("=" * W)
+
+        # Payment details
         receipt_lines.append(f"Payment: {transaction['payment_method'].upper()}")
-        if transaction.get('tendered_amount'):
-            receipt_lines.append(f"Tendered:        {transaction['tendered_amount']:>10,.2f}")
-            receipt_lines.append(f"Change:          {transaction['change_amount']:>10,.2f}")
-        receipt_lines.append("=" * 42)
-        receipt_lines.append("Thank you for your business!")
+        if transaction.get('tendered_amount') and float(transaction.get('tendered_amount', 0)) > 0:
+            receipt_lines.append(f"{'Tendered:':<22} {fmt(transaction['tendered_amount']):>18}")
+            receipt_lines.append(f"{'Change:':<22} {fmt(transaction.get('change_amount', 0)):>18}")
+
+        # Split payment info (stored in notes)
+        if transaction.get('notes') and 'split' in str(transaction.get('notes', '')).lower():
+            receipt_lines.append(f"({transaction['notes'][:W]})")
+
+        receipt_lines.append("=" * W)
+        receipt_lines.append("Thank you for your patronage!".center(W))
+        receipt_lines.append(f"Powered by Compazz POS".center(W))
         receipt_lines.append("")
         receipt_lines.append("")
         
