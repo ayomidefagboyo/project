@@ -6,6 +6,7 @@ import {
 import { staffService } from '@/lib/staffService';
 import type { StaffProfile, StaffProfileCreate, UserRole } from '@/types';
 import { useOutlet } from '@/contexts/OutletContext';
+import { useToast } from '../../ui/Toast';
 
 interface StaffManagementModalProps {
   isOpen: boolean;
@@ -22,6 +23,7 @@ interface AddStaffFormData {
 
 const StaffManagementModal: React.FC<StaffManagementModalProps> = ({ isOpen, onClose }) => {
   const { currentOutlet } = useOutlet();
+  const { success, error, warning } = useToast();
   const [staffProfiles, setStaffProfiles] = useState<StaffProfile[]>([]);
   const [loading, setLoading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -67,7 +69,7 @@ const StaffManagementModal: React.FC<StaffManagementModalProps> = ({ isOpen, onC
       setStaffProfiles(response.profiles);
     } catch (error) {
       console.error('Error loading staff profiles:', error);
-      alert('Failed to load staff profiles');
+      error('Failed to load staff profiles');
     } finally {
       setLoading(false);
     }
@@ -101,7 +103,7 @@ const StaffManagementModal: React.FC<StaffManagementModalProps> = ({ isOpen, onC
 
     const validationError = validateForm();
     if (validationError) {
-      alert(validationError);
+      warning(validationError);
       return;
     }
 
@@ -116,7 +118,7 @@ const StaffManagementModal: React.FC<StaffManagementModalProps> = ({ isOpen, onC
           role: formData.role,
           permissions: formData.permissions
         });
-        alert('Staff profile updated successfully!');
+        success('Staff profile updated successfully!');
       } else {
         // Create new profile
         const createData: StaffProfileCreate = {
@@ -128,7 +130,7 @@ const StaffManagementModal: React.FC<StaffManagementModalProps> = ({ isOpen, onC
         };
 
         await staffService.createStaffProfile(createData);
-        alert('Staff profile created successfully!');
+        success('Staff profile created successfully!');
       }
 
       // Reset form and reload
@@ -145,7 +147,7 @@ const StaffManagementModal: React.FC<StaffManagementModalProps> = ({ isOpen, onC
 
     } catch (error: any) {
       console.error('Error saving staff profile:', error);
-      alert(error.message || 'Failed to save staff profile');
+      error(error.message || 'Failed to save staff profile');
     } finally {
       setLoading(false);
     }
@@ -171,11 +173,11 @@ const StaffManagementModal: React.FC<StaffManagementModalProps> = ({ isOpen, onC
     try {
       setLoading(true);
       await staffService.deleteStaffProfile(profileId);
-      alert('Staff profile deactivated successfully');
+      success('Staff profile deactivated successfully');
       await loadStaffProfiles();
     } catch (error: any) {
       console.error('Error deleting staff profile:', error);
-      alert(error.message || 'Failed to deactivate staff profile');
+      error(error.message || 'Failed to deactivate staff profile');
     } finally {
       setLoading(false);
     }
@@ -189,11 +191,11 @@ const StaffManagementModal: React.FC<StaffManagementModalProps> = ({ isOpen, onC
     try {
       setLoading(true);
       await staffService.resetFailedAttempts(profileId);
-      alert('Failed login attempts reset successfully');
+      success('Failed login attempts reset successfully');
       await loadStaffProfiles();
     } catch (error: any) {
       console.error('Error resetting failed attempts:', error);
-      alert(error.message || 'Failed to reset failed attempts');
+      error(error.message || 'Failed to reset failed attempts');
     } finally {
       setLoading(false);
     }

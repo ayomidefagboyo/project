@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Save } from 'lucide-react';
 import { posService } from '@/lib/posService';
 import { useOutlet } from '@/contexts/OutletContext';
+import { useToast } from '../../ui/Toast';
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -11,6 +12,7 @@ interface AddProductModalProps {
 
 const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSuccess }) => {
   const { currentOutlet } = useOutlet();
+  const { success, error } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -103,7 +105,7 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
         localStorage.setItem('mockProducts', JSON.stringify(existingProducts));
       }
 
-      alert('Product added successfully!');
+      success('Product added successfully!');
       onSuccess();
       onClose();
 
@@ -123,7 +125,7 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
       });
     } catch (error) {
       console.error('Error adding product:', error);
-      alert('Failed to add product. Please try again.');
+      error('Failed to add product. Please try again.');
     } finally {
       setIsLoading(false);
     }

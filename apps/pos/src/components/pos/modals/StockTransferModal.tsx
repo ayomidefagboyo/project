@@ -4,6 +4,7 @@ import { X, RotateCcw, Plus, Minus } from 'lucide-react';
 import { posService } from '@/lib/posService';
 import type { POSProduct } from '@/lib/posService';
 import { useOutlet } from '@/contexts/OutletContext';
+import { useToast } from '../../ui/Toast';
 
 interface TransferItem {
   product_id: string;
@@ -21,6 +22,7 @@ interface StockTransferModalProps {
 
 const StockTransferModal: React.FC<StockTransferModalProps> = ({ isOpen, onClose, onSuccess }) => {
   const { currentOutlet, userOutlets } = useOutlet();
+  const { success, error, warning } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [products, setProducts] = useState<POSProduct[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<string>('');
@@ -54,7 +56,7 @@ const StockTransferModal: React.FC<StockTransferModalProps> = ({ isOpen, onClose
       }
     } catch (error) {
       console.error('Error loading products:', error);
-      alert('Failed to load products');
+      error('Failed to load products');
     }
   };
 
@@ -66,7 +68,7 @@ const StockTransferModal: React.FC<StockTransferModalProps> = ({ isOpen, onClose
 
     // Check if product already in transfer list
     if (transferItems.some(item => item.product_id === selectedProduct)) {
-      alert('Product already added to transfer');
+      warning('Product already added to transfer');
       return;
     }
 
@@ -95,14 +97,14 @@ const StockTransferModal: React.FC<StockTransferModalProps> = ({ isOpen, onClose
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentOutlet?.id || !transferInfo.to_outlet_id || transferItems.length === 0) {
-      alert('Please fill in all required fields and add at least one item');
+      warning('Please fill in all required fields and add at least one item');
       return;
     }
 
     // Validate quantities
     const invalidItems = transferItems.filter(item => item.quantity > item.available_stock);
     if (invalidItems.length > 0) {
-      alert('Some items have quantities exceeding available stock. Please check and try again.');
+      warning('Some items have quantities exceeding available stock. Please check and try again.');
       return;
     }
 
@@ -119,7 +121,7 @@ const StockTransferModal: React.FC<StockTransferModalProps> = ({ isOpen, onClose
         notes: transferInfo.notes
       });
 
-      alert(`Stock transfer created successfully! ${transferItems.length} items transferred.`);
+      success(`Stock transfer created successfully! ${transferItems.length} items transferred.`);
       onSuccess();
       onClose();
 
@@ -132,7 +134,7 @@ const StockTransferModal: React.FC<StockTransferModalProps> = ({ isOpen, onClose
       });
     } catch (error) {
       console.error('Error creating transfer:', error);
-      alert('Failed to create stock transfer. Please try again.');
+      error('Failed to create stock transfer. Please try again.');
     } finally {
       setIsLoading(false);
     }

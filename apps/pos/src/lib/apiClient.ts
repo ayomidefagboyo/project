@@ -2,6 +2,8 @@
  * HTTP client for FastAPI backend communication
  */
 
+import logger from './logger';
+
 
 
 export interface ApiResponse<T = any> {
@@ -31,9 +33,9 @@ class ApiClient {
     this.baseUrl = envUrl;
 
     // Debug logging
-    console.log('=== ApiClient Debug ===');
-    console.log('API Base URL:', this.baseUrl);
-    console.log('======================');
+    logger.log('=== ApiClient Debug ===');
+    logger.log('API Base URL:', this.baseUrl);
+    logger.log('======================');
   }
 
   /**
@@ -59,7 +61,7 @@ class ApiClient {
       const { data: { session } } = await supabase.auth.getSession();
       return session?.access_token || null;
     } catch (error) {
-      console.error('Error getting Supabase session:', error);
+      logger.error('Error getting Supabase session:', error);
       return null;
     }
   }
@@ -75,9 +77,9 @@ class ApiClient {
     const token = await this.getStoredToken();
     if (token) {
       headers.Authorization = `Bearer ${token}`;
-      console.debug('🔐 Auth token found and added to headers');
+      logger.debug('🔐 Auth token found and added to headers');
     } else {
-      console.debug('⚠️ No auth token found in localStorage or Supabase session');
+      logger.debug('⚠️ No auth token found in localStorage or Supabase session');
     }
 
     return headers;

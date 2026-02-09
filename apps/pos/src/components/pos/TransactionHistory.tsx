@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Search, Eye, RotateCcw } from 'lucide-react';
 import { posService, PaymentMethod } from '../../lib/posService';
+import { useToast } from '../ui/Toast';
 
 interface Transaction {
   id: string;
@@ -206,20 +207,21 @@ const TransactionDetailsModal: React.FC<TransactionDetailsModalProps> = ({
 }) => {
   const [showVoidConfirm, setShowVoidConfirm] = useState(false);
   const [voidReason, setVoidReason] = useState('');
+  const { success, error } = useToast();
 
   const handleVoid = async () => {
     if (!voidReason.trim()) {
-      alert('Please provide a reason for voiding this transaction');
+      error('Please provide a reason for voiding this transaction');
       return;
     }
 
     try {
       await posService.voidTransaction(transaction.id, voidReason);
-      alert('Transaction voided successfully. Stock quantities have been restored.');
+      success('Transaction voided successfully. Stock quantities have been restored.');
       onVoid();
       setShowVoidConfirm(false);
     } catch (error: any) {
-      alert(`Failed to void transaction: ${error.message}`);
+      error(`Failed to void transaction: ${error.message}`);
     }
   };
 

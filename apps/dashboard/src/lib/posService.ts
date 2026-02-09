@@ -545,6 +545,19 @@ class POSService {
     }
   }
 
+  /**
+   * Void a transaction
+   */
+  async voidTransaction(transactionId: string, reason: string): Promise<void> {
+    try {
+      await apiClient.put(`${this.baseUrl}/transactions/${transactionId}/void`, {
+        void_reason: reason
+      });
+    } catch (error) {
+      logger.error('Error voiding transaction:', error);
+      throw this.handleError(error);
+    }
+  }
 
   // ===============================================
   // STATISTICS AND REPORTING
@@ -1357,6 +1370,30 @@ class POSService {
     }
   }
 
+  /**
+   * Create a new customer
+   */
+  async createCustomer(data: {
+    outlet_id: string;
+    name: string;
+    phone: string;
+    email?: string;
+    address?: string;
+  }): Promise<any> {
+    try {
+      const response = await apiClient.post<any>(`${this.baseUrl}/customers?outlet_id=${data.outlet_id}`, {
+        name: data.name,
+        phone: data.phone,
+        email: data.email,
+        address: data.address
+      });
+      if (!response.data) throw new Error(response.error || 'Failed to create customer');
+      return response.data;
+    } catch (error) {
+      logger.error('Error creating customer:', error);
+      throw this.handleError(error);
+    }
+  }
 
   /**
    * EOD SALES BREAKDOWN METHODS

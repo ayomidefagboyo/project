@@ -7,18 +7,86 @@ import AppLayout from './components/layout/AppLayout';
 import { OutletProvider, useOutlet } from './contexts/OutletContext';
 import { Upload, Download, Plus, Wifi, WifiOff } from 'lucide-react';
 import { posService, type POSProduct } from './lib/posService';
+import { useToast } from './components/ui/Toast';
+import TerminalSetup from './components/setup/TerminalSetup';
+import StaffAuthentication from './components/auth/StaffAuthentication';
+import AuthWrapper from './components/auth/AuthWrapper';
+
+interface TerminalConfig {
+  outlet_id: string;
+  outlet_name: string;
+  initialized_by: string;
+  initialized_at: string;
+}
+
+interface StaffProfile {
+  id: string;
+  staff_code: string;
+  display_name: string;
+  role: string;
+  permissions: string[];
+  is_active: boolean;
+  created_at: string;
+}
 
 function AppContent() {
   const location = useLocation();
-  const { currentOutlet, currentUser } = useOutlet();
+  const { currentOutlet, currentUser, isLoading } = useOutlet();
   const productManagementRef = useRef<ProductManagementHandle>(null);
   const posDashboardRef = useRef<POSDashboardHandle>(null);
+  const { error } = useToast();
+
+  // Terminal State
+  const [terminalConfig, setTerminalConfig] = useState<TerminalConfig | null>(null);
+  const [currentStaff, setCurrentStaff] = useState<StaffProfile | null>(null);
+  const [terminalPhase, setTerminalPhase] = useState<'setup' | 'staff_auth' | 'operational'>('setup');
 
   // POS Search State
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<POSProduct[]>([]);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  // Check terminal configuration on mount
+  useEffect(() => {
+    const storedConfig = localStorage.getItem('pos_terminal_config');
+    const storedStaffSession = localStorage.getItem('pos_staff_session');
+
+    if (storedConfig) {
+      try {
+        const config = JSON.parse(storedConfig);
+        setTerminalConfig(config);
+
+        // Check if staff is already authenticated
+        if (storedStaffSession) {
+          try {
+            const staffSession = JSON.parse(storedStaffSession);
+            // Check if session is still valid (24 hours)
+            if (new Date(staffSession.expires_at) > new Date()) {
+              setCurrentStaff(staffSession.staff_profile);
+              setTerminalPhase('operational');
+            } else {
+              // Session expired, clear it
+              localStorage.removeItem('pos_staff_session');
+              setTerminalPhase('staff_auth');
+            }
+          } catch (err) {
+            console.error('Invalid staff session:', err);
+            localStorage.removeItem('pos_staff_session');
+            setTerminalPhase('staff_auth');
+          }
+        } else {
+          setTerminalPhase('staff_auth');
+        }
+      } catch (err) {
+        console.error('Invalid terminal config:', err);
+        localStorage.removeItem('pos_terminal_config');
+        setTerminalPhase('setup');
+      }
+    } else {
+      setTerminalPhase('setup');
+    }
+  }, []);
 
   // Monitor online status
   useEffect(() => {
@@ -33,6 +101,54 @@ function AppContent() {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  // Helper functions
+  const handleTerminalSetup = (config: TerminalConfig) => {
+    setTerminalConfig(config);
+    setTerminalPhase('staff_auth');
+  };
+
+  const handleStaffAuthenticated = (staff: StaffProfile) => {
+    setCurrentStaff(staff);
+    setTerminalPhase('operational');
+  };
+
+  const handleReconfigureTerminal = () => {
+    localStorage.removeItem('pos_terminal_config');
+    localStorage.removeItem('pos_staff_session');
+    setTerminalConfig(null);
+    setCurrentStaff(null);
+    setTerminalPhase('setup');
+  };
+
+  const handleStaffLogout = () => {
+    localStorage.removeItem('pos_staff_session');
+    setCurrentStaff(null);
+    setTerminalPhase('staff_auth');
+  };
+
+  // Handle authentication routing
+  if (location.pathname === '/auth') {
+    return <AuthWrapper onAuthSuccess={() => window.location.href = '/'} />;
+  }
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Redirect to auth if not authenticated (except for auth page)
+  if (!currentUser) {
+    window.location.href = '/auth';
+    return null;
+  }
 
   // Format currency helper
   const formatCurrency = (amount: number): string => {
@@ -91,7 +207,7 @@ function AppContent() {
       }
     } catch (error) {
       console.error('Barcode scan error:', error);
-      alert('Product not found. Please try again.');
+      error('Product not found. Please try again.');
     }
   };
 
@@ -101,7 +217,9 @@ function AppContent() {
       {/* Search Bar with Dropdown */}
       <div className="relative flex-1 max-w-2xl">
         <input
-          type="text"
+          type="search"
+          id="pos-product-search-input"
+          name="product-search-query"
           placeholder="Find Products - Enter barcode or product name..."
           value={searchQuery}
           onChange={(e) => handleSearchChange(e.target.value)}
@@ -129,6 +247,14 @@ function AppContent() {
             if (searchResults.length > 0) setShowSearchDropdown(true);
           }}
           className="w-full px-4 py-2.5 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+          autoComplete="chrome-off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck="false"
+          data-form-type="other"
+          data-lpignore="true"
+          role="combobox"
+          aria-autocomplete="list"
           autoFocus
         />
 
@@ -192,19 +318,16 @@ function AppContent() {
           + Add Customer
         </button>
 
-        {/* Cashier - first name only, clickable for clock-out (reuses sidebar Clock Out logic) */}
-        {currentUser && (
+        {/* Staff Member - show current staff if authenticated */}
+        {currentStaff && (
           <button
             type="button"
             className="px-4 py-2 rounded-full bg-gray-100 text-gray-700 text-sm font-semibold whitespace-nowrap active:scale-95 transition-transform"
-            onClick={() => {
-              // Delegate to sidebar clock in/out button via custom event
-              window.dispatchEvent(new CustomEvent('pos-clock-out'));
-            }}
+            onClick={handleStaffLogout}
           >
-            Cashier:{' '}
+            {currentStaff.role}:{' '}
             <span className="font-semibold">
-              {currentUser.name?.split(' ')[0] || currentUser.name}
+              {currentStaff.display_name.split(' ')[0] || currentStaff.display_name}
             </span>
           </button>
         )}
@@ -262,6 +385,22 @@ function AppContent() {
     </div>
   );
 
+  // Handle different terminal phases
+  if (terminalPhase === 'setup') {
+    return <TerminalSetup onSetupComplete={handleTerminalSetup} />;
+  }
+
+  if (terminalPhase === 'staff_auth') {
+    return (
+      <StaffAuthentication
+        terminalConfig={terminalConfig!}
+        onStaffAuthenticated={handleStaffAuthenticated}
+        onReconfigure={handleReconfigureTerminal}
+      />
+    );
+  }
+
+  // Operational phase - normal POS functionality
   const headerContent =
     location.pathname === '/products'
       ? productManagementHeader
@@ -275,6 +414,7 @@ function AppContent() {
         <Route path="/" element={<POSDashboard ref={posDashboardRef} />} />
         <Route path="/products" element={<ProductManagement ref={productManagementRef} />} />
         <Route path="/eod" element={<POSEODDashboard />} />
+        <Route path="/auth" element={<AuthWrapper onAuthSuccess={() => window.location.href = '/'} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppLayout>

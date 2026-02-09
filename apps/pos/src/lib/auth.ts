@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import logger from './logger';
 import type { LoginCredentials, AuthResponse, Permission, UserInvitation, AuthUser } from '@/types';
 
 // Minimal signup - name, email, password + optional company
@@ -86,7 +87,7 @@ class AuthService {
     try {
       // Safe logging - no sensitive data
       if (import.meta.env.VITE_DEBUG === 'true') {
-        console.log('Starting owner signup process');
+        logger.log('Starting owner signup process');
       }
 
       // Create auth user with minimal metadata
@@ -102,11 +103,11 @@ class AuthService {
       });
 
       if (error) {
-        console.error('Supabase auth signup error:', error);
+        logger.error('Supabase auth signup error:', error);
         throw error;
       }
 
-      console.log('Auth user created successfully:', data.user?.id);
+      logger.log('Auth user created successfully:', data.user?.id);
 
       if (data.user) {
         // The database trigger will automatically create:
@@ -123,11 +124,11 @@ class AuthService {
           .single();
 
         if (profileError) {
-          console.error('Error fetching created profile:', profileError);
+          logger.error('Error fetching created profile:', profileError);
           throw profileError;
         }
 
-        console.log('Profile created by trigger:', profile);
+        logger.log('Profile created by trigger:', profile);
 
         const authUser: AuthUser = {
           id: data.user.id,
@@ -139,13 +140,13 @@ class AuthService {
           isOwner: true,
         };
 
-        console.log('User signup completed successfully:', authUser);
+        logger.log('User signup completed successfully:', authUser);
         return { user: authUser, error: null };
       }
 
       return { user: null, error: 'No user data received' };
     } catch (error) {
-      console.error('Owner signup error details:', error);
+      logger.error('Owner signup error details:', error);
       return {
         user: null,
         error: error instanceof Error ? error.message : 'Owner signup failed'
@@ -189,7 +190,7 @@ class AuthService {
           .single();
 
         if (outletError) {
-          console.warn('Could not fetch outlet details for email:', outletError);
+          logger.warn('Could not fetch outlet details for email:', outletError);
         }
 
         // Get inviter details
@@ -200,12 +201,12 @@ class AuthService {
           .single();
 
         if (inviterError) {
-          console.warn('Could not fetch inviter details for email:', inviterError);
+          logger.warn('Could not fetch inviter details for email:', inviterError);
         }
 
         // In a real app, you would send an email here
         const inviteLink = `${import.meta.env.VITE_APP_URL}/invite/${inviteRecord.id}`;
-        console.log('Team member invitation created:', {
+        logger.log('Team member invitation created:', {
           email: inviteData.email,
           inviteLink,
           outlet: outlet?.name,
@@ -214,12 +215,12 @@ class AuthService {
 
         return { data: inviteRecord, error: null };
       } catch (emailError) {
-        console.error('Error sending invitation email:', emailError);
+        logger.error('Error sending invitation email:', emailError);
         // Don't fail the invitation creation if email fails
         return { data: inviteRecord, error: null };
       }
     } catch (error) {
-      console.error('Invite team member error:', error);
+      logger.error('Invite team member error:', error);
       return {
         data: null,
         error: error instanceof Error ? error.message : 'Failed to create invitation'
@@ -292,7 +293,7 @@ class AuthService {
 
       return { user: null, error: 'No user data received' };
     } catch (error) {
-      console.error('Signup from invite error:', error);
+      logger.error('Signup from invite error:', error);
       return {
         user: null,
         error: error instanceof Error ? error.message : 'Signup from invitation failed'
@@ -316,7 +317,7 @@ class AuthService {
       // This method initiates the OAuth flow
       return { user: null, error: null };
     } catch (error) {
-      console.error('Google sign-in error:', error);
+      logger.error('Google sign-in error:', error);
       return {
         user: null,
         error: error instanceof Error ? error.message : 'Google sign-in failed'
@@ -345,7 +346,7 @@ class AuthService {
         if (profileError) {
           // If user doesn't exist in users table (OAuth user), create profile
           if (profileError.details === 'The result contains 0 rows') {
-            console.log('Creating profile for OAuth user during sign in:', data.user.id);
+            logger.log('Creating profile for OAuth user during sign in:', data.user.id);
 
             // Extract name from user metadata (Google OAuth)
             const fullName = data.user.user_metadata?.full_name || data.user.user_metadata?.name || data.user.email?.split('@')[0] || '';
@@ -378,7 +379,7 @@ class AuthService {
               .single();
 
             if (outletError) {
-              console.error('Outlet creation error during OAuth:', outletError);
+              logger.error('Outlet creation error during OAuth:', outletError);
               throw outletError;
             }
 
@@ -398,7 +399,7 @@ class AuthService {
               });
 
             if (settingsError) {
-              console.error('Business settings creation error during OAuth:', settingsError);
+              logger.error('Business settings creation error during OAuth:', settingsError);
               throw settingsError;
             }
 
@@ -418,7 +419,7 @@ class AuthService {
               .single();
 
             if (createError) {
-              console.error('User profile creation error during OAuth:', createError);
+              logger.error('User profile creation error during OAuth:', createError);
               throw createError;
             }
 
@@ -453,7 +454,7 @@ class AuthService {
 
       return { user: null, error: 'No user data received' };
     } catch (error) {
-      console.error('Sign in error:', error);
+      logger.error('Sign in error:', error);
       return {
         user: null,
         error: error instanceof Error ? error.message : 'Sign in failed'
@@ -468,7 +469,7 @@ class AuthService {
       if (error) throw error;
       return { error: null };
     } catch (error) {
-      console.error('Sign out error:', error);
+      logger.error('Sign out error:', error);
       return { error: error instanceof Error ? error.message : 'Sign out failed' };
     }
   }
@@ -482,7 +483,7 @@ class AuthService {
       if (error) throw error;
       return { error: null };
     } catch (error) {
-      console.error('Reset password error:', error);
+      logger.error('Reset password error:', error);
       return { error: error instanceof Error ? error.message : 'Reset password failed' };
     }
   }
@@ -494,18 +495,18 @@ class AuthService {
 
       // If there's an invalid refresh token error, clear the session
       if (error && error.message.includes('Invalid Refresh Token')) {
-        console.warn('Invalid refresh token detected, clearing session');
+        logger.warn('Invalid refresh token detected, clearing session');
         await supabase.auth.signOut();
         return { session: null, error: null }; // Return null instead of error to allow fresh login
       }
 
       return { session, error: error ? error.message : null };
     } catch (error) {
-      console.error('Get session error:', error);
+      logger.error('Get session error:', error);
 
       // Handle refresh token errors
       if (error instanceof Error && error.message.includes('Invalid Refresh Token')) {
-        console.warn('Invalid refresh token in catch block, clearing session');
+        logger.warn('Invalid refresh token in catch block, clearing session');
         await supabase.auth.signOut();
         return { session: null, error: null };
       }
@@ -524,7 +525,7 @@ class AuthService {
 
       // Handle refresh token errors
       if (error && error.message.includes('Invalid Refresh Token')) {
-        console.warn('Invalid refresh token in getCurrentUser, clearing session');
+        logger.warn('Invalid refresh token in getCurrentUser, clearing session');
         await supabase.auth.signOut();
         return { user: null, error: null };
       }
@@ -540,14 +541,14 @@ class AuthService {
           .maybeSingle();
 
         if (profileError) {
-          console.error('Error fetching user profile:', profileError);
+          logger.error('Error fetching user profile:', profileError);
           throw profileError;
         }
 
         // If user doesn't exist in users table (OAuth signup), return minimal user info
         // Profile will be created during onboarding flow
         if (!profile) {
-          console.log('No profile found for OAuth user:', user.id, '- user needs onboarding');
+          logger.log('No profile found for OAuth user:', user.id, '- user needs onboarding');
 
           // Extract name from user metadata (Google OAuth)
           const fullName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || '';
@@ -581,11 +582,11 @@ class AuthService {
 
       return { user: null, error: 'No user found' };
     } catch (error) {
-      console.error('Get current user error:', error);
+      logger.error('Get current user error:', error);
 
       // Handle refresh token errors in catch block
       if (error instanceof Error && error.message.includes('Invalid Refresh Token')) {
-        console.warn('Invalid refresh token in catch, clearing session');
+        logger.warn('Invalid refresh token in catch, clearing session');
         await supabase.auth.signOut();
         return { user: null, error: null };
       }
@@ -608,7 +609,7 @@ class AuthService {
       if (error) throw error;
       return { data: data || [], error: null };
     } catch (error) {
-      console.error('Get user outlets error:', error);
+      logger.error('Get user outlets error:', error);
       return {
         data: null,
         error: error instanceof Error ? error.message : 'Failed to get user outlets'
@@ -623,7 +624,7 @@ class AuthService {
       if (error) throw error;
       return { error: null };
     } catch (error) {
-      console.error('Update password error:', error);
+      logger.error('Update password error:', error);
       return { error: error instanceof Error ? error.message : 'Password update failed' };
     }
   }
@@ -639,7 +640,7 @@ class AuthService {
       if (error) throw error;
       return { error: null };
     } catch (error) {
-      console.error('Update user profile error:', error);
+      logger.error('Update user profile error:', error);
       return { error: error instanceof Error ? error.message : 'Profile update failed' };
     }
   }
@@ -728,13 +729,13 @@ class AuthService {
         });
 
       if (profileError) {
-        console.error('User profile creation error:', profileError);
+        logger.error('User profile creation error:', profileError);
         return { error: profileError.message };
       }
 
       return { error: null };
     } catch (error) {
-      console.error('Error creating user profile:', error);
+      logger.error('Error creating user profile:', error);
       return {
         error: error instanceof Error ? error.message : 'Failed to create user profile'
       };
@@ -747,7 +748,7 @@ class AuthService {
       const { data, error } = await supabase.auth.getSession();
 
       if (error) {
-        console.error('OAuth session error:', error);
+        logger.error('OAuth session error:', error);
         return { data: null, error: error.message };
       }
 
@@ -762,7 +763,7 @@ class AuthService {
 
       return { data: null, error: 'No session found' };
     } catch (error) {
-      console.error('Error handling OAuth callback:', error);
+      logger.error('Error handling OAuth callback:', error);
       return {
         data: null,
         error: error instanceof Error ? error.message : 'OAuth callback failed'
@@ -780,13 +781,13 @@ class AuthService {
         .maybeSingle();
 
       if (error) {
-        console.error('Email check error:', error);
+        logger.error('Email check error:', error);
         return { exists: false, error: error.message };
       }
 
       return { exists: !!data, error: null };
     } catch (error) {
-      console.error('Error checking if email exists:', error);
+      logger.error('Error checking if email exists:', error);
       return {
         exists: false,
         error: error instanceof Error ? error.message : 'Failed to check email'

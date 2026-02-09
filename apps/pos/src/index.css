@@ -4,38 +4,38 @@
 
 @layer base {
   :root {
-    /* Premium Swiss Spa Design System - Desktop Touch POS */
+    /* Premium Swiss spa palette - Neutral grays with accent */
     --background: 0 0% 100%;
-    --foreground: 212 27% 9%;
+    --foreground: 0 0% 9%;
 
     --card: 0 0% 100%;
-    --card-foreground: 212 27% 9%;
+    --card-foreground: 0 0% 9%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 212 27% 9%;
+    --popover-foreground: 0 0% 9%;
 
-    /* Primary - Refined indigo for accents */
-    --primary: 234 89% 64%;
+    /* Primary - Sophisticated deep blue-gray */
+    --primary: 215 28% 17%;
     --primary-foreground: 0 0% 98%;
 
-    /* Secondary - Pure minimalism */
-    --secondary: 216 12% 97%;
-    --secondary-foreground: 213 27% 84%;
+    /* Secondary - Warm minimal beige */
+    --secondary: 20 14% 96%;
+    --secondary-foreground: 215 25% 27%;
 
-    /* Muted - Subtle backgrounds */
-    --muted: 214 32% 91%;
-    --muted-foreground: 215 16% 47%;
+    /* Muted - Light neutral */
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 45%;
 
-    /* Accent - Selection states */
-    --accent: 234 100% 97%;
-    --accent-foreground: 234 89% 64%;
+    /* Accent - Subtle warm accent */
+    --accent: 25 100% 97%;
+    --accent-foreground: 215 25% 27%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 234 89% 64%;
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 215 28% 17%;
 
     /* Fixed POS Layout Dimensions */
     --pos-header-height: 80px;

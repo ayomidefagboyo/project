@@ -18,6 +18,7 @@ import { staffService } from '../../lib/staffService';
 import type { StaffProfile, StaffAuthResponse } from '../../types';
 import { offlineDatabase } from '../../lib/offlineDatabase';
 import { ToastContainer, useToast } from '../ui/Toast';
+import logger from '../../lib/logger';
 
 // Sub-components (we'll create these next)
 import POSProductGrid from './POSProductGrid';
@@ -35,6 +36,8 @@ import StockReportModal from './modals/StockReportModal';
 // Staff Management Modals
 import StaffManagementModal from './modals/StaffManagementModal';
 import PinEntryModal from './PinEntryModal';
+import NoStaffMessage from './NoStaffMessage';
+import ClockOutConfirmModal from '../modals/ClockOutConfirmModal';
 import LoginForm from '../auth/LoginForm';
 import TransactionHistory from './TransactionHistory';
 
@@ -60,7 +63,9 @@ interface HeldSale {
   cashier_name: string;
 }
 
-const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
+interface POSDashboardProps {}
+
+const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) => {
   // Context and state
   const { currentUser, currentOutlet } = useOutlet();
   const { toasts, success, error, removeToast } = useToast();
@@ -108,9 +113,29 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
   // Staff Management States
   const [staffProfiles, setStaffProfiles] = useState<StaffProfile[]>([]);
   const [currentStaff, setCurrentStaff] = useState<StaffProfile | null>(null);
+  const [isStaffAuthenticated, setIsStaffAuthenticated] = useState(false);
+  const [showClockOutModal, setShowClockOutModal] = useState(false);
   const [showStaffManagement, setShowStaffManagement] = useState(false);
   const [showManagerLogin, setShowManagerLogin] = useState(false);
-  const [isStaffAuthenticated, setIsStaffAuthenticated] = useState(false);
+
+  // Simple staff loading function
+  const loadStaffProfiles = async () => {
+    if (!currentOutlet?.id) return;
+    try {
+      const response = await staffService.getOutletStaff(currentOutlet.id);
+      setStaffProfiles(response.profiles || []);
+    } catch (err) {
+      console.log('Could not load staff profiles:', err);
+      setStaffProfiles([]);
+    }
+  };
+
+  // Load staff profiles on mount
+  useEffect(() => {
+    if (currentOutlet?.id) {
+      loadStaffProfiles();
+    }
+  }, [currentOutlet?.id]);
 
   // Helper function to format currency
   const formatCurrency = (amount: number): string => {
@@ -122,19 +147,19 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
   };
 
   // Determine what screen to show based on authentication state
-  const getScreenToShow = (): 'manager_login' | 'staff_setup' | 'pin_entry' | 'pos_dashboard' => {
+  const getScreenToShow = (): 'manager_login' | 'no_staff' | 'pin_entry' | 'pos_dashboard' => {
     // If no user is authenticated, show manager login
     if (!currentUser) {
       return 'manager_login';
     }
 
-    // If user is authenticated but no staff profiles exist, show staff setup
+    // If user is authenticated but no staff profiles exist, show no staff message
     if (currentUser && staffProfiles.length === 0) {
-      return 'staff_setup';
+      return 'no_staff';
     }
 
-    // If staff profiles exist but staff not authenticated, show PIN entry
-    if (currentUser && staffProfiles.length > 0 && !isStaffAuthenticated) {
+    // If user is authenticated but staff not authenticated, show PIN entry
+    if (currentUser && !isStaffAuthenticated) {
       return 'pin_entry';
     }
 
@@ -192,7 +217,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
           // For now, we'll just check - UI can prompt user to open session
         }
       } catch (err) {
-        console.error('Error checking cash drawer session:', err);
+        logger.error('Error checking cash drawer session:', err);
       }
     };
 
@@ -227,19 +252,20 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
     }
   }, [currentOutlet?.id]);
 
-  // Clear staff session when outlet changes
+  // Clear staff session when outlet changes (but not on initial authentication)
   useEffect(() => {
-    if (currentOutlet?.id && currentStaff?.outlet_id !== currentOutlet.id) {
+    // Only trigger logout if staff is already authenticated and outlet actually changed
+    if (isStaffAuthenticated && currentStaff && currentOutlet?.id && currentStaff.outlet_id !== currentOutlet.id) {
       handleStaffLogout();
     }
-  }, [currentOutlet?.id, currentStaff?.outlet_id]);
+  }, [currentOutlet?.id]);
 
   /**
    * Load products from API
    */
   const loadProducts = async () => {
     if (!currentOutlet?.id) {
-      console.warn('No active outlet found for POS');
+      logger.warn('No active outlet found for POS');
       setIsLoading(false);
       return;
     }
@@ -255,19 +281,19 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
       setProducts(response?.items || []);
       setPosError(null);
     } catch (err) {
-      console.error('Error loading products online, trying offline:', err);
+      logger.error('Error loading products online, trying offline:', err);
       // Fallback to offline DB explicitly
       try {
         const offlineProducts = await offlineDatabase.getProducts(currentOutlet.id);
         if (offlineProducts && offlineProducts.length > 0) {
           setProducts(offlineProducts);
           setPosError(null);
-          console.log('Loaded products from offline database');
+          logger.log('Loaded products from offline database');
         } else {
           setPosError('No products found. Please connect to internet to sync.');
         }
       } catch (offlineErr) {
-        console.error('Offline load failed:', offlineErr);
+        logger.error('Offline load failed:', offlineErr);
         setPosError('Failed to load products from both online and offline sources.');
       }
     } finally {
@@ -275,20 +301,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
     }
   };
 
-  /**
-   * Load staff profiles for PIN authentication
-   */
-  const loadStaffProfiles = async () => {
-    if (!currentOutlet?.id) return;
-
-    try {
-      const response = await staffService.getOutletStaff(currentOutlet.id);
-      setStaffProfiles(response.profiles);
-    } catch (err) {
-      console.error('Error loading staff profiles:', err);
-      // Don't show error to user for staff loading
-    }
-  };
 
   /**
    * Handle successful PIN authentication
@@ -311,9 +323,16 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
   };
 
   /**
-   * Handle staff logout
+   * Handle staff logout/clock out
    */
   const handleStaffLogout = () => {
+    setShowClockOutModal(true);
+  };
+
+  /**
+   * Confirm staff logout
+   */
+  const confirmStaffLogout = () => {
     setCurrentStaff(null);
     setIsStaffAuthenticated(false);
 
@@ -358,7 +377,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
           localStorage.removeItem('staff_session');
         }
       } catch (err) {
-        console.error('Error parsing staff session:', err);
+        logger.error('Error parsing staff session:', err);
         localStorage.removeItem('staff_session');
       }
     }
@@ -375,7 +394,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
         // silently reset count; UI stays ready for next sale
       }
     } catch (err) {
-      console.error('Error syncing offline transactions:', err);
+      logger.error('Error syncing offline transactions:', err);
     }
   };
 
@@ -533,7 +552,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
           }
         }
       } catch (err) {
-        console.error('Failed to load held receipts:', err);
+        logger.error('Failed to load held receipts:', err);
         // Fallback to localStorage
         if (heldStorageKey) {
           try {
@@ -545,7 +564,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
               }
             }
           } catch (localErr) {
-            console.error('Failed to load from localStorage:', localErr);
+            logger.error('Failed to load from localStorage:', localErr);
             setHeldSales([]);
           }
         }
@@ -638,7 +657,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
 
       clearCart();
     } catch (err) {
-      console.error('Failed to put sale on hold:', err);
+      logger.error('Failed to put sale on hold:', err);
       // Fallback to localStorage
       try {
         const totals = calculateCartTotals();
@@ -654,7 +673,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
         await persistHeldSales(updated);
         clearCart();
       } catch (fallbackErr) {
-        console.error('Failed to save to localStorage:', fallbackErr);
+        logger.error('Failed to save to localStorage:', fallbackErr);
       }
     }
   };
@@ -689,7 +708,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
               
               return null;
             } catch (err) {
-              console.error(`Failed to fetch product ${productId}:`, err);
+              logger.error(`Failed to fetch product ${productId}:`, err);
               return null;
             }
           })
@@ -707,7 +726,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
           return item;
         });
       } catch (err) {
-        console.error('Failed to fetch product details for held receipt:', err);
+        logger.error('Failed to fetch product details for held receipt:', err);
         // Continue with existing cart data
       }
     }
@@ -732,7 +751,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
       try {
         await posService.deleteHeldReceipt(id);
       } catch (err) {
-        console.error('Failed to delete held receipt from backend:', err);
+        logger.error('Failed to delete held receipt from backend:', err);
         // Continue anyway - we've already removed it locally
       }
     }
@@ -904,7 +923,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
       setShowPaymentModal(false);
 
     } catch (err) {
-      console.error('Payment error:', err);
+      logger.error('Payment error:', err);
       // keep cart as-is so cashier can retry or adjust
     }
   };
@@ -921,7 +940,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
     const totalPaid = (activePayments.cash || 0) + (activePayments.card || 0) + (activePayments.transfer || 0);
 
     if (totalPaid < totals.total) {
-      alert(`Total paid (${formatCurrency(totalPaid)}) is less than amount due (${formatCurrency(totals.total)})`);
+      error(`Total paid (${formatCurrency(totalPaid)}) is less than amount due (${formatCurrency(totals.total)})`);
       return;
     }
 
@@ -991,7 +1010,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
               }
             }
           } catch (printError: any) {
-            console.error('Receipt print error:', printError);
+            logger.error('Receipt print error:', printError);
             error(`Receipt printing failed: ${printError.message || 'Unknown error'}`, 5000);
           }
         }
@@ -1014,7 +1033,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
           const remaining = heldSales.filter((s) => s.id !== restoredHeldReceiptId);
           await persistHeldSales(remaining);
         } catch (err) {
-          console.error('Failed to delete held receipt after sale:', err);
+          logger.error('Failed to delete held receipt after sale:', err);
           // Continue anyway - sale is complete
         }
       }
@@ -1028,7 +1047,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
       setSelectedCustomer(null); // Clear customer after transaction
 
     } catch (err: any) {
-      console.error('Split payment error:', err);
+      logger.error('Split payment error:', err);
       const errorMessage = err?.response?.data?.detail || err?.message || 'Transaction failed. Please try again.';
       error(errorMessage, 6000);
     }
@@ -1100,7 +1119,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
               }
             }
           } catch (printError: any) {
-            console.error('Receipt print error:', printError);
+            logger.error('Receipt print error:', printError);
             error(`Receipt printing failed: ${printError.message || 'Unknown error'}`, 5000);
           }
         }
@@ -1123,7 +1142,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
           const remaining = heldSales.filter((s) => s.id !== restoredHeldReceiptId);
           await persistHeldSales(remaining);
         } catch (err) {
-          console.error('Failed to delete held receipt after sale:', err);
+          logger.error('Failed to delete held receipt after sale:', err);
           // Continue anyway - sale is complete
         }
       }
@@ -1136,7 +1155,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
       setSelectedCustomer(null); // Clear customer after transaction
 
     } catch (err) {
-      console.error('Payment error:', err);
+      logger.error('Payment error:', err);
       // keep cart and cash input so cashier can retry
     }
   };
@@ -1160,7 +1179,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
           const results = await posService.searchLocalProducts(currentOutlet.id, searchQuery);
           setDisplayedProducts(results);
         } catch (err) {
-          console.error("Local search failed, falling back to memory:", err);
+          logger.error("Local search failed, falling back to memory:", err);
           // Fallback: Filter in-memory products
           const lowerQuery = searchQuery.toLowerCase();
           setDisplayedProducts(
@@ -1195,7 +1214,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
   // Show Manager Login Screen
   if (screenToShow === 'manager_login') {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-white">
         <LoginForm
           onSuccess={handleManagerLoginSuccess}
           onSwitchToSignup={() => {
@@ -1207,51 +1226,32 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
     );
   }
 
-  // Show Staff Setup Screen (when manager is logged in but no staff profiles)
-  if (screenToShow === 'staff_setup') {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-lg shadow-lg max-w-md w-full p-6 text-center">
-          <User className="w-16 h-16 text-blue-600 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-gray-900 mb-2">Set Up Staff Access</h2>
-          <p className="text-gray-600 mb-6">
-            Create staff profiles with PIN access to get started with your POS system.
-          </p>
-          <button
-            onClick={() => setShowStaffManagement(true)}
-            className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors font-medium"
-          >
-            Create Staff Profiles
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   // Show PIN Entry Screen
   if (screenToShow === 'pin_entry') {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-white">
         <PinEntryModal
           isOpen={true}
           onClose={() => {}} // Can't close PIN entry
           onSuccess={handleStaffAuthentication}
           staffProfiles={staffProfiles}
           onManagerLogin={handleManagerLoginFromPIN}
+          onForceReload={loadStaffProfiles}
         />
       </div>
     );
   }
 
   return (
-    <div className="p-4 bg-gray-50 min-h-screen">
-        {/* Main POS Interface - Full Width Cart */}
-        <div className="h-[calc(100vh-10rem)] overflow-hidden">
-          {/* Full Width Cart & Payment */}
-          <div className="w-full h-full flex flex-col gap-4">
+    <div className="p-6 bg-white min-h-screen">
+        {/* Premium POS Interface */}
+        <div className="h-[calc(100vh-8rem)] overflow-hidden">
+          {/* Clean Layout */}
+          <div className="w-full h-full flex flex-col gap-6">
 
-            {/* Cart Section - Scrollable */}
-            <div className="bg-white rounded-lg shadow p-4 flex-1 overflow-hidden flex flex-col mb-4">
+            {/* Premium Cart Section */}
+            <div className="bg-white border border-gray-200 rounded-lg p-6 flex-1 overflow-hidden flex flex-col">
 
               <div className="flex-1 overflow-y-auto">
                 <POSShoppingCart
@@ -1265,8 +1265,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
               </div>
             </div>
 
-            {/* Fixed Payment Section */}
-            <div className="bg-white rounded-lg shadow px-4 pt-4 pb-1 flex-shrink-0">
+            {/* Premium Payment Section */}
+            <div className="bg-white border border-gray-200 rounded-lg px-6 py-4 flex-shrink-0">
               {/* Customer Selection */}
               {selectedCustomer && (
                 <div className="mb-3 pb-3 border-b border-gray-200">
@@ -1657,7 +1657,19 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
         {/* Staff Management Modal */}
         <StaffManagementModal
           isOpen={showStaffManagement}
-          onClose={() => setShowStaffManagement(false)}
+          onClose={() => {
+            setShowStaffManagement(false);
+            // Reload staff profiles after modal closes to update the UI
+            loadStaffProfiles();
+          }}
+        />
+
+        {/* Clock Out Confirmation Modal */}
+        <ClockOutConfirmModal
+          isOpen={showClockOutModal}
+          onClose={() => setShowClockOutModal(false)}
+          onConfirm={confirmStaffLogout}
+          staffName={currentStaff?.display_name || 'staff member'}
         />
 
         {/* Manager Login Modal */}
@@ -1718,7 +1730,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, {}>((_props, ref) => {
                         const results = await posService.searchCustomers(currentOutlet.id, query);
                         setCustomerSearchResults(results);
                       } catch (err) {
-                        console.error('Customer search error:', err);
+                        logger.error('Customer search error:', err);
                       } finally {
                         setIsSearchingCustomers(false);
                       }

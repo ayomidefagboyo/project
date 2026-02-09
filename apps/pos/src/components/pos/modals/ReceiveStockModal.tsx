@@ -3,6 +3,7 @@ import { X, Truck, Plus, Minus } from 'lucide-react';
 import { posService } from '@/lib/posService';
 import type { POSProduct } from '@/lib/posService';
 import { useOutlet } from '@/contexts/OutletContext';
+import { useToast } from '../../ui/Toast';
 
 interface StockItem {
   product_id: string;
@@ -21,6 +22,7 @@ interface ReceiveStockModalProps {
 
 const ReceiveStockModal: React.FC<ReceiveStockModalProps> = ({ isOpen, onClose, onSuccess }) => {
   const { currentOutlet } = useOutlet();
+  const { success, error } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [products, setProducts] = useState<POSProduct[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<string>('');
@@ -46,7 +48,7 @@ const ReceiveStockModal: React.FC<ReceiveStockModalProps> = ({ isOpen, onClose, 
       setProducts(response?.items || []);
     } catch (error) {
       console.error('Error loading products:', error);
-      alert('Failed to load products');
+      error('Failed to load products');
     }
   };
 
@@ -109,7 +111,7 @@ const ReceiveStockModal: React.FC<ReceiveStockModalProps> = ({ isOpen, onClose, 
         notes: deliveryInfo.delivery_notes
       })));
 
-      alert(`Stock delivery received successfully! ${stockItems.length} items processed.`);
+      success(`Stock delivery received successfully! ${stockItems.length} items processed.`);
       onSuccess();
       onClose();
 
@@ -122,7 +124,7 @@ const ReceiveStockModal: React.FC<ReceiveStockModalProps> = ({ isOpen, onClose, 
       });
     } catch (error) {
       console.error('Error receiving stock:', error);
-      alert('Failed to process stock delivery. Please try again.');
+      error('Failed to process stock delivery. Please try again.');
     } finally {
       setIsLoading(false);
     }

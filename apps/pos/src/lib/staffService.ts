@@ -1,4 +1,5 @@
 import { apiClient } from './apiClient';
+import logger from './logger';
 import type {
   StaffProfile,
   StaffProfileCreate,
@@ -19,7 +20,7 @@ class StaffService {
       if (!response.data) throw new Error(response.error || 'Failed to create staff profile');
       return response.data;
     } catch (error) {
-      console.error('Error creating staff profile:', error);
+      logger.error('Error creating staff profile:', error);
       throw this.handleError(error);
     }
   }
@@ -40,7 +41,7 @@ class StaffService {
       if (!response.data) throw new Error(response.error || 'Failed to fetch staff profiles');
       return response.data;
     } catch (error) {
-      console.error('Error fetching staff profiles:', error);
+      logger.error('Error fetching staff profiles:', error);
       throw this.handleError(error);
     }
   }
@@ -54,7 +55,7 @@ class StaffService {
       if (!response.data) throw new Error(response.error || 'Failed to fetch staff profile');
       return response.data;
     } catch (error) {
-      console.error('Error fetching staff profile:', error);
+      logger.error('Error fetching staff profile:', error);
       throw this.handleError(error);
     }
   }
@@ -68,7 +69,7 @@ class StaffService {
       if (!response.data) throw new Error(response.error || 'Failed to update staff profile');
       return response.data;
     } catch (error) {
-      console.error('Error updating staff profile:', error);
+      logger.error('Error updating staff profile:', error);
       throw this.handleError(error);
     }
   }
@@ -81,7 +82,7 @@ class StaffService {
       const response = await apiClient.delete(`${this.baseUrl}/staff/${profileId}`);
       if (response.error) throw new Error(response.error);
     } catch (error) {
-      console.error('Error deleting staff profile:', error);
+      logger.error('Error deleting staff profile:', error);
       throw this.handleError(error);
     }
   }
@@ -94,7 +95,7 @@ class StaffService {
       const response = await apiClient.post(`${this.baseUrl}/staff/reset-attempts/${profileId}`, {});
       if (response.error) throw new Error(response.error);
     } catch (error) {
-      console.error('Error resetting failed attempts:', error);
+      logger.error('Error resetting failed attempts:', error);
       throw this.handleError(error);
     }
   }
@@ -108,7 +109,7 @@ class StaffService {
       if (!response.data) throw new Error(response.error || 'Authentication failed');
       return response.data;
     } catch (error) {
-      console.error('Error authenticating with PIN:', error);
+      logger.error('Error authenticating with PIN:', error);
       throw this.handleError(error);
     }
   }
@@ -125,7 +126,7 @@ class StaffService {
       if (!response.data) throw new Error(response.error || 'Failed to fetch outlet staff');
       return response.data;
     } catch (error) {
-      console.error('Error fetching outlet staff:', error);
+      logger.error('Error fetching outlet staff:', error);
       throw this.handleError(error);
     }
   }

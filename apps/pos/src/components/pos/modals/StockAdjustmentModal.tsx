@@ -3,6 +3,7 @@ import { X, Package2, Plus, Minus } from 'lucide-react';
 import { posService } from '@/lib/posService';
 import type { POSProduct } from '@/lib/posService';
 import { useOutlet } from '@/contexts/OutletContext';
+import { useToast } from '../../ui/Toast';
 
 interface AdjustmentItem {
   product_id: string;
@@ -22,6 +23,7 @@ interface StockAdjustmentModalProps {
 
 const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({ isOpen, onClose, onSuccess }) => {
   const { currentOutlet } = useOutlet();
+  const { success, error, warning } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [products, setProducts] = useState<POSProduct[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<string>('');
@@ -57,7 +59,7 @@ const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({ isOpen, onC
       setProducts(response?.items || []);
     } catch (error) {
       console.error('Error loading products:', error);
-      alert('Failed to load products');
+      error('Failed to load products');
     }
   };
 
@@ -69,7 +71,7 @@ const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({ isOpen, onC
 
     // Check if product already in adjustment list
     if (adjustmentItems.some(item => item.product_id === selectedProduct)) {
-      alert('Product already added to adjustment');
+      warning('Product already added to adjustment');
       return;
     }
 
@@ -108,7 +110,7 @@ const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({ isOpen, onC
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentOutlet?.id || adjustmentItems.length === 0) {
-      alert('Please add at least one adjustment item');
+      warning('Please add at least one adjustment item');
       return;
     }
 
@@ -120,7 +122,7 @@ const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({ isOpen, onC
     );
 
     if (invalidItems.length > 0) {
-      alert('Please fill in all required fields and ensure adjustment quantities are valid');
+      warning('Please fill in all required fields and ensure adjustment quantities are valid');
       return;
     }
 
@@ -136,7 +138,7 @@ const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({ isOpen, onC
         batch_number: `ADJ${Date.now()}`
       })));
 
-      alert(`Stock adjustments processed successfully! ${adjustmentItems.length} items adjusted.`);
+      success(`Stock adjustments processed successfully! ${adjustmentItems.length} items adjusted.`);
       onSuccess();
       onClose();
 
@@ -144,7 +146,7 @@ const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({ isOpen, onC
       setAdjustmentItems([]);
     } catch (error) {
       console.error('Error processing adjustments:', error);
-      alert('Failed to process stock adjustments. Please try again.');
+      error('Failed to process stock adjustments. Please try again.');
     } finally {
       setIsLoading(false);
     }
