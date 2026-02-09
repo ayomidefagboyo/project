@@ -327,6 +327,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                     />
                   </th>
                   <th className="text-left p-4 font-semibold text-slate-900">SKU</th>
+                  <th className="text-left p-4 font-semibold text-slate-900">Barcode</th>
                   <th className="text-left p-4 font-semibold text-slate-900">Product Name</th>
                   <th className="text-left p-4 font-semibold text-slate-900">Category</th>
                   <th className="text-right p-4 font-semibold text-slate-900">Cost Price</th>
@@ -351,6 +352,15 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                         value={newProduct.sku || ''}
                         onChange={(e) => handleNewProductChange('sku', e.target.value)}
                         className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 text-sm"
+                      />
+                    </td>
+                    <td className="p-2">
+                      <input
+                        type="text"
+                        placeholder="Scan or type barcode"
+                        value={newProduct.barcode || ''}
+                        onChange={(e) => handleNewProductChange('barcode', e.target.value)}
+                        className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 text-sm font-mono"
                       />
                     </td>
                     <td className="p-2">
@@ -456,6 +466,18 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                         />
                       </td>
                       <td className="p-4 font-mono text-sm text-slate-600">{product.sku}</td>
+                      <td className="p-4">
+                        {isEditing ? (
+                          <input
+                            type="text"
+                            value={product.barcode || ''}
+                            onChange={(e) => handleCellEdit(product.id, 'barcode', e.target.value)}
+                            className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 font-mono text-sm"
+                          />
+                        ) : (
+                          <span className="font-mono text-sm text-slate-500">{product.barcode || '—'}</span>
+                        )}
+                      </td>
                       <td className="p-4">
                         {isEditing ? (
                           <input
