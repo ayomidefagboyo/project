@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { useOutlet } from '@/contexts/OutletContext';
 import { posService, POSProduct } from '@/lib/posService';
-import { useRealtimeProducts } from '@/hooks/useRealtimeProducts';
+import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { offlineDatabase } from '@/lib/offlineDatabase';
 
 interface ProductRow extends POSProduct {
@@ -72,31 +72,28 @@ const ProductManagement: React.FC = () => {
     'Other'
   ];
 
-  // Real-time sync for product changes
-  const { isConnected } = useRealtimeProducts({
+  // Comprehensive real-time sync for products and inventory
+  const { isConnected, syncStats } = useRealtimeSync({
     outletId: currentOutlet?.id || '',
     enabled: !!currentOutlet?.id,
-    onProductAdded: async (newProduct) => {
-      console.log('🆕 Real-time: New product added', newProduct.name);
-      setProducts(prev => [newProduct as ProductRow, ...prev]);
-      // Also cache it offline
-      if (currentOutlet?.id) {
-        await offlineDatabase.storeProducts([newProduct]);
+    onProductChange: async (action, data) => {
+      console.log(`📦 Real-time: Product ${action}`, data);
+      if (action === 'INSERT') {
+        setProducts(prev => [data as ProductRow, ...prev]);
+        if (currentOutlet?.id) await offlineDatabase.storeProducts([data]);
+      } else if (action === 'UPDATE') {
+        setProducts(prev => prev.map(p => p.id === data.id ? data as ProductRow : p));
+        if (currentOutlet?.id) await offlineDatabase.storeProducts([data]);
+      } else if (action === 'DELETE') {
+        setProducts(prev => prev.filter(p => p.id !== data.id));
       }
     },
-    onProductUpdated: async (updatedProduct) => {
-      console.log('🔄 Real-time: Product updated', updatedProduct.name);
-      setProducts(prev =>
-        prev.map(p => p.id === updatedProduct.id ? { ...updatedProduct as ProductRow } : p)
-      );
-      // Update offline cache
-      if (currentOutlet?.id) {
-        await offlineDatabase.storeProducts([updatedProduct]);
+    onInventoryChange: (action, data) => {
+      console.log(`📊 Real-time: Inventory ${action}`, data);
+      // Refresh product list to reflect inventory changes
+      if (action === 'INSERT' || action === 'UPDATE') {
+        loadProducts();
       }
-    },
-    onProductDeleted: (productId) => {
-      console.log('🗑️ Real-time: Product deleted', productId);
-      setProducts(prev => prev.filter(p => p.id !== productId));
     }
   });
 

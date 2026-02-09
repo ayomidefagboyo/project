@@ -4,9 +4,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { X, Search, Eye, RotateCcw } from 'lucide-react';
+import { X, Search, Eye, RotateCcw, Wifi, WifiOff } from 'lucide-react';
 import { posService, PaymentMethod } from '../../lib/posService';
 import { useToast } from '../ui/Toast';
+import { useRealtimeSync } from '../../hooks/useRealtimeSync';
 
 interface Transaction {
   id: string;
@@ -38,6 +39,26 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+  const { success } = useToast();
+
+  // Real-time sync for transactions
+  const { isConnected: isRealtimeConnected } = useRealtimeSync({
+    outletId: outletId || '',
+    enabled: !!outletId && isOpen,
+    onTransactionChange: (action, data) => {
+      console.log(`💰 Real-time: Transaction ${action}`, data);
+      if (action === 'INSERT' && selectedDate === new Date().toISOString().split('T')[0]) {
+        // Refresh transactions if viewing today's date
+        loadTransactions();
+        success(`New sale: ${formatCurrency(data.total_amount)}`);
+      } else if (action === 'UPDATE') {
+        // Update existing transaction in list
+        setTransactions(prev =>
+          prev.map(t => t.id === data.id ? { ...t, ...data } : t)
+        );
+      }
+    }
+  });
 
   useEffect(() => {
     if (isOpen && outletId) {

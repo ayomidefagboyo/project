@@ -19,7 +19,7 @@ import type { StaffProfile, StaffAuthResponse } from '../../types';
 import { offlineDatabase } from '../../lib/offlineDatabase';
 import { ToastContainer, useToast } from '../ui/Toast';
 import logger from '../../lib/logger';
-import { useRealtimeProducts } from '../../hooks/useRealtimeProducts';
+import { useRealtimeSync } from '../../hooks/useRealtimeSync';
 
 // Sub-components (we'll create these next)
 import POSProductGrid from './POSProductGrid';
@@ -261,28 +261,31 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     }
   }, [currentOutlet?.id]);
 
-  // Real-time sync for product changes
-  const { isConnected: isRealtimeConnected } = useRealtimeProducts({
+  // Comprehensive real-time sync for products, inventory, and transactions
+  const { isConnected: isRealtimeConnected } = useRealtimeSync({
     outletId: currentOutlet?.id || '',
     enabled: !!currentOutlet?.id && isStaffAuthenticated,
-    onProductAdded: async (newProduct) => {
-      logger.log('🆕 Real-time: New product added', newProduct.name);
-      setProducts(prev => [newProduct, ...prev]);
-      // Cache it offline
-      await offlineDatabase.storeProducts([newProduct]);
-      success(`New product: ${newProduct.name}`);
+    onProductChange: async (action, data) => {
+      if (action === 'INSERT') {
+        logger.log('🆕 Real-time: New product added', data.name);
+        setProducts(prev => [data, ...prev]);
+        await offlineDatabase.storeProducts([data]);
+        success(`New product: ${data.name}`);
+      } else if (action === 'UPDATE') {
+        logger.log('🔄 Real-time: Product updated', data.name);
+        setProducts(prev => prev.map(p => p.id === data.id ? data : p));
+        await offlineDatabase.storeProducts([data]);
+      } else if (action === 'DELETE') {
+        logger.log('🗑️ Real-time: Product deleted', data.id);
+        setProducts(prev => prev.filter(p => p.id !== data.id));
+      }
     },
-    onProductUpdated: async (updatedProduct) => {
-      logger.log('🔄 Real-time: Product updated', updatedProduct.name);
-      setProducts(prev =>
-        prev.map(p => p.id === updatedProduct.id ? updatedProduct : p)
-      );
-      // Update offline cache
-      await offlineDatabase.storeProducts([updatedProduct]);
-    },
-    onProductDeleted: (productId) => {
-      logger.log('🗑️ Real-time: Product deleted', productId);
-      setProducts(prev => prev.filter(p => p.id !== productId));
+    onInventoryChange: (action, data) => {
+      logger.log(`📊 Real-time: Inventory ${action}`, data);
+      // Refresh product list to reflect inventory changes
+      if (action === 'INSERT' || action === 'UPDATE') {
+        loadProducts();
+      }
     }
   });
 
