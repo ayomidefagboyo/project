@@ -3,7 +3,7 @@
  * Listens for changes across ALL POS tables
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
@@ -53,6 +53,32 @@ export function useRealtimeSync({
     staff: 0
   });
 
+  // Use refs to store callbacks so they don't trigger effect re-runs
+  const callbacksRef = useRef({
+    onProductChange,
+    onTransactionChange,
+    onInventoryChange,
+    onStockTransferChange,
+    onCashDrawerChange,
+    onCustomerChange,
+    onInvoiceChange,
+    onStaffChange
+  });
+
+  // Update refs when callbacks change
+  useEffect(() => {
+    callbacksRef.current = {
+      onProductChange,
+      onTransactionChange,
+      onInventoryChange,
+      onStockTransferChange,
+      onCashDrawerChange,
+      onCustomerChange,
+      onInvoiceChange,
+      onStaffChange
+    };
+  });
+
   useEffect(() => {
     if (!enabled || !outletId) {
       setIsConnected(false);
@@ -65,13 +91,13 @@ export function useRealtimeSync({
     // ==========================================
     // 1. PRODUCTS REAL-TIME
     // ==========================================
-    if (onProductChange) {
+    if (callbacksRef.current.onProductChange) {
       const productChannel = supabase
         .channel(`products:${outletId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'pos_products', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
             console.log('📦 Product changed:', payload.eventType, payload.new || payload.old);
-            onProductChange(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
+            callbacksRef.current.onProductChange?.(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
             setSyncStats(prev => ({ ...prev, products: prev.products + 1 }));
           }
         )
@@ -85,13 +111,13 @@ export function useRealtimeSync({
     // ==========================================
     // 2. TRANSACTIONS (SALES) REAL-TIME
     // ==========================================
-    if (onTransactionChange) {
+    if (callbacksRef.current.onTransactionChange) {
       const transactionChannel = supabase
         .channel(`transactions:${outletId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'pos_transactions', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
             console.log('💰 Transaction changed:', payload.eventType, payload.new || payload.old);
-            onTransactionChange(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
+            callbacksRef.current.onTransactionChange?.(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
             setSyncStats(prev => ({ ...prev, transactions: prev.transactions + 1 }));
           }
         )
@@ -102,13 +128,13 @@ export function useRealtimeSync({
     // ==========================================
     // 3. INVENTORY MOVEMENTS REAL-TIME
     // ==========================================
-    if (onInventoryChange) {
+    if (callbacksRef.current.onInventoryChange) {
       const inventoryChannel = supabase
         .channel(`inventory:${outletId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'pos_stock_movements', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
             console.log('📊 Inventory changed:', payload.eventType, payload.new || payload.old);
-            onInventoryChange(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
+            callbacksRef.current.onInventoryChange?.(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
             setSyncStats(prev => ({ ...prev, inventory: prev.inventory + 1 }));
           }
         )
@@ -119,14 +145,14 @@ export function useRealtimeSync({
     // ==========================================
     // 4. STOCK TRANSFERS REAL-TIME
     // ==========================================
-    if (onStockTransferChange) {
+    if (callbacksRef.current.onStockTransferChange) {
       const transferChannel = supabase
         .channel(`transfers:${outletId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'pos_stock_transfers', 
           filter: `from_outlet_id=eq.${outletId}` },
           (payload) => {
             console.log('🚚 Stock transfer changed:', payload.eventType, payload.new || payload.old);
-            onStockTransferChange(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
+            callbacksRef.current.onStockTransferChange?.(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
             setSyncStats(prev => ({ ...prev, transfers: prev.transfers + 1 }));
           }
         )
@@ -137,13 +163,13 @@ export function useRealtimeSync({
     // ==========================================
     // 5. CASH DRAWER SESSIONS REAL-TIME
     // ==========================================
-    if (onCashDrawerChange) {
+    if (callbacksRef.current.onCashDrawerChange) {
       const cashDrawerChannel = supabase
         .channel(`cash_drawer:${outletId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'pos_cash_drawer_sessions', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
             console.log('💵 Cash drawer changed:', payload.eventType, payload.new || payload.old);
-            onCashDrawerChange(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
+            callbacksRef.current.onCashDrawerChange?.(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
             setSyncStats(prev => ({ ...prev, cashDrawer: prev.cashDrawer + 1 }));
           }
         )
@@ -154,13 +180,13 @@ export function useRealtimeSync({
     // ==========================================
     // 6. CUSTOMERS REAL-TIME
     // ==========================================
-    if (onCustomerChange) {
+    if (callbacksRef.current.onCustomerChange) {
       const customerChannel = supabase
         .channel(`customers:${outletId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'customers', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
             console.log('👤 Customer changed:', payload.eventType, payload.new || payload.old);
-            onCustomerChange(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
+            callbacksRef.current.onCustomerChange?.(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
             setSyncStats(prev => ({ ...prev, customers: prev.customers + 1 }));
           }
         )
@@ -171,13 +197,13 @@ export function useRealtimeSync({
     // ==========================================
     // 7. INVOICES REAL-TIME
     // ==========================================
-    if (onInvoiceChange) {
+    if (callbacksRef.current.onInvoiceChange) {
       const invoiceChannel = supabase
         .channel(`invoices:${outletId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
             console.log('🧾 Invoice changed:', payload.eventType, payload.new || payload.old);
-            onInvoiceChange(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
+            callbacksRef.current.onInvoiceChange?.(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
             setSyncStats(prev => ({ ...prev, invoices: prev.invoices + 1 }));
           }
         )
@@ -188,13 +214,13 @@ export function useRealtimeSync({
     // ==========================================
     // 8. STAFF PROFILES REAL-TIME
     // ==========================================
-    if (onStaffChange) {
+    if (callbacksRef.current.onStaffChange) {
       const staffChannel = supabase
         .channel(`staff:${outletId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'staff_profiles', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
             console.log('👥 Staff changed:', payload.eventType, payload.new || payload.old);
-            onStaffChange(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
+            callbacksRef.current.onStaffChange?.(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
             setSyncStats(prev => ({ ...prev, staff: prev.staff + 1 }));
           }
         )
@@ -210,7 +236,7 @@ export function useRealtimeSync({
       activeChannels.forEach(channel => channel.unsubscribe());
       setIsConnected(false);
     };
-  }, [outletId, enabled, onProductChange, onTransactionChange, onInventoryChange, onStockTransferChange, onCashDrawerChange, onCustomerChange, onInvoiceChange, onStaffChange]);
+  }, [outletId, enabled]); // Only depend on outletId and enabled, not callbacks
 
   return { 
     isConnected, 
