@@ -16,11 +16,14 @@ import {
   Users,
   Eye,
   BarChart3,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import { useOutlet } from '../contexts/OutletContext';
 import { posEodService, type POSEODCreateData } from '../lib/eodService';
 import { posService } from '../lib/posService';
 import logger from '../lib/logger';
+import { useRealtimeSync } from '../hooks/useRealtimeSync';
 
 const POSEODDashboard: React.FC = () => {
   const { currentOutlet } = useOutlet();
@@ -136,6 +139,43 @@ const POSEODDashboard: React.FC = () => {
 
     fetchSalesData();
   }, [currentOutlet?.id, formData.date, selectedCashier || '']);
+
+  // Real-time sync for transactions (sales updates)
+  const { isConnected: isRealtimeConnected } = useRealtimeSync({
+    outletId: currentOutlet?.id || '',
+    enabled: !!currentOutlet?.id,
+    onTransactionChange: (action, data) => {
+      logger.log(`💰 Real-time: Transaction ${action}`, data);
+      // Refresh sales data when new transaction comes in
+      if (action === 'INSERT' && formData.date === new Date().toISOString().split('T')[0]) {
+        // Only refresh if viewing today's date
+        const fetchSalesData = async () => {
+          try {
+            const breakdown = await posService.getSalesBreakdown(
+              currentOutlet!.id,
+              formData.date,
+              formData.date,
+              selectedCashier || undefined
+            );
+            setSalesBreakdown(breakdown);
+            if (breakdown?.breakdown?.summary) {
+              const summary = breakdown.breakdown.summary;
+              setFormData(prev => ({
+                ...prev,
+                salesCash: summary.cash_total?.toString() || '0',
+                salesTransfer: summary.transfer_total?.toString() || '0',
+                salesPOS: summary.pos_total?.toString() || '0',
+                salesCredit: summary.mobile_total?.toString() || '0',
+              }));
+            }
+          } catch (error) {
+            logger.error('Failed to refresh sales breakdown:', error);
+          }
+        };
+        fetchSalesData();
+      }
+    }
+  });
 
   // Calculate totals
   const totalSales = toNumber(formData.salesCash) +
