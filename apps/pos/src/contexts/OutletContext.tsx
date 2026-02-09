@@ -22,6 +22,7 @@ interface OutletContextType {
   isLoading: boolean;
   refreshData: () => Promise<void>;
   loadOutletData: () => Promise<void>;
+  reInitAuth: () => void; // Trigger re-init without full page reload
   // Multi-store helpers
   canViewAllOutlets: () => boolean;
   canCreateGlobalVendors: () => boolean;
@@ -37,17 +38,40 @@ interface OutletProviderProps {
 }
 
 export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
-  const [currentOutlet, setCurrentOutlet] = useState<Outlet | null>(null);
-  const [userOutlets, setUserOutlets] = useState<Outlet[]>([]);
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
-  const [businessSettings, setBusinessSettings] = useState<BusinessSettings | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  // --- Instant restore from localStorage cache ---
+  const cachedState = (() => {
+    try {
+      const raw = localStorage.getItem('pos_auth_cache');
+      if (raw) return JSON.parse(raw) as { user: AuthUser; outlets: Outlet[]; outlet: Outlet; settings: BusinessSettings | null };
+    } catch { /* ignore */ }
+    return null;
+  })();
 
-  // Check for existing session on mount
+  const [currentOutlet, setCurrentOutlet] = useState<Outlet | null>(cachedState?.outlet ?? null);
+  const [userOutlets, setUserOutlets] = useState<Outlet[]>(cachedState?.outlets ?? []);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(cachedState?.user ?? null);
+  const [businessSettings, setBusinessSettings] = useState<BusinessSettings | null>(cachedState?.settings ?? null);
+  // If we have a cache, skip the loading spinner entirely
+  const [isLoading, setIsLoading] = useState(!cachedState);
+  // Bump this to re-trigger initializeAuth (e.g. after login)
+  const [authTrigger, setAuthTrigger] = useState(0);
+
+  // Callable from outside to re-initialize auth without page reload
+  const reInitAuth = () => setAuthTrigger(prev => prev + 1);
+
+  // Helper to persist auth cache
+  const persistCache = (user: AuthUser, outlets: Outlet[], outlet: Outlet, settings: BusinessSettings | null) => {
+    try {
+      localStorage.setItem('pos_auth_cache', JSON.stringify({ user, outlets, outlet, settings }));
+    } catch { /* quota exceeded, etc. */ }
+  };
+
+  // Check for existing session on mount (or when authTrigger changes)
   useEffect(() => {
     const initializeAuth = async () => {
       try {
-        setIsLoading(true);
+        // Only show spinner if we have NO cache
+        if (!cachedState) setIsLoading(true);
 
         // Handle OAuth callback if present
         if (window.location.hash.includes('access_token')) {
@@ -68,6 +92,8 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
         if (sessionError && sessionError.includes('Invalid Refresh Token')) {
           console.warn('Invalid refresh token detected, clearing session');
           await authService.signOut();
+          localStorage.removeItem('pos_auth_cache');
+          setCurrentUser(null);
           setIsLoading(false);
           return;
         }
@@ -80,25 +106,38 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
             setCurrentUser(user);
 
             // Only load outlets and business data if user has completed onboarding
-            // This prevents loading issues for new users who haven't set up their trial yet
             if (user.outletId) {
-              // Get user's outlets
-              const { data: outlets, error: outletsError } = await dataService.getUserOutlets(user.id);
+              // Run outlets + settings queries in PARALLEL
+              const [outletsResult, settingsResult] = await Promise.all([
+                dataService.getUserOutlets(user.id),
+                // Use cached outlet id for settings, or fetch after outlets
+                cachedState?.outlet?.id
+                  ? dataService.getBusinessSettings(cachedState.outlet.id)
+                  : Promise.resolve({ data: null, error: null }),
+              ]);
+
+              const { data: outlets, error: outletsError } = outletsResult;
 
               if (outlets && !outletsError) {
                 setUserOutlets(outlets);
 
                 // Set first outlet as current if none selected
-                if (outlets.length > 0 && !currentOutlet) {
-                  setCurrentOutlet(outlets[0]);
+                const targetOutlet = outlets[0];
+                if (targetOutlet) {
+                  setCurrentOutlet(targetOutlet);
 
-                  // Load business settings for the outlet
-                  if (outlets[0]?.id) {
-                    const { data: settings, error: settingsError } = await dataService.getBusinessSettings(outlets[0].id);
-                    if (settings && !settingsError) {
-                      setBusinessSettings(settings);
-                    }
+                  // If we didn't have a cached outlet id, fetch settings now
+                  let settings = settingsResult?.data ?? null;
+                  if (!settings && targetOutlet.id) {
+                    const { data: freshSettings } = await dataService.getBusinessSettings(targetOutlet.id);
+                    settings = freshSettings;
                   }
+                  if (settings) {
+                    setBusinessSettings(settings);
+                  }
+
+                  // Persist everything to cache for next instant load
+                  persistCache(user, outlets, targetOutlet, settings);
                 }
               } else if (outletsError) {
                 console.error('Error loading outlets:', outletsError);
@@ -107,16 +146,27 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
           } else if (error && error.includes('Invalid Refresh Token')) {
             console.warn('Invalid refresh token in getCurrentUser, clearing session');
             await authService.signOut();
+            localStorage.removeItem('pos_auth_cache');
+            setCurrentUser(null);
           } else if (error) {
             console.error('Error getting current user:', error);
+            // If network error but we have cache, keep the cached state
+            if (!cachedState) {
+              setCurrentUser(null);
+            }
           }
+        } else {
+          // No session — clear cache and user
+          localStorage.removeItem('pos_auth_cache');
+          setCurrentUser(null);
         }
       } catch (error) {
         console.error('Error initializing auth:', error);
-        // If any authentication error occurs, clear the session
         if (error instanceof Error && error.message.includes('Invalid Refresh Token')) {
           console.warn('Clearing invalid session due to refresh token error');
           await authService.signOut();
+          localStorage.removeItem('pos_auth_cache');
+          setCurrentUser(null);
         }
       } finally {
         setIsLoading(false);
@@ -124,7 +174,7 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
     };
 
     initializeAuth();
-  }, []);
+  }, [authTrigger]);
 
   // Load business settings when outlet changes
   useEffect(() => {
@@ -274,6 +324,7 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
     isLoading,
     refreshData,
     loadOutletData,
+    reInitAuth,
     // Multi-store helpers
     canViewAllOutlets,
     canCreateGlobalVendors,
