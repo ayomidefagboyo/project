@@ -121,8 +121,8 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent }) => {
               </button>
             </div>
 
-            {/* Navigation */}
-            <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+            {/* Navigation – large touch targets */}
+            <nav className="flex-1 px-3 py-4 space-y-2 overflow-y-auto">
               {navItems.map((item) => {
                 const active = isActive(item.path);
                 const c = colorMap[item.color];
@@ -132,40 +132,40 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent }) => {
                     key={item.path}
                     to={item.path}
                     onClick={() => setShowSidebar(false)}
-                    className={`flex items-center gap-3 px-3 py-3 rounded-xl border transition-all ${
+                    className={`flex items-center gap-4 px-4 py-4 rounded-2xl border-2 transition-all active:scale-[0.97] ${
                       active
-                        ? `${c.active} border-opacity-100`
+                        ? `${c.active}`
                         : `border-transparent ${c.idle}`
                     }`}
                   >
-                    <div className={`w-10 h-10 ${c.icon} rounded-lg flex items-center justify-center flex-shrink-0`}>
-                      <Icon className="w-5 h-5 text-white" />
+                    <div className={`w-12 h-12 ${c.icon} rounded-xl flex items-center justify-center flex-shrink-0`}>
+                      <Icon className="w-6 h-6 text-white" />
                     </div>
                     <div>
-                      <span className={`text-sm font-semibold ${c.text} block leading-tight`}>
+                      <span className={`text-base font-bold ${c.text} block leading-tight`}>
                         {item.label}
                       </span>
-                      <span className={`text-xs ${c.sub}`}>{item.sublabel}</span>
+                      <span className={`text-sm ${c.sub}`}>{item.sublabel}</span>
                     </div>
                   </Link>
                 );
               })}
             </nav>
 
-            {/* Bottom Section */}
-            <div className="px-3 py-4 border-t border-gray-100 space-y-1">
+            {/* Bottom Section – touch-friendly */}
+            <div className="px-3 py-4 border-t border-gray-100 space-y-2">
               {/* Clock Out */}
               <button
                 type="button"
                 onClick={() => { setShowSidebar(false); handleClockOut(); }}
-                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-red-50 transition-colors"
+                className="w-full flex items-center gap-4 px-4 py-4 rounded-2xl hover:bg-red-50 active:scale-[0.97] transition-all"
               >
-                <div className="w-10 h-10 bg-red-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <LogOut className="w-5 h-5 text-white" />
+                <div className="w-12 h-12 bg-red-500 rounded-xl flex items-center justify-center flex-shrink-0">
+                  <LogOut className="w-6 h-6 text-white" />
                 </div>
                 <div className="text-left">
-                  <span className="text-sm font-semibold text-red-800 block leading-tight">Clock Out</span>
-                  <span className="text-xs text-red-600">End Shift</span>
+                  <span className="text-base font-bold text-red-800 block leading-tight">Clock Out</span>
+                  <span className="text-sm text-red-600">End Shift</span>
                 </div>
               </button>
 
@@ -173,29 +173,16 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent }) => {
               <button
                 type="button"
                 onClick={() => setShowSidebar(false)}
-                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-gray-100 transition-colors"
+                className="w-full flex items-center gap-4 px-4 py-4 rounded-2xl hover:bg-gray-100 active:scale-[0.97] transition-all"
               >
-                <div className="w-10 h-10 bg-gray-400 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Settings className="w-5 h-5 text-white" />
+                <div className="w-12 h-12 bg-gray-400 rounded-xl flex items-center justify-center flex-shrink-0">
+                  <Settings className="w-6 h-6 text-white" />
                 </div>
                 <div className="text-left">
-                  <span className="text-sm font-semibold text-gray-800 block leading-tight">Settings</span>
-                  <span className="text-xs text-gray-500">Preferences</span>
+                  <span className="text-base font-bold text-gray-800 block leading-tight">Settings</span>
+                  <span className="text-sm text-gray-500">Preferences</span>
                 </div>
               </button>
-
-              {/* Signed-in user */}
-              <div className="flex items-center gap-3 px-3 pt-3 mt-2 border-t border-gray-100">
-                <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-full flex items-center justify-center flex-shrink-0">
-                  <span className="text-white text-xs font-bold">
-                    {currentUser?.name?.charAt(0)?.toUpperCase() || 'U'}
-                  </span>
-                </div>
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-gray-900 truncate">{currentUser?.name || 'User'}</div>
-                  <div className="text-xs text-gray-500 truncate">{currentUser?.role || 'Cashier'}</div>
-                </div>
-              </div>
             </div>
           </div>
         </>
