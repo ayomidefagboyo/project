@@ -17,6 +17,7 @@
     "@supabase/supabase-js": "^2.56.1",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.0.0",
+    "dexie": "^4.3.0",
     "dotenv": "^17.2.2",
     "lucide-react": "^0.344.0",
     "posthog-js": "^1.266.0",

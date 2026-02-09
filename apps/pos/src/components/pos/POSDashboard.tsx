@@ -19,6 +19,7 @@ import type { StaffProfile, StaffAuthResponse } from '../../types';
 import { offlineDatabase } from '../../lib/offlineDatabase';
 import { ToastContainer, useToast } from '../ui/Toast';
 import logger from '../../lib/logger';
+import { useRealtimeProducts } from '../../hooks/useRealtimeProducts';
 
 // Sub-components (we'll create these next)
 import POSProductGrid from './POSProductGrid';
@@ -259,6 +260,31 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       handleStaffLogout();
     }
   }, [currentOutlet?.id]);
+
+  // Real-time sync for product changes
+  const { isConnected: isRealtimeConnected } = useRealtimeProducts({
+    outletId: currentOutlet?.id || '',
+    enabled: !!currentOutlet?.id && isStaffAuthenticated,
+    onProductAdded: async (newProduct) => {
+      logger.log('🆕 Real-time: New product added', newProduct.name);
+      setProducts(prev => [newProduct, ...prev]);
+      // Cache it offline
+      await offlineDatabase.storeProducts([newProduct]);
+      success(`New product: ${newProduct.name}`);
+    },
+    onProductUpdated: async (updatedProduct) => {
+      logger.log('🔄 Real-time: Product updated', updatedProduct.name);
+      setProducts(prev =>
+        prev.map(p => p.id === updatedProduct.id ? updatedProduct : p)
+      );
+      // Update offline cache
+      await offlineDatabase.storeProducts([updatedProduct]);
+    },
+    onProductDeleted: (productId) => {
+      logger.log('🗑️ Real-time: Product deleted', productId);
+      setProducts(prev => prev.filter(p => p.id !== productId));
+    }
+  });
 
   /**
    * Load products from API
