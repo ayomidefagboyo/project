@@ -85,7 +85,7 @@ export function useRealtimeSync({
       return;
     }
 
-    console.log('🔴 Starting COMPREHENSIVE real-time sync for outlet:', outletId);
+    // console.log('🔴 Starting COMPREHENSIVE real-time sync for outlet:', outletId);
     const activeChannels: RealtimeChannel[] = [];
 
     // ==========================================
@@ -102,7 +102,7 @@ export function useRealtimeSync({
           }
         )
         .subscribe((status) => {
-          console.log('📡 Products channel:', status);
+          // console.log('📡 Products channel:', status);
           setIsConnected(status === 'SUBSCRIBED');
         });
       activeChannels.push(productChannel);
@@ -232,7 +232,7 @@ export function useRealtimeSync({
 
     // Cleanup all channels
     return () => {
-      console.log('🔴 Stopping comprehensive real-time sync');
+      // console.log('🔴 Stopping comprehensive real-time sync');
       activeChannels.forEach(channel => channel.unsubscribe());
       setIsConnected(false);
     };
