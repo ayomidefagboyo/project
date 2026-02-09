@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from 'react';
 import POSDashboard, { type POSDashboardHandle } from './components/pos/POSDashboard';
 import ProductManagement, { type ProductManagementHandle } from './components/pos/ProductManagement';
 import POSEODDashboard from './pages/EODDashboard';
+import TransactionsPage from './pages/TransactionsPage';
 import AppLayout from './components/layout/AppLayout';
 import { OutletProvider, useOutlet } from './contexts/OutletContext';
 import { Upload, Download, Plus, Wifi, WifiOff } from 'lucide-react';
@@ -412,6 +413,7 @@ function AppContent() {
     <AppLayout headerContent={headerContent}>
       <Routes>
         <Route path="/" element={<POSDashboard ref={posDashboardRef} />} />
+        <Route path="/transactions" element={<TransactionsPage />} />
         <Route path="/products" element={<ProductManagement ref={productManagementRef} />} />
         <Route path="/eod" element={<POSEODDashboard />} />
         <Route path="/auth" element={<AuthWrapper onAuthSuccess={() => window.location.href = '/'} />} />
