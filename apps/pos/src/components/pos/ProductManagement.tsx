@@ -28,6 +28,7 @@ interface ProductManagementProps {
 
 export interface ProductManagementHandle {
   handleShowNewRow: () => void;
+  refresh: () => void;
 }
 
 const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementProps>(({ onShowNewRow }, ref) => {
@@ -266,9 +267,10 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     setShowNewRow(true);
   };
 
-  // Expose method to parent component
+  // Expose methods to parent component
   useImperativeHandle(ref, () => ({
-    handleShowNewRow
+    handleShowNewRow,
+    refresh: loadProducts
   }));
 
   return (
