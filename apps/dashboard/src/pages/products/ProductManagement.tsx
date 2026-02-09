@@ -3,7 +3,7 @@
  * Nigerian Supermarket Focus
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Plus,
   Upload,
@@ -72,39 +72,8 @@ const ProductManagement: React.FC = () => {
     'Other'
   ];
 
-  // Comprehensive real-time sync for products and inventory
-  const { isConnected, syncStats } = useRealtimeSync({
-    outletId: currentOutlet?.id || '',
-    enabled: !!currentOutlet?.id,
-    onProductChange: async (action, data) => {
-      console.log(`📦 Real-time: Product ${action}`, data);
-      if (action === 'INSERT') {
-        setProducts(prev => [data as ProductRow, ...prev]);
-        if (currentOutlet?.id) await offlineDatabase.storeProducts([data]);
-      } else if (action === 'UPDATE') {
-        setProducts(prev => prev.map(p => p.id === data.id ? data as ProductRow : p));
-        if (currentOutlet?.id) await offlineDatabase.storeProducts([data]);
-      } else if (action === 'DELETE') {
-        setProducts(prev => prev.filter(p => p.id !== data.id));
-      }
-    },
-    onInventoryChange: (action, data) => {
-      console.log(`📊 Real-time: Inventory ${action}`, data);
-      // Refresh product list to reflect inventory changes
-      if (action === 'INSERT' || action === 'UPDATE') {
-        loadProducts();
-      }
-    }
-  });
-
-  // Load products
-  useEffect(() => {
-    if (currentOutlet?.id) {
-      loadProducts();
-    }
-  }, [currentOutlet?.id]);
-
-  const loadProducts = async () => {
+  // Load products function (stable with useCallback)
+  const loadProducts = useCallback(async () => {
     if (!currentOutlet?.id) {
       console.error('No outlet selected');
       setIsLoading(false);
@@ -133,7 +102,39 @@ const ProductManagement: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [currentOutlet?.id, currentOutlet?.name, searchQuery, selectedCategory]);
+
+  // Load products on mount and when outlet changes
+  useEffect(() => {
+    if (currentOutlet?.id) {
+      loadProducts();
+    }
+  }, [currentOutlet?.id, loadProducts]);
+
+  // Comprehensive real-time sync for products and inventory
+  const { isConnected, syncStats } = useRealtimeSync({
+    outletId: currentOutlet?.id || '',
+    enabled: !!currentOutlet?.id,
+    onProductChange: async (action, data) => {
+      console.log(`📦 Real-time: Product ${action}`, data);
+      if (action === 'INSERT') {
+        setProducts(prev => [data as ProductRow, ...prev]);
+        if (currentOutlet?.id) await offlineDatabase.storeProducts([data]);
+      } else if (action === 'UPDATE') {
+        setProducts(prev => prev.map(p => p.id === data.id ? data as ProductRow : p));
+        if (currentOutlet?.id) await offlineDatabase.storeProducts([data]);
+      } else if (action === 'DELETE') {
+        setProducts(prev => prev.filter(p => p.id !== data.id));
+      }
+    },
+    onInventoryChange: (action, data) => {
+      console.log(`📊 Real-time: Inventory ${action}`, data);
+      // Refresh product list to reflect inventory changes
+      if (action === 'INSERT' || action === 'UPDATE') {
+        loadProducts();
+      }
+    }
+  });
 
   // Filter products
   const filteredProducts = products.filter(product => {
