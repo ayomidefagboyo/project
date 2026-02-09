@@ -19,10 +19,14 @@ import {
   CheckCircle,
   RefreshCw,
   FileSpreadsheet,
-  DollarSign
+  DollarSign,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import { useOutlet } from '@/contexts/OutletContext';
 import { posService, POSProduct } from '@/lib/posService';
+import { useRealtimeProducts } from '@/hooks/useRealtimeProducts';
+import { offlineDatabase } from '@/lib/offlineDatabase';
 
 interface ProductRow extends POSProduct {
   isEditing?: boolean;
@@ -68,6 +72,34 @@ const ProductManagement: React.FC = () => {
     'Other'
   ];
 
+  // Real-time sync for product changes
+  const { isConnected } = useRealtimeProducts({
+    outletId: currentOutlet?.id || '',
+    enabled: !!currentOutlet?.id,
+    onProductAdded: async (newProduct) => {
+      console.log('🆕 Real-time: New product added', newProduct.name);
+      setProducts(prev => [newProduct as ProductRow, ...prev]);
+      // Also cache it offline
+      if (currentOutlet?.id) {
+        await offlineDatabase.storeProducts([newProduct]);
+      }
+    },
+    onProductUpdated: async (updatedProduct) => {
+      console.log('🔄 Real-time: Product updated', updatedProduct.name);
+      setProducts(prev =>
+        prev.map(p => p.id === updatedProduct.id ? { ...updatedProduct as ProductRow } : p)
+      );
+      // Update offline cache
+      if (currentOutlet?.id) {
+        await offlineDatabase.storeProducts([updatedProduct]);
+      }
+    },
+    onProductDeleted: (productId) => {
+      console.log('🗑️ Real-time: Product deleted', productId);
+      setProducts(prev => prev.filter(p => p.id !== productId));
+    }
+  });
+
   // Load products
   useEffect(() => {
     if (currentOutlet?.id) {
@@ -76,8 +108,13 @@ const ProductManagement: React.FC = () => {
   }, [currentOutlet?.id]);
 
   const loadProducts = async () => {
-    if (!currentOutlet?.id) return;
+    if (!currentOutlet?.id) {
+      console.error('No outlet selected');
+      setIsLoading(false);
+      return;
+    }
 
+    console.log('📦 Loading products for outlet:', currentOutlet.name, '(ID:', currentOutlet.id + ')');
     setIsLoading(true);
     try {
       const response = await posService.getProducts(currentOutlet.id, {
@@ -85,10 +122,17 @@ const ProductManagement: React.FC = () => {
         search: searchQuery || undefined,
         category: selectedCategory || undefined
       });
-      setProducts(response.items || []);
-    } catch (error) {
-      console.error('Error loading products:', error);
-      alert('Failed to load products');
+      
+      if (response?.offline) {
+        console.log('✅ Loaded', response.items.length, 'products from offline cache (shared with POS)');
+      } else {
+        console.log('✅ Loaded', response?.items?.length || 0, 'products from backend API');
+      }
+      
+      setProducts(response?.items || []);
+    } catch (error: any) {
+      console.error('❌ Error loading products:', error.message);
+      // Don't alert on offline fallback - let the service handle it gracefully
     } finally {
       setIsLoading(false);
     }
@@ -260,7 +304,21 @@ const ProductManagement: React.FC = () => {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Product Management</h1>
-            <p className="text-gray-600">{currentOutlet?.name} • {totals.totalProducts} products</p>
+            <div className="flex items-center gap-3 mt-1">
+              <p className="text-gray-600">{currentOutlet?.name} • {totals.totalProducts} products</p>
+              {/* Real-time sync status */}
+              {isConnected ? (
+                <span className="flex items-center gap-1.5 px-2.5 py-1 bg-green-50 border border-green-200 rounded-full text-xs font-medium text-green-700">
+                  <Wifi className="w-3 h-3" />
+                  Live Sync
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 border border-gray-200 rounded-full text-xs font-medium text-gray-600">
+                  <WifiOff className="w-3 h-3" />
+                  Offline
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center space-x-3">
@@ -290,6 +348,7 @@ const ProductManagement: React.FC = () => {
             </button>
           </div>
         </div>
+
 
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
