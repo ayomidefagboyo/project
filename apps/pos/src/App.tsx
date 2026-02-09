@@ -6,7 +6,9 @@ import POSEODDashboard from './pages/EODDashboard';
 import TransactionsPage from './pages/TransactionsPage';
 import AppLayout from './components/layout/AppLayout';
 import { OutletProvider, useOutlet } from './contexts/OutletContext';
-import { Upload, Download, Plus, Wifi, WifiOff } from 'lucide-react';
+import { Upload, Download, Plus, Wifi, WifiOff, ChevronDown } from 'lucide-react';
+import ImportProductsModal from './components/pos/ImportProductsModal';
+import { exportProducts } from './lib/inventoryImportExport';
 import { posService, type POSProduct } from './lib/posService';
 import { useToast } from './components/ui/Toast';
 import TerminalSetup from './components/setup/TerminalSetup';
@@ -47,6 +49,10 @@ function AppContent() {
   const [searchResults, setSearchResults] = useState<POSProduct[]>([]);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  // Import/Export State
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
   // Check terminal configuration on mount
   useEffect(() => {
@@ -363,14 +369,56 @@ function AppContent() {
 
       {/* Action Buttons */}
       <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-        <button className="btn-action text-sm px-3 py-2 sm:px-4 sm:py-2.5">
+        <button
+          onClick={() => setShowImportModal(true)}
+          className="btn-action text-sm px-3 py-2 sm:px-4 sm:py-2.5"
+        >
           <Upload className="w-4 h-4 sm:w-5 sm:h-5" />
           <span className="hidden sm:inline">Import</span>
         </button>
-        <button className="btn-action text-sm px-3 py-2 sm:px-4 sm:py-2.5">
-          <Download className="w-4 h-4 sm:w-5 sm:h-5" />
-          <span className="hidden sm:inline">Export</span>
-        </button>
+        <div className="relative">
+          <button
+            onClick={() => setShowExportMenu(!showExportMenu)}
+            className="btn-action text-sm px-3 py-2 sm:px-4 sm:py-2.5"
+          >
+            <Download className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span className="hidden sm:inline">Export</span>
+            <ChevronDown className="w-3 h-3 hidden sm:block" />
+          </button>
+          {showExportMenu && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setShowExportMenu(false)} />
+              <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1">
+                <button
+                  onClick={() => {
+                    if (productManagementRef.current && currentOutlet) {
+                      posService.getProducts(currentOutlet.id, { size: 1000 }).then(res => {
+                        exportProducts(res.items || [], { format: 'xlsx', outletName: currentOutlet.name });
+                      });
+                    }
+                    setShowExportMenu(false);
+                  }}
+                  className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors"
+                >
+                  Export as Excel (.xlsx)
+                </button>
+                <button
+                  onClick={() => {
+                    if (productManagementRef.current && currentOutlet) {
+                      posService.getProducts(currentOutlet.id, { size: 1000 }).then(res => {
+                        exportProducts(res.items || [], { format: 'csv', outletName: currentOutlet.name });
+                      });
+                    }
+                    setShowExportMenu(false);
+                  }}
+                  className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors"
+                >
+                  Export as CSV
+                </button>
+              </div>
+            </>
+          )}
+        </div>
         <button
           onClick={() => {
             if (productManagementRef.current) {
@@ -419,6 +467,20 @@ function AppContent() {
         <Route path="/auth" element={<AuthWrapper onAuthSuccess={() => window.location.href = '/'} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+
+      {/* Import Products Modal */}
+      <ImportProductsModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onImportComplete={() => {
+          // Reload products in ProductManagement if it's mounted
+          if (productManagementRef.current) {
+            productManagementRef.current.handleShowNewRow(); // This triggers a refresh
+          }
+          // Navigate to products page to see results
+          window.location.href = '/products';
+        }}
+      />
     </AppLayout>
   );
 }
