@@ -301,21 +301,7 @@ const ProductManagement: React.FC = () => {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Product Management</h1>
-            <div className="flex items-center gap-3 mt-1">
-              <p className="text-gray-600">{currentOutlet?.name} • {totals.totalProducts} products</p>
-              {/* Real-time sync status */}
-              {isConnected ? (
-                <span className="flex items-center gap-1.5 px-2.5 py-1 bg-green-50 border border-green-200 rounded-full text-xs font-medium text-green-700">
-                  <Wifi className="w-3 h-3" />
-                  Live Sync
-                </span>
-              ) : (
-                <span className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 border border-gray-200 rounded-full text-xs font-medium text-gray-600">
-                  <WifiOff className="w-3 h-3" />
-                  Offline
-                </span>
-              )}
-            </div>
+            <p className="text-gray-600 mt-1">{currentOutlet?.name} • {totals.totalProducts} products</p>
           </div>
 
           <div className="flex items-center space-x-3">

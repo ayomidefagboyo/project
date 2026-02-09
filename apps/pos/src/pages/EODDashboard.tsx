@@ -15,9 +15,7 @@ import {
   Camera,
   Users,
   Eye,
-  BarChart3,
-  Wifi,
-  WifiOff
+  BarChart3
 } from 'lucide-react';
 import { useOutlet } from '../contexts/OutletContext';
 import { posEodService, type POSEODCreateData } from '../lib/eodService';
