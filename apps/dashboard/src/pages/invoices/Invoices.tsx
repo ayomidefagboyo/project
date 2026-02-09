@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Filter, Search, CheckCircle, Clock, XCircle, DollarSign, Receipt, AlertTriangle, Wifi, WifiOff } from 'lucide-react';
+import { Plus, Filter, Search, CheckCircle, Clock, XCircle, DollarSign, Receipt, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useOutlet } from '@/contexts/OutletContext';
 import { vendorInvoiceService } from '@/lib/vendorInvoiceService';
@@ -119,14 +119,6 @@ const Invoices: React.FC = () => {
                 <Receipt className="w-5 h-5 text-white dark:text-gray-900" />
               </div>
               <h1 className="text-3xl font-light text-gray-900 dark:text-white tracking-tight">Vendor Invoices</h1>
-              <div className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ${
-                isRealtimeConnected 
-                  ? 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400' 
-                  : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
-              }`}>
-                {isRealtimeConnected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-                {isRealtimeConnected ? 'Live Sync' : 'Offline'}
-              </div>
             </div>
             <p className="text-gray-600 dark:text-gray-400 font-light">
               Manage bills from suppliers and vendors with precision

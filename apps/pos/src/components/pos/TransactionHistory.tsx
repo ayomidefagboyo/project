@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { X, Search, Eye, RotateCcw, Wifi, WifiOff } from 'lucide-react';
+import { X, Search, Eye, RotateCcw } from 'lucide-react';
 import { posService, PaymentMethod } from '../../lib/posService';
 import { useToast } from '../ui/Toast';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
