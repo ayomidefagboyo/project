@@ -250,6 +250,39 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     };
   }, []);
 
+  // Automatic clock-out on page unload/refresh
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      // Only trigger auto clock-out if staff is authenticated
+      if (isStaffAuthenticated && currentStaff) {
+        // Clear staff session from localStorage to trigger automatic clock-out
+        localStorage.removeItem('pos_staff_session');
+
+        // Store clock-out timestamp for potential recovery
+        const clockOutData = {
+          staff_id: currentStaff.id,
+          clocked_out_at: new Date().toISOString(),
+          auto_logout: true,
+          outlet_id: currentOutlet?.id
+        };
+
+        // Use sessionStorage so it persists only for this browser session
+        sessionStorage.setItem('pos_auto_clockout', JSON.stringify(clockOutData));
+
+        // Optional: Show warning message (some browsers may not display this)
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isStaffAuthenticated, currentStaff, currentOutlet?.id]);
+
   // Load staff profiles when outlet changes
   useEffect(() => {
     if (currentOutlet?.id) {
@@ -372,6 +405,9 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     // Clear staff session
     localStorage.removeItem('pos_staff_session');
 
+    // Clear any auto-clockout data since this is a manual logout
+    sessionStorage.removeItem('pos_auto_clockout');
+
     // Clear cart and reset POS state
     setCart([]);
     setSelectedCustomer(null);
@@ -393,6 +429,21 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
    * Check for existing staff session on load
    */
   const checkExistingStaffSession = () => {
+    // Check if there was an auto-logout
+    const autoClockout = sessionStorage.getItem('pos_auto_clockout');
+    if (autoClockout) {
+      try {
+        const clockoutData = JSON.parse(autoClockout);
+        logger.log(`Staff member was automatically clocked out at ${clockoutData.clocked_out_at}`);
+
+        // Clear the auto-logout data
+        sessionStorage.removeItem('pos_auto_clockout');
+      } catch (err) {
+        logger.error('Error parsing auto-clockout data:', err);
+        sessionStorage.removeItem('pos_auto_clockout');
+      }
+    }
+
     const staffSession = localStorage.getItem('pos_staff_session');
     if (staffSession) {
       try {
