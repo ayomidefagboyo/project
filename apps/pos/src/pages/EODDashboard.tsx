@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Check,
   Save,
+  LogOut,
   Banknote,
   Smartphone,
   CreditCard,
@@ -217,22 +218,6 @@ const POSEODDashboard: React.FC = () => {
       setErrorMessage(error);
     } else {
       setSuccessMessage('End of Day report saved successfully.');
-      // Optionally reset numeric fields
-      setFormData(prev => ({
-        ...prev,
-        salesCash: '',
-        salesTransfer: '',
-        salesPOS: '',
-        salesCredit: '',
-        openingBalance: '',
-        closingBalance: '',
-        bankDeposit: '',
-        inventoryCost: '',
-        notes: '',
-      }));
-
-      // Clear success message after 3 seconds
-      setTimeout(() => setSuccessMessage(null), 3000);
     }
 
     setLoading(false);
@@ -264,16 +249,46 @@ const POSEODDashboard: React.FC = () => {
           </p>
         </div>
 
-        {/* Success Message */}
+        {/* Success Modal */}
         {successMessage && (
-          <div className="mb-6 card border-emerald-200 bg-emerald-50/50 p-4 rounded-xl border">
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-emerald-100 rounded-full flex items-center justify-center">
-                <Check className="w-4 h-4 text-emerald-600" />
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setSuccessMessage(null)}>
+            <div
+              className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-8 text-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Success Icon */}
+              <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center mx-auto mb-5">
+                <Check className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
               </div>
-              <span className="text-emerald-800 font-medium">
-                {successMessage}
-              </span>
+
+              {/* Title */}
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+                EOD Report Saved!
+              </h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                Your End of Day report has been submitted successfully.
+              </p>
+
+              {/* Actions */}
+              <div className="space-y-3">
+                <button
+                  onClick={() => {
+                    setSuccessMessage(null);
+                    localStorage.removeItem('pos_staff_session');
+                    window.dispatchEvent(new CustomEvent('pos-staff-logout'));
+                  }}
+                  className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 shadow-sm hover:shadow-md"
+                >
+                  <LogOut className="w-5 h-5" />
+                  Clock Out
+                </button>
+                <button
+                  onClick={() => setSuccessMessage(null)}
+                  className="w-full text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 px-6 py-2.5 rounded-xl font-medium transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                >
+                  Stay Logged In
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -411,25 +426,7 @@ const POSEODDashboard: React.FC = () => {
                 </div>
               </div>
 
-              {/* Sales Summary */}
-              {salesBreakdown?.breakdown?.summary && (
-                <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                  <div className="flex items-center justify-between">
-                    <div className="text-center">
-                      <div className="text-sm text-gray-500">Total Transactions</div>
-                      <div className="text-lg font-bold text-gray-900 dark:text-white">
-                        {salesBreakdown.breakdown.summary.total_transactions}
-                      </div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-sm text-gray-500">Net Sales</div>
-                      <div className="text-lg font-bold text-green-600 dark:text-green-400">
-                        {formatCurrency(salesBreakdown.breakdown.summary.total_amount)}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
+
             </div>
 
             {/* Expenses & Notes Section */}
