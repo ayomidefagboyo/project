@@ -4,11 +4,16 @@
  */
 
 import Dexie, { type Table } from 'dexie';
-import type { POSProduct, CreateTransactionRequest } from './posService';
+import type { POSProduct, CreateTransactionRequest, POSTransaction } from './posService';
 
 // Extended Product type for indexing
 interface IndexedPOSProduct extends POSProduct {
   name_tokens: string[]; // For full-text search
+  last_sync: string;
+}
+
+interface IndexedPOSTransaction extends POSTransaction {
+  search_tokens: string[]; // For full-text search (receipt #, customer name)
   last_sync: string;
 }
 
@@ -36,6 +41,7 @@ interface SettingItem {
 // Dexie Database Definition
 export class POSDatabase extends Dexie {
   products!: Table<IndexedPOSProduct, string>;
+  transactions!: Table<IndexedPOSTransaction, string>;
   offlineTransactions!: Table<OfflineTransaction, string>;
   syncQueue!: Table<SyncQueueItem, number>;
   settings!: Table<SettingItem, string>;
@@ -43,17 +49,15 @@ export class POSDatabase extends Dexie {
   constructor() {
     super('CompazzPOS');
     this.version(1).stores({
-      // Primary key: id
-      // Indexes: [outlet_id+is_active] for filtering
-      // *name_tokens for multi-entry text search
-      // barcode, sku, category for exact lookups
       products: 'id, outlet_id, [outlet_id+is_active], *name_tokens, barcode, sku, category',
-
       offlineTransactions: 'offline_id, outlet_id, created_at, status',
-
       syncQueue: '++id, type, status, created_at',
-
       settings: 'key'
+    });
+
+    // Version 2: Add transactions table
+    this.version(2).stores({
+      transactions: 'id, outlet_id, [outlet_id+transaction_date], transaction_number, *search_tokens, status, payment_method'
     });
   }
 }
@@ -71,7 +75,12 @@ interface OfflineDatabase {
   init(): Promise<void>;
   storeProducts(products: POSProduct[]): Promise<void>;
   getProducts(outletId: string): Promise<POSProduct[]>;
-  searchProducts(outletId: string, query: string): Promise<POSProduct[]>; // NEW
+  // Transaction History Methods
+  storeTransactions(transactions: POSTransaction[]): Promise<void>;
+  getTransactions(outletId: string, limit?: number): Promise<POSTransaction[]>;
+  searchTransactions(outletId: string, query: string): Promise<POSTransaction[]>;
+
+  // Offline Transaction Queue Methods
   storeOfflineTransaction(transaction: CreateTransactionRequest): Promise<string>;
   getOfflineTransactions(): Promise<Array<CreateTransactionRequest & { offline_id: string; created_at: string }>>;
   removeOfflineTransaction(offlineId: string): Promise<void>;
@@ -113,21 +122,12 @@ class DexieOfflineDatabase implements OfflineDatabase {
 
   async getProducts(outletId: string): Promise<POSProduct[]> {
     // Return all active products for outlet
-    // Using compound index [outlet_id+is_active]
-    // Note: IndexedDB doesn't handle boolean indexing well in all browsers, 
-    // but Dexie handles 1/0 interpolation. 
-    // Assuming backend sends true/false.
-    // Ideally we iterate using compound index.
-
-    // For simplicity and speed in getProducts (loading all):
+    // Use simple outlet_id index and filter is_active client-side for reliability
     return await db.products
-      .where('[outlet_id+is_active]')
-      .equals([outletId, 1]) // active=1/true? Need to check POSProduct type. Usually API sends boolean. Dexie needs match.
-      // If boolean doesn't work directly, we can just filter outlet_id
+      .where('outlet_id')
+      .equals(outletId)
+      .filter(p => p.is_active)
       .toArray();
-
-    // Fallback if compound index fails due to type mismatch:
-    // return await db.products.where('outlet_id').equals(outletId).filter(p => p.is_active).toArray();
   }
 
   // Optimized Search Method
@@ -157,6 +157,58 @@ class DexieOfflineDatabase implements OfflineDatabase {
 
     // Filter by outlet if needed (client side filter is fast on 50 items)
     return results.filter(p => p.outlet_id === outletId && p.is_active);
+  }
+
+  // ==========================================
+  // TRANSACTION HISTORY (NEW)
+  // ==========================================
+
+  async storeTransactions(transactions: POSTransaction[]): Promise<void> {
+    const indexedTransactions: IndexedPOSTransaction[] = transactions.map(t => ({
+      ...t,
+      search_tokens: [
+        ...tokenize(t.transaction_number),
+        ...tokenize(t.customer_name || ''),
+        ...tokenize(t.payment_method)
+      ],
+      last_sync: new Date().toISOString()
+    }));
+
+    await db.transactions.bulkPut(indexedTransactions);
+  }
+
+  async getTransactions(outletId: string, limit: number = 200): Promise<POSTransaction[]> {
+    // Get latest transactions for specific outlet using compound index for performance
+    return await db.transactions
+      .where('[outlet_id+transaction_date]')
+      .between([outletId, '0'], [outletId, '\uffff'])
+      .reverse() // Newest first
+      .limit(limit)
+      .toArray();
+  }
+
+  async searchTransactions(outletId: string, query: string): Promise<POSTransaction[]> {
+    const q = query.toLowerCase();
+
+    // 1. Exact Receipt Number Match
+    const receiptMatch = await db.transactions
+      .where('transaction_number').equals(query)
+      .first();
+
+    if (receiptMatch && receiptMatch.outlet_id === outletId) return [receiptMatch];
+
+    // 2. Token Search (Customer Name, Receipt parts, Payment Method)
+    let results = await db.transactions
+      .where('search_tokens')
+      .startsWith(q)
+      .distinct()
+      .limit(50)
+      .toArray();
+
+    // Filter by outlet and sort by date desc
+    return results
+      .filter(t => t.outlet_id === outletId)
+      .sort((a, b) => new Date(b.transaction_date).getTime() - new Date(a.transaction_date).getTime());
   }
 
   async storeOfflineTransaction(transaction: CreateTransactionRequest): Promise<string> {

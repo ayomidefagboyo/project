@@ -4,48 +4,32 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Search, Eye, RotateCcw, Filter, ChevronDown, Receipt, X } from 'lucide-react';
-import { posService } from '../lib/posService';
+import { Search, RotateCcw, Receipt, X } from 'lucide-react';
+import { posService, type POSTransaction } from '../lib/posService';
 import { useOutlet } from '../contexts/OutletContext';
 import { useToast } from '../components/ui/Toast';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
 
-interface Transaction {
-  id: string;
-  transaction_number: string;
-  total_amount: number;
-  subtotal: number;
-  tax_amount: number;
-  discount_amount: number;
-  payment_method: string;
-  transaction_date: string;
-  cashier_id: string;
+// Extend base transaction type with UI-specific fields returned by API
+interface ExtendedTransaction extends POSTransaction {
   cashier_name?: string;
-  customer_name?: string;
-  status: string;
-  receipt_type: string;
-  receipt_printed: boolean;
-  tendered_amount?: number;
-  change_amount?: number;
-  payment_reference?: string;
-  voided_by?: string;
+  receipt_type?: string;
   voided_by_name?: string;
   void_reason?: string;
   voided_at?: string;
-  notes?: string;
 }
 
 const TransactionsPage: React.FC = () => {
   const { currentOutlet } = useOutlet();
   const { success, error: showError } = useToast();
 
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactions, setTransactions] = useState<ExtendedTransaction[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [paymentFilter, setPaymentFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+  const [selectedTransaction, setSelectedTransaction] = useState<ExtendedTransaction | null>(null);
   const [showVoidConfirm, setShowVoidConfirm] = useState(false);
   const [voidReason, setVoidReason] = useState('');
 
@@ -70,14 +54,33 @@ const TransactionsPage: React.FC = () => {
 
   const loadTransactions = async () => {
     if (!currentOutlet?.id) return;
-    setIsLoading(true);
+
     try {
+      // 1. Always try local cache first (instant results)
+      setIsLoading(true);
+      const localData = await posService.getLocalTransactions(currentOutlet.id, 500);
+      if (localData.length > 0) {
+        setTransactions(localData as ExtendedTransaction[]);
+        setIsLoading(false); // Show cached data immediately
+      }
+
+      // 2. Fetch fresh data in background and update
       const result = await posService.getTransactions(currentOutlet.id, {
-        size: 200
+        size: 500 // Increased cache size for multiple terminals
       });
-      setTransactions(result.items || []);
+      setTransactions((result.items || []) as ExtendedTransaction[]);
     } catch (err) {
       console.error('Error loading transactions:', err);
+      // If network fails, still show cached data (already loaded above)
+      if (transactions.length === 0) {
+        // Only show error if we have no cached data
+        try {
+          const localData = await posService.getLocalTransactions(currentOutlet.id, 500);
+          setTransactions(localData as ExtendedTransaction[]);
+        } catch (localErr) {
+          console.error('Local cache also failed:', localErr);
+        }
+      }
     } finally {
       setIsLoading(false);
     }
@@ -98,11 +101,11 @@ const TransactionsPage: React.FC = () => {
 
   const getPaymentBadge = (method: string) => {
     const map: Record<string, { label: string; cls: string }> = {
-      cash:     { label: 'Cash',     cls: 'bg-green-100 text-green-800' },
+      cash: { label: 'Cash', cls: 'bg-green-100 text-green-800' },
       transfer: { label: 'Transfer', cls: 'bg-blue-100 text-blue-800' },
-      pos:      { label: 'POS',      cls: 'bg-purple-100 text-purple-800' },
-      credit:   { label: 'Credit',   cls: 'bg-amber-100 text-amber-800' },
-      mobile:   { label: 'Mobile',   cls: 'bg-pink-100 text-pink-800' },
+      pos: { label: 'POS', cls: 'bg-purple-100 text-purple-800' },
+      credit: { label: 'Credit', cls: 'bg-amber-100 text-amber-800' },
+      mobile: { label: 'Mobile', cls: 'bg-pink-100 text-pink-800' },
     };
     const info = map[method] || { label: method, cls: 'bg-gray-100 text-gray-800' };
     return <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${info.cls}`}>{info.label}</span>;
@@ -114,7 +117,7 @@ const TransactionsPage: React.FC = () => {
     return <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-green-100 text-green-800">Completed</span>;
   };
 
-  // Apply filters
+  // Filters are applied in render
   const filteredTransactions = transactions.filter(tx => {
     // Date filter (compare local YYYY-MM-DD portion)
     if (selectedDate) {
@@ -133,11 +136,6 @@ const TransactionsPage: React.FC = () => {
     if (statusFilter !== 'all' && tx.status !== statusFilter) return false;
     return true;
   });
-
-  // Summary
-  const totalSales = filteredTransactions.filter(t => t.status !== 'voided').reduce((s, t) => s + t.total_amount, 0);
-  const totalCount = filteredTransactions.filter(t => t.status !== 'voided').length;
-  const voidedCount = filteredTransactions.filter(t => t.status === 'voided').length;
 
   // Void handler
   const handleVoid = async () => {
@@ -237,9 +235,8 @@ const TransactionsPage: React.FC = () => {
               <button
                 key={tx.id}
                 onClick={() => setSelectedTransaction(tx)}
-                className={`w-full text-left bg-white border rounded-lg px-4 py-3 hover:border-blue-300 hover:shadow-sm transition-all ${
-                  tx.status === 'voided' ? 'opacity-60 border-red-200' : 'border-gray-200'
-                }`}
+                className={`w-full text-left bg-white border rounded-lg px-4 py-3 hover:border-blue-300 hover:shadow-sm transition-all ${tx.status === 'voided' ? 'opacity-60 border-red-200' : 'border-gray-200'
+                  }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 min-w-0">

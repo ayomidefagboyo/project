@@ -16,7 +16,7 @@ import {
   LogOut,
   Truck,
 } from 'lucide-react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useOutlet } from '../../contexts/OutletContext';
 
 interface AppLayoutProps {
@@ -75,6 +75,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent }) => {
   const { currentUser, currentOutlet } = useOutlet();
   const [showSidebar, setShowSidebar] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
 
   // Clock out handler – returns to staff auth (PIN entry), NOT main sign-in
   const handleClockOut = () => {
@@ -172,7 +173,10 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent }) => {
               {/* Settings */}
               <button
                 type="button"
-                onClick={() => setShowSidebar(false)}
+                onClick={() => {
+                  setShowSidebar(false);
+                  navigate('/settings');
+                }}
                 className="w-full flex items-center gap-4 px-4 py-4 rounded-2xl hover:bg-gray-100 active:scale-[0.97] transition-all"
               >
                 <div className="w-12 h-12 bg-gray-400 rounded-xl flex items-center justify-center flex-shrink-0">

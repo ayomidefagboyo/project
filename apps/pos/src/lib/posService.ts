@@ -478,6 +478,17 @@ class POSService {
     try {
       const response = await apiClient.post<POSTransaction>(`${this.baseUrl}/transactions`, transaction);
       if (!response.data) throw new Error(response.error || 'Failed to create transaction');
+
+      // Immediately cache the new transaction for other terminals
+      if (this.isInitialized && response.data) {
+        try {
+          await offlineDatabase.storeTransactions([response.data]);
+          logger.log('📝 New transaction cached for multi-terminal access');
+        } catch (cacheError) {
+          logger.warn('Failed to cache new transaction:', cacheError);
+        }
+      }
+
       return response.data;
     } catch (error) {
       logger.error('Error creating transaction:', error);
@@ -524,6 +535,12 @@ class POSService {
       });
 
       const response = await apiClient.get<any>(`${this.baseUrl}/transactions?${params}`);
+
+      // Always cache all fetched transactions for multiple terminal access
+      if (this.isInitialized && response.data?.items && response.data.items.length > 0) {
+        await offlineDatabase.storeTransactions(response.data.items);
+      }
+
       return response.data;
     } catch (error) {
       logger.error('Error fetching transactions:', error);
@@ -543,6 +560,23 @@ class POSService {
       logger.error('Error fetching transaction:', error);
       throw this.handleError(error);
     }
+  }
+
+
+  /**
+   * Get local transactions for instant load
+   */
+  async getLocalTransactions(outletId: string, limit: number = 50): Promise<POSTransaction[]> {
+    if (!this.isInitialized) return [];
+    return await offlineDatabase.getTransactions(outletId, limit);
+  }
+
+  /**
+   * Search local transactions
+   */
+  async searchLocalTransactions(outletId: string, query: string): Promise<POSTransaction[]> {
+    if (!this.isInitialized || !query) return [];
+    return await offlineDatabase.searchTransactions(outletId, query);
   }
 
 
