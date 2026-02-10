@@ -23,6 +23,14 @@ class PaymentMethod(str, Enum):
     MOBILE = "mobile"
 
 
+class ReceiptType(str, Enum):
+    """Receipt types"""
+    SALE = "sale"
+    RETURN = "return"
+    VOID = "void"
+    REFUND = "refund"
+
+
 class TransactionStatus(str, Enum):
     """Transaction status"""
     PENDING = "pending"
@@ -196,6 +204,7 @@ class POSTransactionCreate(BaseModel):
     tendered_amount: Optional[Decimal] = Field(None, ge=0, description="Amount tendered (for cash)")
     payment_reference: Optional[str] = Field(None, max_length=100, description="Payment reference")
     discount_amount: Decimal = Field(0, ge=0, description="Total transaction discount")
+    receipt_type: ReceiptType = Field(ReceiptType.SALE, description="Type of receipt")
     notes: Optional[str] = Field(None, description="Transaction notes")
     offline_id: Optional[str] = Field(None, description="Offline transaction ID")
 
@@ -226,6 +235,12 @@ class POSTransactionResponse(BaseModel):
     transaction_date: datetime = Field(..., description="Transaction timestamp")
     sync_status: SyncStatus = Field(..., description="Sync status")
     items: List[TransactionItemResponse] = Field(..., description="Transaction items")
+    receipt_type: ReceiptType = Field(..., description="Type of receipt")
+    cashier_name: Optional[str] = Field(None, description="Name of the cashier")
+    voided_by: Optional[str] = Field(None, description="ID of staff who voided transaction")
+    voided_by_name: Optional[str] = Field(None, description="Name of staff who voided transaction")
+    void_reason: Optional[str] = Field(None, description="Reason for voiding")
+    voided_at: Optional[datetime] = Field(None, description="When transaction was voided")
     notes: Optional[str] = Field(None, description="Transaction notes")
     receipt_printed: bool = Field(..., description="Whether receipt was printed")
     created_at: datetime = Field(..., description="Creation timestamp")

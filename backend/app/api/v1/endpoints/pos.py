@@ -33,7 +33,7 @@ from app.schemas.pos import (
     StaffProfileCreate, StaffProfileUpdate, StaffProfileResponse,
     StaffProfileListResponse, StaffPinAuth, StaffAuthResponse,
     # Base types
-    PaymentMethod, TransactionStatus, MovementType, SyncStatus
+    PaymentMethod, TransactionStatus, MovementType, SyncStatus, ReceiptType
 )
 
 router = APIRouter()
@@ -378,12 +378,17 @@ async def create_transaction(
                     detail="Insufficient payment amount"
                 )
 
+        # Get cashier's name for display
+        cashier_result = supabase.table('staff_profiles').select('name').eq('id', transaction.cashier_id).execute()
+        cashier_name = cashier_result.data[0]['name'] if cashier_result.data else 'Unknown'
+
         # Prepare transaction data
         transaction_data = {
             'id': transaction_id,
             'transaction_number': transaction_number,
             'outlet_id': transaction.outlet_id,
             'cashier_id': transaction.cashier_id,
+            'cashier_name': cashier_name,
             'customer_id': transaction.customer_id,
             'customer_name': transaction.customer_name,
             'subtotal': float(subtotal),
@@ -395,6 +400,7 @@ async def create_transaction(
             'change_amount': float(change_amount),
             'payment_reference': transaction.payment_reference,
             'status': TransactionStatus.COMPLETED.value,
+            'receipt_type': transaction.receipt_type.value if hasattr(transaction, 'receipt_type') else 'sale',
             'transaction_date': datetime.utcnow().isoformat(),
             'sync_status': SyncStatus.SYNCED.value,
             'offline_id': transaction.offline_id,
@@ -567,7 +573,15 @@ async def void_transaction(
     """Void a transaction"""
     try:
         supabase = get_supabase_admin()
-        
+
+        # Check if user has permission to void transactions (cashiers cannot void)
+        user_role = current_user.get('role', '').lower()
+        if user_role == 'cashier':
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cashiers are not authorized to void transactions. Please contact a manager."
+            )
+
         void_reason = void_data.get('void_reason', 'No reason provided') if void_data else 'No reason provided'
 
         # Get transaction to restore stock
@@ -615,11 +629,16 @@ async def void_transaction(
                 except Exception as stock_error:
                     logger.warning(f"Failed to restore stock for product {item['product_id']}: {stock_error}")
 
+        # Get voider's name for display
+        voider_name = current_user.get('name', 'Unknown')
+
         result = supabase.table('pos_transactions').update({
             'is_voided': True,
             'voided_by': current_user['id'],
+            'voided_by_name': voider_name,
             'voided_at': datetime.utcnow().isoformat(),
             'void_reason': void_reason,
+            'receipt_type': 'void',
             'status': TransactionStatus.VOIDED.value,
             'updated_at': datetime.utcnow().isoformat()
         }).eq('id', transaction_id).execute()
@@ -1013,6 +1032,146 @@ async def delete_held_receipt(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete held receipt: {str(e)}"
+        )
+
+
+@router.put("/transactions/{transaction_id}/return")
+async def return_transaction(
+    transaction_id: str,
+    return_data: Dict[str, Any],
+    current_user=Depends(CurrentUser())
+):
+    """Process a transaction return"""
+    try:
+        supabase = get_supabase_admin()
+
+        # Check if user has permission to process returns
+        user_role = current_user.get('role', '').lower()
+        if user_role == 'cashier':
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cashiers are not authorized to process returns. Please contact a manager."
+            )
+
+        return_reason = return_data.get('return_reason', 'Customer return')
+        return_items = return_data.get('items', [])  # Specific items being returned
+        return_amount = return_data.get('amount')    # Total return amount
+
+        # Get original transaction
+        tx_result = supabase.table('pos_transactions').select('*, pos_transaction_items(*)').eq('id', transaction_id).execute()
+        if not tx_result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Original transaction not found"
+            )
+
+        original_transaction = tx_result.data[0]
+
+        # Validate transaction can be returned
+        if original_transaction['status'] not in ['completed']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot return a {original_transaction['status']} transaction"
+            )
+
+        # Get processor's name for display
+        processor_name = current_user.get('name', 'Unknown')
+
+        # Create return transaction as a negative transaction
+        return_transaction_id = str(uuid.uuid4())
+        return_transaction_number = f"RTN-{datetime.now().strftime('%Y%m%d')}-{return_transaction_id[:8].upper()}"
+
+        # Prepare return transaction data
+        return_transaction_data = {
+            'id': return_transaction_id,
+            'transaction_number': return_transaction_number,
+            'outlet_id': original_transaction['outlet_id'],
+            'cashier_id': current_user['id'],
+            'cashier_name': processor_name,
+            'customer_id': original_transaction.get('customer_id'),
+            'customer_name': original_transaction.get('customer_name'),
+            'subtotal': -float(return_amount or original_transaction['subtotal']),
+            'tax_amount': -float(original_transaction['tax_amount']),
+            'discount_amount': 0,
+            'total_amount': -float(return_amount or original_transaction['total_amount']),
+            'payment_method': 'cash',  # Returns typically processed as cash
+            'tendered_amount': None,
+            'change_amount': 0,
+            'payment_reference': f"Return for {original_transaction['transaction_number']}",
+            'status': TransactionStatus.COMPLETED.value,
+            'receipt_type': 'return',
+            'transaction_date': datetime.utcnow().isoformat(),
+            'sync_status': SyncStatus.SYNCED.value,
+            'notes': f"Return for transaction {original_transaction['transaction_number']}: {return_reason}",
+            'receipt_printed': False,
+            'created_at': datetime.utcnow().isoformat(),
+            'updated_at': datetime.utcnow().isoformat()
+        }
+
+        # Insert return transaction
+        return_result = supabase.table('pos_transactions').insert(return_transaction_data).execute()
+        if not return_result.data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to create return transaction"
+            )
+
+        # Update original transaction status to returned
+        original_update = supabase.table('pos_transactions').update({
+            'status': TransactionStatus.REFUNDED.value,
+            'updated_at': datetime.utcnow().isoformat()
+        }).eq('id', transaction_id).execute()
+
+        # Restore stock for returned items
+        if original_transaction.get('pos_transaction_items'):
+            for item in original_transaction['pos_transaction_items']:
+                try:
+                    # Get current stock
+                    product_result = supabase.table('pos_products').select('quantity_on_hand').eq('id', item['product_id']).execute()
+                    if product_result.data:
+                        current_qty = product_result.data[0]['quantity_on_hand']
+                        new_qty = current_qty + item['quantity']  # Restore returned quantity
+
+                        # Update product quantity
+                        supabase.table('pos_products').update({
+                            'quantity_on_hand': new_qty,
+                            'updated_at': datetime.utcnow().isoformat()
+                        }).eq('id', item['product_id']).execute()
+
+                        # Create stock movement record for return
+                        movement_data = {
+                            'id': str(uuid.uuid4()),
+                            'product_id': item['product_id'],
+                            'outlet_id': original_transaction['outlet_id'],
+                            'movement_type': 'return',
+                            'quantity_change': item['quantity'],
+                            'quantity_before': current_qty,
+                            'quantity_after': new_qty,
+                            'reference_id': return_transaction_id,
+                            'reference_type': 'return_transaction',
+                            'performed_by': current_user['id'],
+                            'movement_date': datetime.utcnow().isoformat(),
+                            'notes': f'Stock restored from return: {return_reason}'
+                        }
+                        supabase.table('pos_stock_movements').insert(movement_data).execute()
+                except Exception as stock_error:
+                    logger.warning(f"Failed to restore stock for product {item['product_id']}: {stock_error}")
+
+        return {
+            "message": "Transaction returned successfully",
+            "original_transaction_id": transaction_id,
+            "return_transaction_id": return_transaction_id,
+            "return_transaction_number": return_transaction_number,
+            "return_amount": return_amount or original_transaction['total_amount']
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing return for transaction {transaction_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process return: {str(e)}"
         )
 
 

@@ -20,12 +20,18 @@ interface Transaction {
   payment_method: string;
   transaction_date: string;
   cashier_id: string;
+  cashier_name?: string;
   customer_name?: string;
   status: string;
+  receipt_type: string;
   receipt_printed: boolean;
   tendered_amount?: number;
   change_amount?: number;
   payment_reference?: string;
+  voided_by?: string;
+  voided_by_name?: string;
+  void_reason?: string;
+  voided_at?: string;
   notes?: string;
 }
 
@@ -303,19 +309,37 @@ const TransactionsPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Payment */}
+              {/* Payment & Receipt Type */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Payment</p>
                   <div>{getPaymentBadge(selectedTransaction.payment_method)}</div>
                 </div>
-                {selectedTransaction.customer_name && (
-                  <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Customer</p>
-                    <p className="text-sm font-medium text-gray-900">{selectedTransaction.customer_name}</p>
-                  </div>
-                )}
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Receipt Type</p>
+                  <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-blue-100 text-blue-800 capitalize">
+                    {selectedTransaction.receipt_type || 'sale'}
+                  </span>
+                </div>
               </div>
+
+              {/* Customer & Cashier */}
+              {(selectedTransaction.customer_name || selectedTransaction.cashier_name) && (
+                <div className="grid grid-cols-2 gap-4">
+                  {selectedTransaction.customer_name && (
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Customer</p>
+                      <p className="text-sm font-medium text-gray-900">{selectedTransaction.customer_name}</p>
+                    </div>
+                  )}
+                  {selectedTransaction.cashier_name && (
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Cashier</p>
+                      <p className="text-sm font-medium text-gray-900">{selectedTransaction.cashier_name}</p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Amounts */}
               <div className="bg-gray-50 rounded-xl p-4 space-y-2">
@@ -352,6 +376,31 @@ const TransactionsPage: React.FC = () => {
                   </>
                 )}
               </div>
+
+              {/* Void Information */}
+              {selectedTransaction.status === 'voided' && (
+                <div className="bg-red-50 rounded-xl p-4">
+                  <p className="text-xs text-red-500 uppercase tracking-wide mb-2">Void Information</p>
+                  {selectedTransaction.voided_by_name && (
+                    <div className="mb-2">
+                      <span className="text-sm font-medium text-red-900">Voided by: </span>
+                      <span className="text-sm text-red-800">{selectedTransaction.voided_by_name}</span>
+                    </div>
+                  )}
+                  {selectedTransaction.voided_at && (
+                    <div className="mb-2">
+                      <span className="text-sm font-medium text-red-900">Voided at: </span>
+                      <span className="text-sm text-red-800">{formatFullDate(selectedTransaction.voided_at)} {formatTime(selectedTransaction.voided_at)}</span>
+                    </div>
+                  )}
+                  {selectedTransaction.void_reason && (
+                    <div>
+                      <span className="text-sm font-medium text-red-900">Reason: </span>
+                      <span className="text-sm text-red-800">{selectedTransaction.void_reason}</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Reference / Notes */}
               {selectedTransaction.payment_reference && (
