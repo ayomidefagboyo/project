@@ -36,7 +36,7 @@ import StockReportModal from './modals/StockReportModal';
 
 // Staff Management Modals
 import StaffManagementModal from './modals/StaffManagementModal';
-import PinEntryModal from './PinEntryModal';
+// import PinEntryModal from './PinEntryModal'; // REMOVED: No longer used
 import NoStaffMessage from './NoStaffMessage';
 import ClockOutConfirmModal from '../modals/ClockOutConfirmModal';
 import LoginForm from '../auth/LoginForm';
@@ -148,7 +148,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   };
 
   // Determine what screen to show based on authentication state
-  const getScreenToShow = (): 'manager_login' | 'no_staff' | 'pin_entry' | 'pos_dashboard' => {
+  const getScreenToShow = (): 'manager_login' | 'no_staff' | 'pos_dashboard' => {
     // If no user is authenticated, show manager login
     if (!currentUser) {
       return 'manager_login';
@@ -159,9 +159,14 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       return 'no_staff';
     }
 
-    // If user is authenticated but staff not authenticated, show PIN entry
+    // If user is authenticated but staff not authenticated, redirect to reconfigure terminal
     if (currentUser && !isStaffAuthenticated) {
-      return 'pin_entry';
+      // Clear terminal configuration to force reconfiguration
+      localStorage.removeItem('pos_terminal_config');
+      localStorage.removeItem('pos_staff_session');
+      // Trigger page reload to go back to terminal setup phase
+      window.location.reload();
+      return 'pos_dashboard'; // This won't actually render due to reload
     }
 
     // If everything is ready, show POS dashboard
@@ -337,10 +342,9 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   const handleStaffAuthentication = (authResponse: StaffAuthResponse) => {
     setCurrentStaff(authResponse.staff_profile);
     setIsStaffAuthenticated(true);
-    setShowPinEntry(false);
 
     // Store staff session info
-    localStorage.setItem('staff_session', JSON.stringify({
+    localStorage.setItem('pos_staff_session', JSON.stringify({
       staff_profile: authResponse.staff_profile,
       session_token: authResponse.session_token,
       expires_at: authResponse.expires_at,
@@ -366,7 +370,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     setIsStaffAuthenticated(false);
 
     // Clear staff session
-    localStorage.removeItem('staff_session');
+    localStorage.removeItem('pos_staff_session');
 
     // Clear cart and reset POS state
     setCart([]);
@@ -389,7 +393,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
    * Check for existing staff session on load
    */
   const checkExistingStaffSession = () => {
-    const staffSession = localStorage.getItem('staff_session');
+    const staffSession = localStorage.getItem('pos_staff_session');
     if (staffSession) {
       try {
         const session = JSON.parse(staffSession);
@@ -400,14 +404,13 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
         if (expiresAt > now && session.outlet_id === currentOutlet?.id) {
           setCurrentStaff(session.staff_profile);
           setIsStaffAuthenticated(true);
-          setShowPinEntry(false);
         } else {
           // Session expired or different outlet, clear it
-          localStorage.removeItem('staff_session');
+          localStorage.removeItem('pos_staff_session');
         }
       } catch (err) {
         logger.error('Error parsing staff session:', err);
-        localStorage.removeItem('staff_session');
+        localStorage.removeItem('pos_staff_session');
       }
     }
   };
@@ -1256,21 +1259,21 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   }
 
 
-  // Show PIN Entry Screen
-  if (screenToShow === 'pin_entry') {
-    return (
-      <div className="min-h-screen bg-white">
-        <PinEntryModal
-          isOpen={true}
-          onClose={() => {}} // Can't close PIN entry
-          onSuccess={handleStaffAuthentication}
-          staffProfiles={staffProfiles}
-          onManagerLogin={handleManagerLoginFromPIN}
-          onForceReload={loadStaffProfiles}
-        />
-      </div>
-    );
-  }
+  // Show PIN Entry Screen - REMOVED: Now redirects to reconfigure terminal instead
+  // if (screenToShow === 'pin_entry') {
+  //   return (
+  //     <div className="min-h-screen bg-white">
+  //       <PinEntryModal
+  //         isOpen={true}
+  //         onClose={() => {}} // Can't close PIN entry
+  //         onSuccess={handleStaffAuthentication}
+  //         staffProfiles={staffProfiles}
+  //         onManagerLogin={handleManagerLoginFromPIN}
+  //         onForceReload={loadStaffProfiles}
+  //       />
+  //     </div>
+  //   );
+  // }
 
   return (
     <div className="p-6 bg-white min-h-screen">

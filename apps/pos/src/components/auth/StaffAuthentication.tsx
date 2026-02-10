@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Settings, AlertCircle, Shield, Clock, ChevronRight, Trash2 } from 'lucide-react';
+import { Settings, AlertCircle, Shield, ChevronRight, Trash2 } from 'lucide-react';
 import { staffService } from '@/lib/staffService';
 import { useToast } from '@/components/ui/Toast';
 
@@ -82,22 +82,33 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
         return;
       }
 
-      // For now, simulate authentication (replace with actual API call)
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Call actual authentication API
+      const authResponse = await staffService.authenticateWithPin({
+        staff_code: selectedStaffCode,
+        pin: pin,
+        outlet_id: terminalConfig.outlet_id
+      });
 
-      // Store staff session
+      // Check if authentication was successful
+      if (!authResponse || !authResponse.staff_profile) {
+        setError('Authentication failed. Please check your PIN.');
+        setPin('');
+        return;
+      }
+
+      // Store staff session from API response
       const staffSession = {
-        staff_profile: selectedStaff,
+        staff_profile: authResponse.staff_profile,
         outlet_id: terminalConfig.outlet_id,
-        session_token: `session_${Date.now()}`,
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours
+        session_token: authResponse.session_token,
+        expires_at: authResponse.expires_at,
         clocked_in_at: new Date().toISOString(),
       };
 
       localStorage.setItem('pos_staff_session', JSON.stringify(staffSession));
 
-      success(`Welcome, ${selectedStaff.display_name}!`);
-      onStaffAuthenticated(selectedStaff);
+      success(`Welcome, ${authResponse.staff_profile.display_name}!`);
+      onStaffAuthenticated(authResponse.staff_profile);
 
     } catch (err) {
       console.error('Authentication failed:', err);
@@ -187,223 +198,147 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
   }
 
   return (
-    <div className="min-h-screen bg-background flex">
-      {/* Left Side - Brand Panel (Desktop-first) */}
-      <div className="hidden lg:flex lg:w-2/5 xl:w-1/3 bg-primary relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-primary to-primary/80"></div>
-        <div className="relative z-10 flex flex-col justify-center px-12 py-16">
-          <div className="mb-16">
-            <h2 className="text-3xl font-light text-primary-foreground tracking-tight">
-              Compazz
-            </h2>
-            <div className="mt-2 h-0.5 w-16 bg-primary-foreground/30"></div>
-          </div>
+    <div
+      className="h-screen w-screen bg-background p-8 flex flex-col"
+      onKeyDown={handleKeyPress}
+      tabIndex={0}
+    >
+      {/* Header */}
+      <div className="text-center mb-8">
+        <h1 className="text-3xl font-light text-foreground tracking-tight mb-2">
+          Welcome to {terminalConfig.outlet_name}
+        </h1>
+        <p className="text-muted-foreground">
+          Select your profile and enter your PIN to clock in
+        </p>
+      </div>
 
-          <div className="max-w-sm space-y-8">
-            <h1 className="text-4xl font-light text-primary-foreground mb-6 leading-tight">
-              Professional Staff Clock-In System
-            </h1>
+      {/* Staff Profiles Grid */}
+      <div className="flex-1 flex flex-col items-center justify-center">
+        <div className="grid grid-cols-6 gap-6 max-w-6xl w-full mb-12">
+          {staffProfiles.map((staff) => (
+            <button
+              key={staff.id}
+              onClick={() => {
+                setSelectedStaffCode(staff.staff_code);
+                setPin('');
+                setError('');
+              }}
+              className={`p-4 border-2 rounded-lg transition-all duration-200 text-center ${
+                selectedStaffCode === staff.staff_code
+                  ? 'border-primary bg-primary/5'
+                  : 'border-border bg-card hover:border-border/60'
+              }`}
+            >
+              <div className="flex flex-col items-center space-y-3">
+                <div className={`w-16 h-16 rounded-full flex items-center justify-center font-medium text-lg ${
+                  selectedStaffCode === staff.staff_code
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-secondary text-secondary-foreground'
+                }`}>
+                  {staff.display_name.charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0 w-full">
+                  <h3 className="font-medium text-foreground truncate">{staff.display_name}</h3>
+                  <span className="text-xs px-2 py-1 bg-secondary text-secondary-foreground rounded font-medium mt-1 inline-block">
+                    {staff.role}
+                  </span>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
 
-            <div className="space-y-6">
-              <div className="flex items-center text-primary-foreground/80">
-                <Shield className="w-5 h-5 mr-4 flex-shrink-0" />
-                <span className="font-light">Secure PIN-based authentication</span>
-              </div>
-              <div className="flex items-center text-primary-foreground/80">
-                <Clock className="w-5 h-5 mr-4 flex-shrink-0" />
-                <span className="font-light">Real-time attendance tracking</span>
-              </div>
-              <div className="flex items-center text-primary-foreground/80">
-                <Users className="w-5 h-5 mr-4 flex-shrink-0" />
-                <span className="font-light">Multi-staff terminal support</span>
-              </div>
+        {/* PIN Entry Section */}
+        <div className="w-full max-w-sm relative">
+          <div className="text-center mb-6">
+            {/* PIN Display */}
+            <div className="flex justify-center space-x-3">
+              {[...Array(6)].map((_, index) => (
+                <div
+                  key={index}
+                  className={`w-12 h-12 border-2 rounded-lg flex items-center justify-center transition-all duration-200 ${
+                    pin.length > index
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border bg-card'
+                  }`}
+                >
+                  <div className={`w-3 h-3 rounded-full transition-all duration-200 ${
+                    pin.length > index ? 'bg-primary' : 'bg-transparent'
+                  }`}></div>
+                </div>
+              ))}
             </div>
 
-            <div className="pt-8 text-primary-foreground/60 text-sm font-light">
-              Terminal: {terminalConfig.outlet_name}
+            {/* Error Display - Overlay to the right of PIN dots */}
+            {error && (
+              <div className="absolute top-0 left-full ml-4 z-20">
+                <div className="px-4 py-2 bg-destructive text-destructive-foreground rounded-lg shadow-lg text-sm font-medium whitespace-nowrap">
+                  {error}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* PIN Pad */}
+          <div>
+            <div className="grid grid-cols-3 gap-4 mb-4">
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                <button
+                  key={num}
+                  onClick={() => handlePinInput(num.toString())}
+                  className="h-16 bg-card border border-border hover:bg-accent hover:border-accent-foreground/20 rounded-lg font-medium text-xl transition-all duration-200 active:scale-95"
+                  disabled={isAuthenticating || !selectedStaffCode}
+                >
+                  {num}
+                </button>
+              ))}
+            </div>
+
+            {/* Bottom row */}
+            <div className="grid grid-cols-3 gap-4">
+              <button
+                onClick={handlePinDelete}
+                className="h-16 bg-card border border-border hover:bg-accent hover:border-accent-foreground/20 rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center"
+                disabled={isAuthenticating || pin.length === 0 || !selectedStaffCode}
+              >
+                <Trash2 className="w-6 h-6 text-muted-foreground" />
+              </button>
+              <button
+                onClick={() => handlePinInput('0')}
+                className="h-16 bg-card border border-border hover:bg-accent hover:border-accent-foreground/20 rounded-lg font-medium text-xl transition-all duration-200 active:scale-95"
+                disabled={isAuthenticating || !selectedStaffCode}
+              >
+                0
+              </button>
+              <button
+                onClick={handleAuthentication}
+                disabled={pin.length !== 6 || isAuthenticating || !selectedStaffCode}
+                className="h-16 bg-primary hover:bg-primary/90 disabled:bg-muted disabled:cursor-not-allowed text-primary-foreground rounded-lg font-medium transition-all duration-200 active:scale-95 flex items-center justify-center disabled:text-muted-foreground"
+              >
+                {isAuthenticating ? (
+                  <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary-foreground border-t-transparent"></div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-5 h-5" />
+                    <span>Clock In</span>
+                  </div>
+                )}
+              </button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Right Side - Authentication Interface */}
-      <div className="w-full lg:w-3/5 xl:w-2/3 flex items-center justify-center p-8 lg:p-16">
-        <div className="w-full max-w-2xl space-y-12">
-
-          {/* Mobile Header - Only visible on smaller screens */}
-          <div className="lg:hidden text-center space-y-4">
-            <h2 className="text-3xl font-light text-foreground tracking-tight">
-              Compazz
-            </h2>
-            <div className="space-y-2">
-              <h1 className="text-2xl font-medium text-foreground">Staff Clock In</h1>
-              <p className="text-muted-foreground">{terminalConfig.outlet_name}</p>
-            </div>
-          </div>
-
-          {/* Desktop Header */}
-          <div className="hidden lg:block space-y-3">
-            <h1 className="text-3xl font-light text-foreground tracking-tight">
-              Welcome to your workspace
-            </h1>
-            <p className="text-muted-foreground text-lg">
-              Select your profile and enter your PIN to clock in
-            </p>
-          </div>
-
-          {/* Staff Selection */}
-          <div className="space-y-6">
-            <div className="space-y-3">
-              <h2 className="text-xl font-medium text-foreground">Select Your Profile</h2>
-              <p className="text-muted-foreground">Choose your staff profile to continue</p>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 max-h-80 overflow-y-auto pr-2">
-              {staffProfiles.map((staff) => (
-                <button
-                  key={staff.id}
-                  onClick={() => {
-                    setSelectedStaffCode(staff.staff_code);
-                    setPin('');
-                    setError('');
-                  }}
-                  className={`p-6 rounded-xl border-2 transition-all duration-200 text-left hover:shadow-[var(--shadow-medium)] ${
-                    selectedStaffCode === staff.staff_code
-                      ? 'border-primary bg-primary/5 shadow-[var(--shadow-medium)]'
-                      : 'border-border bg-card hover:border-border/60'
-                  }`}
-                >
-                  <div className="flex items-center space-x-4">
-                    <div className={`w-12 h-12 rounded-full flex items-center justify-center font-medium text-lg ${
-                      selectedStaffCode === staff.staff_code
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-secondary text-secondary-foreground'
-                    }`}>
-                      {staff.display_name.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-medium text-foreground truncate">{staff.display_name}</h3>
-                      <div className="flex items-center space-x-2 mt-1">
-                        <span className="text-sm text-muted-foreground">{staff.staff_code}</span>
-                        <span className="text-xs px-2 py-1 bg-secondary text-secondary-foreground rounded-md font-medium">
-                          {staff.role}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* PIN Entry Section */}
-          {selectedStaffCode && (
-            <div className="space-y-8">
-              <div className="space-y-3">
-                <h2 className="text-xl font-medium text-foreground">Enter Your PIN</h2>
-                <p className="text-muted-foreground">
-                  Enter your 6-digit security PIN for{' '}
-                  <span className="font-medium text-foreground">
-                    {staffProfiles.find(s => s.staff_code === selectedStaffCode)?.display_name}
-                  </span>
-                </p>
-              </div>
-
-              {/* PIN Display - Desktop-first larger dots */}
-              <div className="flex justify-center space-x-4 lg:space-x-6">
-                {[...Array(6)].map((_, index) => (
-                  <div
-                    key={index}
-                    className={`w-16 h-16 lg:w-20 lg:h-20 border-2 rounded-xl flex items-center justify-center transition-all duration-200 ${
-                      pin.length > index
-                        ? 'border-primary bg-primary/10 shadow-[var(--shadow-medium)]'
-                        : 'border-border bg-card'
-                    }`}
-                  >
-                    <div className={`w-4 h-4 lg:w-5 lg:h-5 rounded-full transition-all duration-200 ${
-                      pin.length > index ? 'bg-primary scale-100' : 'bg-transparent scale-0'
-                    }`}></div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Error Display */}
-              {error && (
-                <div className="text-center px-4 py-3 bg-destructive/10 border border-destructive/20 rounded-lg">
-                  <p className="text-destructive text-sm font-medium">{error}</p>
-                </div>
-              )}
-
-              {/* PIN Pad - Touch-optimized for desktop */}
-              <div className="max-w-md mx-auto">
-                <div className="grid grid-cols-3 gap-4 lg:gap-6 mb-6">
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-                    <button
-                      key={num}
-                      onClick={() => handlePinInput(num.toString())}
-                      className="h-16 lg:h-20 bg-card border border-border hover:bg-accent hover:border-accent-foreground/20 rounded-xl font-medium text-xl lg:text-2xl transition-all duration-200 shadow-[var(--shadow-subtle)] hover:shadow-[var(--shadow-medium)] active:scale-95"
-                      disabled={isAuthenticating}
-                    >
-                      {num}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Bottom row with 0, delete, and submit */}
-                <div className="grid grid-cols-3 gap-4 lg:gap-6">
-                  <button
-                    onClick={handlePinDelete}
-                    className="h-16 lg:h-20 bg-card border border-border hover:bg-accent hover:border-accent-foreground/20 rounded-xl transition-all duration-200 shadow-[var(--shadow-subtle)] hover:shadow-[var(--shadow-medium)] active:scale-95 flex items-center justify-center"
-                    disabled={isAuthenticating || pin.length === 0}
-                  >
-                    <Trash2 className="w-6 h-6 lg:w-7 lg:h-7 text-muted-foreground" />
-                  </button>
-                  <button
-                    onClick={() => handlePinInput('0')}
-                    className="h-16 lg:h-20 bg-card border border-border hover:bg-accent hover:border-accent-foreground/20 rounded-xl font-medium text-xl lg:text-2xl transition-all duration-200 shadow-[var(--shadow-subtle)] hover:shadow-[var(--shadow-medium)] active:scale-95"
-                    disabled={isAuthenticating}
-                  >
-                    0
-                  </button>
-                  <button
-                    onClick={handleAuthentication}
-                    disabled={pin.length !== 6 || isAuthenticating}
-                    className="h-16 lg:h-20 bg-primary hover:bg-primary/90 disabled:bg-muted disabled:cursor-not-allowed text-primary-foreground rounded-xl font-medium transition-all duration-200 shadow-[var(--shadow-subtle)] hover:shadow-[var(--shadow-medium)] active:scale-95 flex items-center justify-center disabled:text-muted-foreground"
-                  >
-                    {isAuthenticating ? (
-                      <div className="animate-spin rounded-full h-6 w-6 lg:h-7 lg:w-7 border-2 border-primary-foreground border-t-transparent"></div>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <Shield className="w-5 h-5 lg:w-6 lg:h-6" />
-                        <span className="text-lg lg:text-xl">Clock In</span>
-                      </div>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Terminal Info Footer */}
-          <div className="border-t border-border pt-8 mt-12 space-y-4">
-            <div className="text-center space-y-3">
-              <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
-                <Clock className="w-4 h-4" />
-                <span>Terminal initialized by</span>
-                <span className="font-medium text-foreground">{terminalConfig.initialized_by}</span>
-              </div>
-
-              <button
-                onClick={onReconfigure}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-secondary text-secondary-foreground rounded-lg hover:bg-secondary/80 transition-all duration-200 text-sm font-medium"
-              >
-                <Settings className="w-4 h-4" />
-                Reconfigure Terminal
-              </button>
-            </div>
-          </div>
-
-        </div>
+      {/* Footer */}
+      <div className="text-center pt-6">
+        <button
+          onClick={onReconfigure}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-secondary text-secondary-foreground rounded-lg hover:bg-secondary/80 transition-all duration-200 text-sm font-medium"
+        >
+          <Settings className="w-4 h-4" />
+          Reconfigure Terminal
+        </button>
       </div>
     </div>
   );
