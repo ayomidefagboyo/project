@@ -5,6 +5,7 @@ import ProductManagement, { type ProductManagementHandle } from './components/po
 import POSEODDashboard from './pages/EODDashboard';
 import TransactionsPage from './pages/TransactionsPage';
 import ReceiveItemsPage from './pages/ReceiveItemsPage';
+import SettingsPage from './pages/SettingsPage';
 import AppLayout from './components/layout/AppLayout';
 import { OutletProvider, useOutlet } from './contexts/OutletContext';
 import { Upload, Download, Plus, Wifi, WifiOff, ChevronDown } from 'lucide-react';
@@ -472,6 +473,7 @@ function AppContent() {
         <Route path="/products" element={<ProductManagement ref={productManagementRef} />} />
         <Route path="/receive" element={<ReceiveItemsPage />} />
         <Route path="/eod" element={<POSEODDashboard />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="/auth" element={<AuthWrapper onAuthSuccess={() => window.location.href = '/'} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
