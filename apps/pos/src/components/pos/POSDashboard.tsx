@@ -10,6 +10,7 @@ import {
   RotateCcw,
   X,
   User,
+  Check,
 } from 'lucide-react';
 import { useOutlet } from '../../contexts/OutletContext';
 import { posService, PaymentMethod } from '../../lib/posService';
@@ -84,8 +85,11 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [posError, setPosError] = useState<string | null>(null);
-  const [showCashInput, setShowCashInput] = useState(false);
-  const [cashAmount, setCashAmount] = useState('');
+  const [tenderModal, setTenderModal] = useState<{
+    method: 'cash' | 'card' | 'transfer';
+    amount: string;
+    error?: string;
+  } | null>(null);
 
   // Split Payment State
   const [activePayments, setActivePayments] = useState<{
@@ -496,11 +500,12 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
             : item
         );
       } else {
-        // Add new item with tax-inclusive pricing
+        // Add new item – treat product.unit_price as VAT-inclusive final price
         return [...prevCart, {
           product,
           quantity,
-          unitPrice: product.unit_price * (1 + product.tax_rate),
+          // IMPORTANT: unitPrice is already VAT-inclusive; we DO NOT add tax again here.
+          unitPrice: product.unit_price,
           discount: 0
         }];
       }
@@ -848,21 +853,30 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
    */
   const calculateCartTotals = () => {
     let subtotal = 0;
-    let totalTax = 0;
+    let totalTax = 0; // VAT portion (for reporting only)
     let totalDiscount = 0;
 
     cart.forEach(item => {
+      // unitPrice is VAT-inclusive, so lineSubtotal is the gross amount charged
       const lineSubtotal = item.unitPrice * item.quantity;
       const lineDiscount = item.discount * item.quantity;
-      const lineTaxableAmount = lineSubtotal - lineDiscount;
-      const lineTax = lineTaxableAmount * item.product.tax_rate;
+      const lineGrossAfterDiscount = lineSubtotal - lineDiscount;
+
+      // Derive VAT portion from VAT-inclusive price for reporting (do NOT add to total again)
+      const rate = item.product.tax_rate || 0;
+      let lineTax = 0;
+      if (rate > 0) {
+        // VAT portion from inclusive price: gross - net = gross * (rate / (1 + rate))
+        lineTax = lineGrossAfterDiscount * (rate / (1 + rate));
+      }
 
       subtotal += lineSubtotal;
       totalDiscount += lineDiscount;
       totalTax += lineTax;
     });
 
-    const total = subtotal - totalDiscount + totalTax;
+    // Total the customer pays is the VAT-inclusive amount already in unitPrice
+    const total = subtotal - totalDiscount;
 
     return {
       subtotal,
@@ -883,80 +897,60 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   };
 
   /**
-   * Toggle payment method for split payments
+   * Helpers for split tendering (QuickBooks-style)
    */
-  const togglePaymentMethod = (method: 'cash' | 'card' | 'transfer') => {
-    if (!cart.length) return;
-
+  const getRemainingForMethod = (method: 'cash' | 'card' | 'transfer') => {
     const totals = calculateCartTotals();
-    setActivePayments(prev => {
-      const updated = { ...prev };
-      
-      // Calculate current total paid (excluding the method being toggled)
-      const currentPaid = (method === 'cash' ? 0 : (updated.cash || 0)) +
-                          (method === 'card' ? 0 : (updated.card || 0)) +
-                          (method === 'transfer' ? 0 : (updated.transfer || 0));
-      const remaining = Math.max(0, totals.total - currentPaid);
+    const otherPaid =
+      (method === 'cash' ? 0 : (activePayments.cash || 0)) +
+      (method === 'card' ? 0 : (activePayments.card || 0)) +
+      (method === 'transfer' ? 0 : (activePayments.transfer || 0));
+    return Math.max(0, totals.total - otherPaid);
+  };
 
-      if (method === 'cash') {
-        if (updated.cash) {
-          delete updated.cash;
-          setShowCashInput(false);
-          setCashAmount('');
-        } else {
-          // Set cash amount to remaining balance
-          updated.cash = remaining;
-          setShowCashInput(true);
-          setCashAmount(remaining.toString());
-        }
-      } else if (method === 'card') {
-        if (updated.card) {
-          delete updated.card;
-        } else {
-          // Set card amount to remaining balance
-          updated.card = remaining;
-        }
-      } else if (method === 'transfer') {
-        if (updated.transfer) {
-          delete updated.transfer;
-        } else {
-          // Set transfer amount to remaining balance
-          updated.transfer = remaining;
-        }
-      }
-
-      return updated;
+  const openTenderModal = (method: 'cash' | 'card' | 'transfer') => {
+    if (!cart.length) return;
+    const remaining = getRemainingForMethod(method);
+    const existing = activePayments[method];
+    setTenderModal({
+      method,
+      amount: (existing ?? remaining).toString(),
     });
   };
 
-  /**
-   * Update cash amount in split payment
-   */
-  const updateCashAmount = (amount: string) => {
-    setCashAmount(amount);
-    const numAmount = parseFloat(amount) || 0;
-    
-    if (numAmount > 0) {
-      const totals = calculateCartTotals();
-      // Calculate remaining balance excluding cash
-      const otherPayments = (activePayments.card || 0) + (activePayments.transfer || 0);
-      const remaining = Math.max(0, totals.total - otherPayments);
-      
-      // Cap cash amount at remaining balance
-      const cappedAmount = Math.min(numAmount, remaining);
-      setActivePayments(prev => ({ ...prev, cash: cappedAmount }));
-      
-      // Update cash amount display if it was capped
-      if (cappedAmount < numAmount) {
-        setCashAmount(cappedAmount.toString());
-      }
-    } else {
+  const applyTender = () => {
+    if (!tenderModal) return;
+
+    const method = tenderModal.method;
+    const remaining = getRemainingForMethod(method);
+    const numAmount = parseFloat(tenderModal.amount) || 0;
+
+    // Validate
+    if (numAmount <= 0) {
+      // Remove this method if amount is cleared
       setActivePayments(prev => {
-        const updated = { ...prev };
-        delete updated.cash;
+        const updated: { cash?: number; card?: number; transfer?: number } = { ...prev };
+        delete updated[method];
         return updated;
       });
+      setTenderModal(null);
+      return;
     }
+
+    // Only CASH can exceed remaining (cashback/change). Card/transfer are capped.
+    if (method !== 'cash' && numAmount > remaining) {
+      setTenderModal(prev => prev ? ({ ...prev, error: `Amount cannot exceed ${formatCurrency(remaining)}` }) : prev);
+      return;
+    }
+
+    setActivePayments(prev => ({ ...prev, [method]: numAmount }));
+    setTenderModal(null);
+  };
+
+  const closeTenderModal = () => setTenderModal(null);
+
+  const updateTenderAmount = (amount: string) => {
+    setTenderModal(prev => prev ? ({ ...prev, amount, error: undefined }) : prev);
   };
 
 
@@ -990,7 +984,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
         items,
         payment_method: paymentMethod,
         tendered_amount: tenderedAmount,
-        discount_amount: totals.totalDiscount
+        // We already send per-line discounts; keep transaction-level discount 0 for now
+        discount_amount: 0
       };
 
       // Process transaction (online or offline)
@@ -1059,7 +1054,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
         items,
         payment_method: splitPayments.length === 1 ? splitPayments[0].method : PaymentMethod.CASH, // Primary method
         tendered_amount: totalPaid,
-        discount_amount: totals.totalDiscount,
+        // Per-line discounts already included in items; keep transaction-level discount 0 for now
+        discount_amount: 0,
         notes,
         customer_id: selectedCustomer?.id,
         customer_name: selectedCustomer?.name,
@@ -1068,10 +1064,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       let transaction;
       if (isOnline) {
         transaction = await posService.createTransaction(transactionRequest);
-        
-        // Show success message
-        success(`Transaction completed! Total: ${formatCurrency(totals.total)}`, 4000);
-        
+
         // Handle receipt printing
         if (mode === 'save_and_print' && transaction?.id) {
           try {
@@ -1103,7 +1096,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       } else {
         await posService.storeOfflineTransaction(transactionRequest);
         setOfflineTransactionCount(prev => prev + 1);
-        success(`Transaction saved offline. Will sync when online.`, 4000);
       }
 
       // Delete held receipt if this sale was restored from one
@@ -1124,8 +1116,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       // Reset and clear
       clearCart();
       setActivePayments({});
-      setShowCashInput(false);
-      setCashAmount('');
+      setTenderModal(null);
       setRestoredHeldReceiptId(null);
       setSelectedCustomer(null); // Clear customer after transaction
 
@@ -1136,112 +1127,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     }
   };
 
-  /**
-   * Handle cash payment with amount (legacy single payment)
-   * mode: 'save' -> save only
-   *       'save_and_print' -> save then print receipt (online only)
-   */
-  const handleCashPayment = async (mode: 'save' | 'save_and_print' = 'save') => {
-    const amount = parseFloat(cashAmount);
-    const totals = calculateCartTotals();
-
-    if (isNaN(amount) || amount < totals.total) {
-      // invalid amount: do nothing; cashier can correct and retry
-      return;
-    }
-
-    if (!currentUser?.id || !currentOutlet?.id) return;
-
-    try {
-      // Prepare transaction items
-      const items = cart.map(item => ({
-        product_id: item.product.id,
-        quantity: item.quantity,
-        unit_price: item.unitPrice,
-        discount_amount: item.discount * item.quantity
-      }));
-
-      // Create transaction request
-      const transactionRequest = {
-        outlet_id: currentOutlet.id,
-        cashier_id: currentUser.id,
-        items,
-        payment_method: PaymentMethod.CASH,
-        tendered_amount: amount,
-        discount_amount: totals.totalDiscount,
-        customer_id: selectedCustomer?.id,
-        customer_name: selectedCustomer?.name,
-      };
-
-      // Process transaction (online or offline)
-      let transaction;
-      if (isOnline) {
-        transaction = await posService.createTransaction(transactionRequest);
-        
-        // Show success message
-        success(`Transaction completed! Total: ${formatCurrency(totals.total)}`, 4000);
-        
-        // Optionally print receipt
-        if (mode === 'save_and_print' && transaction?.id) {
-          try {
-            const printResult = await posService.printReceipt(transaction.id);
-            // Open print dialog with receipt content
-            if (printResult?.receipt_content) {
-              const printWindow = window.open('', '_blank');
-              if (printWindow) {
-                printWindow.document.write(`
-                  <html>
-                    <head><title>Receipt</title></head>
-                    <body style="font-family: monospace; padding: 20px;">
-                      <pre style="white-space: pre-wrap;">${printResult.receipt_content}</pre>
-                      <script>window.onload = () => window.print();</script>
-                    </body>
-                  </html>
-                `);
-                printWindow.document.close();
-              }
-            }
-          } catch (printError: any) {
-            logger.error('Receipt print error:', printError);
-            error(`Receipt printing failed: ${printError.message || 'Unknown error'}`, 5000);
-          }
-        }
-        
-        // Reload products to update stock quantities
-        loadProducts();
-      } else {
-        const offlineId = await posService.storeOfflineTransaction(transactionRequest);
-        setOfflineTransactionCount(prev => prev + 1);
-        success(`Transaction saved offline. Will sync when online.`, 4000);
-      }
-
-      // Delete held receipt if this sale was restored from one
-      if (restoredHeldReceiptId) {
-        try {
-          if (isOnline) {
-            await posService.deleteHeldReceipt(restoredHeldReceiptId);
-          }
-          // Remove from local list if still there
-          const remaining = heldSales.filter((s) => s.id !== restoredHeldReceiptId);
-          await persistHeldSales(remaining);
-        } catch (err) {
-          logger.error('Failed to delete held receipt after sale:', err);
-          // Continue anyway - sale is complete
-        }
-      }
-
-      // Clear cart and close cash input
-      clearCart();
-      setShowCashInput(false);
-      setCashAmount('');
-      setRestoredHeldReceiptId(null);
-      setSelectedCustomer(null); // Clear customer after transaction
-
-    } catch (err) {
-      logger.error('Payment error:', err);
-      // keep cart and cash input so cashier can retry
-    }
-  };
+  // NOTE: Legacy single-method cash flow removed.
+  // All payments (cash/card/transfer, single or split) now use handleSplitPayment + tender popup.
 
   // Get unique categories for filter
 
@@ -1371,22 +1258,26 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                 </div>
               )}
 
-              {/* Total Section - at top of payment section */}
+              {/* Amount Due Section - at top of payment section */}
               <div className="mb-4 pb-4 border-b border-gray-200">
                 <div className="flex flex-col items-end gap-1">
-                  {/* Total */}
+                  {/* Always show Amount Due (matches QuickBooks-style terminal) */}
                   <div className="flex items-baseline gap-2">
-                    <span className="text-sm font-medium text-gray-600">Total:</span>
-                    <span className="text-4xl font-bold text-orange-600">{formatCurrency(cartTotals.total)}</span>
+                    <span className="text-sm font-medium text-gray-600">Amount Due:</span>
+                    <span className="text-4xl font-bold text-orange-600">
+                      {formatCurrency(
+                        cart.length === 0 ? 0 : calculateRemainingBalance()
+                      )}
+                    </span>
                   </div>
                   
                   {/* Payment Split Details - only show when multiple payment methods are active */}
-                  {Object.keys(activePayments).length > 1 && (() => {
+                  {Object.keys(activePayments).length > 0 && (() => {
                     const remaining = calculateRemainingBalance();
                     const totalPaid = (activePayments.cash || 0) + (activePayments.card || 0) + (activePayments.transfer || 0);
                     return (
                       <div className="text-xs text-gray-600">
-                        <span className="font-semibold">Split: </span>
+                        <span className="font-semibold">Payments: </span>
                         {activePayments.cash && (
                           <span>Cash {formatCurrency(activePayments.cash)}</span>
                         )}
@@ -1412,72 +1303,115 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                 </div>
               </div>
 
-              {showCashInput ? (() => {
-                const otherPayments = (activePayments.card || 0) + (activePayments.transfer || 0);
-                const remaining = Math.max(0, cartTotals.total - otherPayments);
-                const currentCash = parseFloat(cashAmount) || 0;
-                const change = currentCash > remaining ? currentCash - remaining : 0;
-                
+              {/* QuickBooks-style tender modal */}
+              {tenderModal && (() => {
+                const remaining = getRemainingForMethod(tenderModal.method);
+                const entered = parseFloat(tenderModal.amount) || 0;
+                const change = tenderModal.method === 'cash' && entered > remaining ? entered - remaining : 0;
+                const title = tenderModal.method === 'cash' ? 'Cash Payment' : tenderModal.method === 'card' ? 'Card Payment' : 'Transfer Payment';
+
                 return (
-                  /* Cash Calculator Interface - Compact */
-                  <div className="mb-4 pb-4 border-b border-gray-200">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-base font-semibold text-gray-900">Cash Payment</h3>
-                      <div className="flex items-baseline gap-2">
-                        <span className="text-sm font-medium text-gray-600">Amount Due:</span>
-                        <span className="text-lg font-bold text-orange-600">{formatCurrency(remaining)}</span>
-                      </div>
-                    </div>
-
-                    {/* Quick Amount Buttons */}
-                    <div className="flex gap-2 mb-3">
-                      <button
-                        onClick={() => updateCashAmount(remaining.toString())}
-                        className="px-3 py-2 bg-orange-100 hover:bg-orange-200 text-orange-900 text-sm font-bold rounded-lg transition-colors"
-                      >
-                        Exact
-                      </button>
-                      <button
-                        onClick={() => updateCashAmount((Math.ceil(remaining / 1000) * 1000).toString())}
-                        className="px-3 py-2 bg-orange-100 hover:bg-orange-200 text-orange-900 text-sm font-bold rounded-lg transition-colors"
-                      >
-                        Round ₦1k
-                      </button>
-                      <button
-                        onClick={() => updateCashAmount((Math.ceil(remaining / 5000) * 5000).toString())}
-                        className="px-3 py-2 bg-orange-100 hover:bg-orange-200 text-orange-900 text-sm font-bold rounded-lg transition-colors"
-                      >
-                        Round ₦5k
-                      </button>
-                    </div>
-
-                    {/* Manual Input */}
-                    <div className="flex items-center space-x-3">
-                      <div className="flex-1">
-                        <input
-                          type="number"
-                          value={cashAmount}
-                          onChange={(e) => updateCashAmount(e.target.value)}
-                          placeholder={`Enter cash amount (max ${formatCurrency(remaining)})`}
-                          max={remaining}
-                          className="w-full px-3 py-2 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                          autoFocus
-                        />
-                      </div>
-
-                      {/* Change Display */}
-                      {change > 0 && (
-                        <div className="flex-shrink-0 bg-green-50 px-3 py-2 rounded-lg">
-                          <div className="text-xs text-green-600 font-medium">Change</div>
-                          <div className="text-base font-bold text-green-900">
-                            {formatCurrency(change)}
-                          </div>
+                  <>
+                    <div className="fixed inset-0 z-40 bg-black/40" onClick={closeTenderModal} />
+                    <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[92vw] max-w-md bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden">
+                      <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                        <div>
+                          <h3 className="text-lg font-bold text-gray-900">{title}</h3>
+                          <p className="text-xs text-gray-500 mt-0.5">Amount due: {formatCurrency(remaining)}</p>
                         </div>
-                      )}
+                        <button onClick={closeTenderModal} className="p-2 hover:bg-gray-100 rounded-lg">
+                          <X className="w-5 h-5 text-gray-500" />
+                        </button>
+                      </div>
+
+                      <div className="p-5 space-y-3">
+                        {/* Quick buttons */}
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => updateTenderAmount(remaining.toString())}
+                            className="flex-1 px-3 py-2 bg-orange-100 hover:bg-orange-200 text-orange-900 text-sm font-bold rounded-lg transition-colors"
+                          >
+                            Exact
+                          </button>
+                          <button
+                            onClick={() => updateTenderAmount((Math.ceil(remaining / 1000) * 1000).toString())}
+                            className="flex-1 px-3 py-2 bg-orange-100 hover:bg-orange-200 text-orange-900 text-sm font-bold rounded-lg transition-colors"
+                          >
+                            Round ₦1k
+                          </button>
+                          <button
+                            onClick={() => updateTenderAmount((Math.ceil(remaining / 5000) * 5000).toString())}
+                            className="flex-1 px-3 py-2 bg-orange-100 hover:bg-orange-200 text-orange-900 text-sm font-bold rounded-lg transition-colors"
+                          >
+                            Round ₦5k
+                          </button>
+                        </div>
+
+                        {/* Amount input */}
+                        <div className="flex items-start gap-3">
+                          <div className="flex-1">
+                            <label className="block text-xs font-medium text-gray-500 mb-1">Amount</label>
+                            <input
+                              type="number"
+                              value={tenderModal.amount}
+                              onChange={(e) => updateTenderAmount(e.target.value)}
+                              className="w-full px-3 py-2.5 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                              autoFocus
+                            />
+                            {tenderModal.error && (
+                              <p className="text-xs text-red-600 mt-1">{tenderModal.error}</p>
+                            )}
+                            {tenderModal.method !== 'cash' && (
+                              <p className="text-[11px] text-gray-400 mt-1">Card/Transfer cannot exceed amount due.</p>
+                            )}
+                          </div>
+
+                          {/* Change display (cash only) */}
+                          {change > 0 && (
+                            <div className="flex-shrink-0 bg-green-50 px-3 py-2 rounded-lg mt-6">
+                              <div className="text-xs text-green-600 font-medium">Change</div>
+                              <div className="text-base font-bold text-green-900">
+                                {formatCurrency(change)}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-between">
+                        <button
+                          onClick={() => {
+                            // Clear this tender
+                            setActivePayments(prev => {
+                              const updated: { cash?: number; card?: number; transfer?: number } = { ...prev };
+                              delete updated[tenderModal.method];
+                              return updated;
+                            });
+                            setTenderModal(null);
+                          }}
+                          className="px-4 py-2 text-sm font-semibold text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                        >
+                          Clear
+                        </button>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={closeTenderModal}
+                            className="px-4 py-2 text-sm font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={applyTender}
+                            className="px-4 py-2 text-sm font-semibold text-white bg-orange-600 hover:bg-orange-700 rounded-lg transition-colors"
+                          >
+                            OK
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  </>
                 );
-              })() : null}
+              })()}
 
               {/* Permanent Payment Method Buttons - Always visible, show active state */}
               {(() => {
@@ -1487,7 +1421,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                 return (
                   <div className="flex items-center space-x-3 mb-4">
                     <button
-                      onClick={() => togglePaymentMethod('cash')}
+                      onClick={() => openTenderModal('cash')}
                       disabled={cart.length === 0 || (isFullyPaid && !activePayments.cash)}
                       className={`px-6 py-3 text-white text-lg font-bold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                         activePayments.cash
@@ -1495,10 +1429,14 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                           : 'bg-orange-600 hover:bg-orange-700'
                       }`}
                     >
-                      CASH
+                      <span className="inline-flex items-center gap-2">
+                        {activePayments.cash ? <Check className="w-5 h-5" /> : null}
+                        CASH
+                        {activePayments.cash ? <span className="text-sm font-bold">{formatCurrency(activePayments.cash)}</span> : null}
+                      </span>
                     </button>
                     <button
-                      onClick={() => togglePaymentMethod('card')}
+                      onClick={() => openTenderModal('card')}
                       disabled={cart.length === 0 || (isFullyPaid && !activePayments.card)}
                       className={`px-6 py-3 text-white text-lg font-bold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                         activePayments.card
@@ -1506,10 +1444,14 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                           : 'bg-orange-600 hover:bg-orange-700'
                       }`}
                     >
-                      CREDIT
+                      <span className="inline-flex items-center gap-2">
+                        {activePayments.card ? <Check className="w-5 h-5" /> : null}
+                        CARD
+                        {activePayments.card ? <span className="text-sm font-bold">{formatCurrency(activePayments.card)}</span> : null}
+                      </span>
                     </button>
                     <button
-                      onClick={() => togglePaymentMethod('transfer')}
+                      onClick={() => openTenderModal('transfer')}
                       disabled={cart.length === 0 || (isFullyPaid && !activePayments.transfer)}
                       className={`px-6 py-3 text-white text-lg font-bold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                         activePayments.transfer
@@ -1517,7 +1459,11 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                           : 'bg-orange-600 hover:bg-orange-700'
                       }`}
                     >
-                      TRANSFER
+                      <span className="inline-flex items-center gap-2">
+                        {activePayments.transfer ? <Check className="w-5 h-5" /> : null}
+                        TRANSFER
+                        {activePayments.transfer ? <span className="text-sm font-bold">{formatCurrency(activePayments.transfer)}</span> : null}
+                      </span>
                     </button>
                   </div>
                 );
@@ -1529,8 +1475,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                 <button
                   onClick={() => {
                     setActivePayments({});
-                    setShowCashInput(false);
-                    setCashAmount('');
+                    setTenderModal(null);
                     clearCart();
                   }}
                   disabled={cart.length === 0 && Object.keys(activePayments).length === 0}
@@ -1558,23 +1503,22 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                   {hasHeldSale && cart.length === 0 ? 'Held Receipts' : 'Put on Hold'}
                 </button>
                 {(() => {
-                  const totals = calculateCartTotals();
-                  const totalPaid = (activePayments.cash || 0) + (activePayments.card || 0) + (activePayments.transfer || 0);
-                  const isTotalCovered = totalPaid >= totals.total;
                   const hasActivePayments = Object.keys(activePayments).length > 0;
+                  const remaining = calculateRemainingBalance();
+                  const canFinalize = hasActivePayments && remaining <= 0;
                   
                   return (
                     <>
                       <button
                         onClick={() => handleSplitPayment('save')}
-                        disabled={!hasActivePayments || !isTotalCovered}
+                        disabled={!canFinalize}
                         className="px-4 py-3 bg-orange-600 hover:bg-orange-700 text-white text-lg font-bold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Save Only
                       </button>
                       <button
                         onClick={() => handleSplitPayment('save_and_print')}
-                        disabled={!hasActivePayments || !isTotalCovered}
+                        disabled={!canFinalize}
                         className="px-4 py-3 bg-orange-600 hover:bg-orange-700 text-white text-lg font-bold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Save &amp; Print
