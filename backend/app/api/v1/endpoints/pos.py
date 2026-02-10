@@ -5,7 +5,7 @@ Nigerian Supermarket Focus
 
 from fastapi import APIRouter, HTTPException, Depends, status, Query
 from typing import List, Optional, Dict, Any
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import uuid
 import logging
 import json
@@ -292,10 +292,10 @@ async def create_transaction(
         transaction_id = str(uuid.uuid4())
         transaction_number = f"TXN-{datetime.now().strftime('%Y%m%d')}-{transaction_id[:8].upper()}"
 
-        # Calculate totals
-        subtotal = Decimal(0)
-        tax_amount = Decimal(0)
-        total_amount = Decimal(0)
+        # Calculate totals (treat unit_price as VAT-inclusive final price)
+        subtotal = Decimal(0)   # Gross after line discounts
+        tax_amount = Decimal(0) # Derived VAT portion (for reporting)
+        total_amount = Decimal(0)  # Same as subtotal (for now), after any transaction-level discount
 
         # Process each item and calculate totals
         transaction_items = []
@@ -310,17 +310,26 @@ async def create_transaction(
 
             product = product_result.data[0]
 
-            # Use provided price or product price
+            # Use provided price or product price (VAT-inclusive)
             unit_price = item.unit_price if item.unit_price else Decimal(str(product['unit_price']))
 
-            # Calculate line totals
-            line_subtotal = unit_price * item.quantity
+            # Line calculations with VAT-inclusive pricing
+            line_gross = unit_price * item.quantity                 # Gross before discount (includes VAT)
             line_discount = item.discount_amount
-            line_tax = (line_subtotal - line_discount) * Decimal(str(product['tax_rate']))
-            line_total = line_subtotal - line_discount + line_tax
+            line_gross_after_discount = max(Decimal(0), line_gross - line_discount)
+
+            rate = Decimal(str(product.get('tax_rate', 0) or 0))
+            if rate > 0:
+                # VAT portion from inclusive price: gross - net = gross * (rate / (1 + rate))
+                line_tax = line_gross_after_discount * (rate / (Decimal(1) + rate))
+            else:
+                line_tax = Decimal(0)
+
+            # For totals, we treat line_total as the gross amount the customer pays (includes VAT)
+            line_total = line_gross_after_discount
 
             # Add to transaction totals
-            subtotal += line_subtotal
+            subtotal += line_gross_after_discount
             tax_amount += line_tax
             total_amount += line_total
 
@@ -338,8 +347,9 @@ async def create_transaction(
                 'line_total': float(line_total)
             })
 
-        # Apply transaction discount
-        total_amount -= transaction.discount_amount
+        # Apply transaction-level discount (if any)
+        if transaction.discount_amount:
+            total_amount = max(Decimal(0), total_amount - transaction.discount_amount)
 
         # Handle split payments or single payment
         change_amount = Decimal(0)
@@ -480,10 +490,14 @@ async def get_transactions(
         # Build query
         query = supabase.table('pos_transactions').select('*, pos_transaction_items(*)').eq('outlet_id', outlet_id)
 
+        # Date filters should include the full calendar day.
         if date_from:
-            query = query.gte('transaction_date', date_from.isoformat())
+            # Start of day (inclusive)
+            query = query.gte('transaction_date', f"{date_from.isoformat()}T00:00:00")
         if date_to:
-            query = query.lte('transaction_date', date_to.isoformat())
+            # End of day (exclusive): start of the next day
+            end_exclusive = date_to + timedelta(days=1)
+            query = query.lt('transaction_date', f"{end_exclusive.isoformat()}T00:00:00")
         if cashier_id:
             query = query.eq('cashier_id', cashier_id)
         if payment_method:
@@ -1058,6 +1072,14 @@ async def print_receipt(
         receipt_lines.append(biz_name.center(W))
         if outlet and outlet.get('address'):
             addr = outlet['address']
+            # In some environments, JSONB may come through as a string; normalize to dict
+            if isinstance(addr, str):
+                try:
+                    addr = json.loads(addr) if addr else {}
+                except Exception:
+                    addr = {}
+            if not isinstance(addr, dict):
+                addr = {}
             street = addr.get('street', '')
             city = addr.get('city', '')
             state = addr.get('state', '')
