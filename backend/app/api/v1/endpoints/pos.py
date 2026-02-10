@@ -487,8 +487,8 @@ async def get_transactions(
     try:
         supabase = get_supabase_admin()
 
-        # Build query
-        query = supabase.table('pos_transactions').select('*, pos_transaction_items(*)').eq('outlet_id', outlet_id)
+        # Build query (alias pos_transaction_items -> items to match schema)
+        query = supabase.table('pos_transactions').select('*, items:pos_transaction_items(*)').eq('outlet_id', outlet_id)
 
         # Date filters should include the full calendar day.
         if date_from:
@@ -537,8 +537,8 @@ async def get_transaction(
     try:
         supabase = get_supabase_admin()
 
-        # Get transaction with items
-        result = supabase.table('pos_transactions').select('*, pos_transaction_items(*)').eq('id', transaction_id).execute()
+        # Get transaction with items (alias pos_transaction_items -> items to match schema)
+        result = supabase.table('pos_transactions').select('*, items:pos_transaction_items(*)').eq('id', transaction_id).execute()
 
         if not result.data:
             raise HTTPException(

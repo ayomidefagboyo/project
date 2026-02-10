@@ -60,15 +60,13 @@ const TransactionsPage: React.FC = () => {
     if (currentOutlet?.id) {
       loadTransactions();
     }
-  }, [currentOutlet?.id, selectedDate]);
+  }, [currentOutlet?.id]);
 
   const loadTransactions = async () => {
     if (!currentOutlet?.id) return;
     setIsLoading(true);
     try {
       const result = await posService.getTransactions(currentOutlet.id, {
-        date_from: selectedDate,
-        date_to: selectedDate,
         size: 200
       });
       setTransactions(result.items || []);
@@ -112,6 +110,11 @@ const TransactionsPage: React.FC = () => {
 
   // Apply filters
   const filteredTransactions = transactions.filter(tx => {
+    // Date filter (compare local YYYY-MM-DD portion)
+    if (selectedDate) {
+      const txDate = tx.transaction_date ? tx.transaction_date.split('T')[0] : '';
+      if (txDate !== selectedDate) return false;
+    }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       if (
