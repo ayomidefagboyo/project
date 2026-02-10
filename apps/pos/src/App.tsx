@@ -371,15 +371,8 @@ function AppContent() {
   // Header content for Product Management page
   const productManagementHeader = (
     <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between w-full gap-4">
-      {/* Title Section */}
-      <div className="flex-1">
-        <h1 className="text-xl lg:text-2xl font-bold text-slate-900 leading-tight">
-          Product Management
-        </h1>
-        <p className="text-sm text-slate-600 mt-0.5 hidden sm:block">
-          Manage your inventory with Excel-like efficiency
-        </p>
-      </div>
+      {/* Left spacer to keep layout aligned without title/description */}
+      <div className="flex-1" />
 
       {/* Action Buttons */}
       <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
@@ -469,7 +462,7 @@ function AppContent() {
       ? productManagementHeader
       : location.pathname === '/'
         ? posTerminalHeader
-        : null; // Other pages handle their own headers internally
+        : null; // EOD and other pages handle their own headers
 
   return (
     <AppLayout headerContent={headerContent}>
