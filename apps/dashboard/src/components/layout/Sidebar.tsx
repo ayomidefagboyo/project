@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import OutletSelector from '@/components/layout/OutletSelector';
 import {
@@ -8,24 +8,16 @@ import {
   BarChart3,
   Settings,
   Bot,
-  History,
   X,
   ChevronLeft,
   ChevronRight,
-  Clock,
   Building2,
-  Plus,
-  ChevronDown,
-  Receipt,
-  DollarSign,
   Users,
   Shield,
-  Menu,
-  Zap,
   ShoppingCart,
   Package
 } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
+
 import CreateStoreModal, { StoreFormData } from '@/components/modals/CreateStoreModal';
 import Toast from '@/components/ui/Toast';
 import { useOutlet } from '@/contexts/OutletContext';
@@ -43,8 +35,6 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
   const location = useLocation();
   const { currentUser, setUserOutlets } = useOutlet();
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [isCreateDropdownOpen, setIsCreateDropdownOpen] = useState(false);
-  const [isCreateReportOpen, setIsCreateReportOpen] = useState(true);
   const [showCreateStoreModal, setShowCreateStoreModal] = useState(false);
   const [toast, setToast] = useState<{
     message: string;
@@ -55,21 +45,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
     type: 'info',
     isVisible: false
   });
-  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsCreateDropdownOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, []);
 
   const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info') => {
     setToast({ message, type, isVisible: true });
@@ -115,11 +91,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
     { name: 'Audit Trail', href: '/dashboard/audit-trail', icon: Shield },
   ];
 
-  const createReportItems = [
-    // EOD moved to POS app
-    { name: 'Create Invoice', href: '/dashboard/invoices/create', icon: Receipt, color: 'text-emerald-600 bg-emerald-50 dark:text-emerald-400 dark:bg-emerald-900/20' },
-    { name: 'Add Expense', href: '/dashboard/expenses/create', icon: DollarSign, color: 'text-purple-600 bg-purple-50 dark:text-purple-400 dark:bg-purple-900/20' },
-  ];
+
 
   const isActive = (href: string) => {
     if (href === '/dashboard') {
@@ -130,14 +102,14 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
 
   const NavItem = ({ item, isCollapsed = false }: { item: any; isCollapsed?: boolean }) => {
     const active = isActive(item.href);
-    
+
     return (
       <Link
         to={item.href}
         className={`
           group relative flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-200 ease-in-out
-          ${active 
-            ? 'bg-gray-900 text-white shadow-sm dark:bg-white dark:text-gray-900' 
+          ${active
+            ? 'bg-gray-900 text-white shadow-sm dark:bg-white dark:text-gray-900'
             : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-800/50'
           }
           ${isCollapsed ? 'justify-center px-3' : ''}
@@ -147,12 +119,12 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
         {!isCollapsed && (
           <span className="font-medium text-sm truncate">{item.name}</span>
         )}
-        
+
         {/* Active indicator */}
         {active && !isCollapsed && (
           <div className="absolute right-3 w-2 h-2 bg-current rounded-full opacity-60" />
         )}
-        
+
         {/* Tooltip for collapsed state */}
         {isCollapsed && (
           <div className="absolute left-full ml-3 px-3 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-50">
@@ -178,7 +150,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
       {!isCollapsed && (
         <span className="font-medium text-sm text-gray-700 dark:text-gray-200 truncate">{item.name}</span>
       )}
-      
+
       {/* Tooltip for collapsed state */}
       {isCollapsed && (
         <div className="absolute left-full ml-3 px-3 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-50">
@@ -193,8 +165,8 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
     <>
       {/* Mobile overlay */}
       {isOpen && (
-        <div 
-          className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 lg:hidden" 
+        <div
+          className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 lg:hidden"
           onClick={onToggle}
         />
       )}
@@ -248,40 +220,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
         {/* Navigation */}
         <div className="flex-1 overflow-y-auto scrollbar-hide">
           <div className={`p-6 ${isCollapsed ? 'px-4' : ''}`}>
-            {/* Create Report Dropdown */}
-            {!isCollapsed && (
-              <div className="mb-4">
-                <div className="relative">
-                  <button
-                    onClick={() => setIsCreateReportOpen(!isCreateReportOpen)}
-                    className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
-                  >
-                    <div className="flex items-center space-x-3">
-                      <Plus className="w-5 h-5" />
-                      <span className="font-medium text-sm">Create Report</span>
-                    </div>
-                    <ChevronDown className={`w-4 h-4 transition-transform ${isCreateReportOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                  
-                  {isCreateReportOpen && (
-                    <div className="mt-2 space-y-1">
-                      {createReportItems.map((item) => (
-                        <Link
-                          key={item.name}
-                          to={item.href}
-                          className="flex items-center gap-3 px-4 py-2 ml-4 rounded-lg transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50"
-                        >
-                          <div className={`flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center ${item.color}`}>
-                            <item.icon className="w-3 h-3" />
-                          </div>
-                          <span className="font-medium text-sm text-gray-700 dark:text-gray-200">{item.name}</span>
-                        </Link>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+
 
             {/* Main Navigation */}
             <div className="space-y-2">
@@ -298,8 +237,8 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
             to="/dashboard/settings"
             className={`
               group flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-800/50
-              ${isActive('/dashboard/settings') 
-                ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' 
+              ${isActive('/dashboard/settings')
+                ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900'
                 : 'text-gray-600 dark:text-gray-300'
               }
               ${isCollapsed ? 'justify-center px-3' : ''}
@@ -309,7 +248,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
             {!isCollapsed && (
               <span className="font-medium text-sm">Settings</span>
             )}
-            
+
             {/* Tooltip for collapsed state */}
             {isCollapsed && (
               <div className="absolute left-full ml-3 px-3 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-50">
