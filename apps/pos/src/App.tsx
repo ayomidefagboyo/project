@@ -126,6 +126,7 @@ function AppContent() {
   // Helper functions
   const handleTerminalSetup = (config: TerminalConfig) => {
     setTerminalConfig(config);
+    localStorage.setItem('pos_terminal_config', JSON.stringify(config));
     setTerminalPhase('staff_auth');
   };
 

@@ -3,6 +3,7 @@ Configuration settings for the FastAPI application
 """
 
 from pydantic_settings import BaseSettings
+from pydantic import model_validator
 from typing import Optional
 import os
 
@@ -20,10 +21,25 @@ class Settings(BaseSettings):
     
     # Supabase Settings - Required for database connection
     SUPABASE_URL: str
-    SUPABASE_KEY: str  # This will be the anon key for frontend
-    SUPABASE_ANON_KEY: str = ""  # Optional, defaults to SUPABASE_KEY
+    # Anon key: set either SUPABASE_KEY or SUPABASE_ANON_KEY (Render often sets only SUPABASE_ANON_KEY)
+    # Default "" so the field is never "required" and we validate in set_anon_key instead
+    SUPABASE_KEY: str = ""
+    SUPABASE_ANON_KEY: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str
-    
+
+    @model_validator(mode="after")
+    def set_anon_key(self):
+        """Require at least one of SUPABASE_KEY or SUPABASE_ANON_KEY; sync the other from it."""
+        anon = (self.SUPABASE_ANON_KEY or self.SUPABASE_KEY or "").strip()
+        if not anon:
+            raise ValueError(
+                "One of SUPABASE_KEY or SUPABASE_ANON_KEY must be set. "
+                "Set SUPABASE_ANON_KEY (or SUPABASE_KEY) in your environment."
+            )
+        object.__setattr__(self, "SUPABASE_ANON_KEY", anon)
+        object.__setattr__(self, "SUPABASE_KEY", self.SUPABASE_KEY.strip() or anon)
+        return self
+
     # JWT Settings
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-here-change-in-production")
     ALGORITHM: str = "HS256"
