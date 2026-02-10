@@ -195,10 +195,8 @@ const TransactionsPage: React.FC = () => {
             >
               <option value="all">All Payments</option>
               <option value="cash">Cash</option>
+              <option value="pos">Card</option>
               <option value="transfer">Transfer</option>
-              <option value="pos">POS</option>
-              <option value="credit">Credit</option>
-              <option value="mobile">Mobile</option>
             </select>
             <select
               value={statusFilter}
@@ -218,14 +216,6 @@ const TransactionsPage: React.FC = () => {
               <RotateCcw className={`w-4 h-4 text-gray-600 ${isLoading ? 'animate-spin' : ''}`} />
             </button>
           </div>
-        </div>
-
-        {/* Summary bar */}
-        <div className="flex items-center gap-6 mt-3 text-sm">
-          <span className="text-gray-500">{formatFullDate(selectedDate)}</span>
-          <span className="font-semibold text-gray-900">{totalCount} sale{totalCount !== 1 ? 's' : ''}</span>
-          <span className="font-bold text-green-700">{formatCurrency(totalSales)}</span>
-          {voidedCount > 0 && <span className="text-red-600">{voidedCount} voided</span>}
         </div>
       </div>
 
