@@ -17,8 +17,13 @@ import {
   Save,
   Printer,
   FileText,
-  Palette
+  Palette,
+  CheckCircle,
+  AlertCircle
 } from 'lucide-react';
+import { useOutlet } from '../../contexts/OutletContext';
+import { posService } from '../../lib/posService';
+import logger from '../../lib/logger';
 
 export interface ReceiptTemplate {
   id: string;
@@ -113,34 +118,177 @@ const sampleTransaction = {
 };
 
 const ReceiptEditor: React.FC = () => {
+  const { currentOutlet } = useOutlet();
   const [template, setTemplate] = useState<ReceiptTemplate>(defaultTemplate);
   const [activeSection, setActiveSection] = useState<'header' | 'body' | 'footer' | 'styling'>('header');
   const [previewMode, setPreviewMode] = useState<'edit' | 'preview'>('edit');
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'success' | 'error' | null>(null);
 
-  // Load saved template on mount
+  // Load saved template from backend on mount
   useEffect(() => {
-    const saved = localStorage.getItem('pos-receipt-template');
-    if (saved) {
+    const loadSettings = async () => {
+      if (!currentOutlet?.id) return;
+      
+      setIsLoading(true);
       try {
-        const parsed = JSON.parse(saved);
-        setTemplate(parsed);
+        // Load receipt settings from backend
+        const receiptSettings = await posService.getReceiptSettings(currentOutlet.id);
+        
+        // Load outlet business info for header
+        const outletInfo = await posService.getOutletInfo(currentOutlet.id);
+        
+        // Merge backend settings with template
+        setTemplate(prev => {
+          // Parse address - handle both string and object formats
+          let addressText = prev.header.address;
+          if (outletInfo.address) {
+            if (typeof outletInfo.address === 'string') {
+              addressText = outletInfo.address;
+            } else if (typeof outletInfo.address === 'object') {
+              const addr = outletInfo.address as any;
+              const parts = [
+                addr.street,
+                addr.city && addr.state ? `${addr.city}, ${addr.state} ${addr.zip || ''}`.trim() : addr.city || addr.state,
+                addr.country
+              ].filter(Boolean);
+              addressText = parts.join('\n') || prev.header.address;
+            }
+          }
+          
+          return {
+            ...prev,
+            header: {
+              ...prev.header,
+              businessName: outletInfo.name || prev.header.businessName,
+              address: addressText,
+              phone: outletInfo.phone || prev.header.phone,
+              email: outletInfo.email || prev.header.email,
+              website: outletInfo.website || prev.header.website,
+              logoUrl: receiptSettings.logo_url,
+              showQR: receiptSettings.show_qr_code ?? prev.header.showQR
+            },
+          body: {
+            ...prev.body,
+            showTaxBreakdown: receiptSettings.show_tax_breakdown ?? prev.body.showTaxBreakdown
+          },
+          footer: {
+            ...prev.footer,
+            thankYouMessage: receiptSettings.footer_text || prev.footer.thankYouMessage
+          },
+          styling: {
+            ...prev.styling,
+            fontSize: (receiptSettings.font_size || 'medium') as 'small' | 'medium' | 'large',
+            paperWidth: receiptSettings.receipt_width === 58 ? '58mm' : receiptSettings.receipt_width === 80 ? '80mm' : 'A4' as '58mm' | '80mm' | 'A4'
+          }
+          };
+        });
+        
+        // Note: localStorage caching happens after state update via useEffect on template change
       } catch (error) {
-        console.warn('Failed to load saved receipt template');
+        logger.error('Failed to load receipt settings from backend:', error);
+        // Fallback to localStorage if backend fails
+        const saved = localStorage.getItem('pos-receipt-template');
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            setTemplate(parsed);
+          } catch (e) {
+            console.warn('Failed to load saved receipt template from localStorage');
+          }
+        }
+      } finally {
+        setIsLoading(false);
       }
-    }
-  }, []);
+    };
+    
+    loadSettings();
+  }, [currentOutlet?.id]);
 
-  // Save template changes
-  const saveTemplate = () => {
-    localStorage.setItem('pos-receipt-template', JSON.stringify(template));
-    // TODO: Save to backend/database
-    alert('Receipt template saved successfully!');
+  // Cache template to localStorage whenever it changes (for offline fallback)
+  useEffect(() => {
+    if (template && currentOutlet?.id) {
+      localStorage.setItem('pos-receipt-template', JSON.stringify(template));
+    }
+  }, [template, currentOutlet?.id]);
+
+  // Save template changes to backend
+  const saveTemplate = async () => {
+    if (!currentOutlet?.id) {
+      alert('Please select an outlet first');
+      return;
+    }
+    
+    setIsSaving(true);
+    setSaveStatus(null);
+    
+    try {
+      // Save receipt settings to backend
+      await posService.updateReceiptSettings(currentOutlet.id, {
+        header_text: template.header.businessName,
+        footer_text: template.footer.thankYouMessage,
+        logo_url: template.header.logoUrl,
+        show_qr_code: template.header.showQR,
+        show_customer_points: template.footer.showCashierName, // Map appropriately
+        show_tax_breakdown: template.body.showTaxBreakdown,
+        receipt_width: template.styling.paperWidth === '58mm' ? 58 : template.styling.paperWidth === '80mm' ? 80 : 80,
+        font_size: template.styling.fontSize
+      });
+      
+      // Also save outlet business info if changed
+      const addressParts = template.header.address.split('\n');
+      await posService.updateOutletInfo(currentOutlet.id, {
+        name: template.header.businessName,
+        phone: template.header.phone,
+        email: template.header.email || undefined,
+        website: template.header.website || undefined,
+        address: template.header.address
+      });
+      
+      // Cache in localStorage for offline support
+      localStorage.setItem('pos-receipt-template', JSON.stringify(template));
+      
+      setSaveStatus('success');
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (error) {
+      logger.error('Failed to save receipt settings:', error);
+      setSaveStatus('error');
+      alert('Failed to save receipt settings. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Reset to default
-  const resetTemplate = () => {
-    setTemplate(defaultTemplate);
-    localStorage.removeItem('pos-receipt-template');
+  const resetTemplate = async () => {
+    if (!currentOutlet?.id) {
+      setTemplate(defaultTemplate);
+      localStorage.removeItem('pos-receipt-template');
+      return;
+    }
+    
+    // Reset backend settings to defaults
+    try {
+      await posService.updateReceiptSettings(currentOutlet.id, {
+        header_text: defaultTemplate.header.businessName,
+        footer_text: defaultTemplate.footer.thankYouMessage,
+        show_qr_code: defaultTemplate.header.showQR,
+        show_customer_points: defaultTemplate.footer.showCashierName,
+        show_tax_breakdown: defaultTemplate.body.showTaxBreakdown,
+        receipt_width: 80,
+        font_size: 'medium'
+      });
+      setTemplate(defaultTemplate);
+      localStorage.removeItem('pos-receipt-template');
+      setSaveStatus('success');
+      setTimeout(() => setSaveStatus(null), 2000);
+    } catch (error) {
+      logger.error('Failed to reset receipt settings:', error);
+      // Still reset locally even if backend fails
+      setTemplate(defaultTemplate);
+      localStorage.removeItem('pos-receipt-template');
+    }
   };
 
   // Update template section
@@ -594,6 +742,17 @@ const ReceiptEditor: React.FC = () => {
     );
   };
 
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Loading receipt settings...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex gap-6 h-full">
       {/* Editor Panel */}
@@ -625,14 +784,48 @@ const ReceiptEditor: React.FC = () => {
         {renderEditor()}
 
         {/* Action Buttons */}
-        <div className="flex gap-3 mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
+        <div className="flex gap-3 items-center mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
           <button
             onClick={saveTemplate}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            disabled={isSaving || !currentOutlet?.id}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+              isSaving
+                ? 'bg-gray-400 cursor-not-allowed'
+                : saveStatus === 'success'
+                ? 'bg-green-600 hover:bg-green-700'
+                : saveStatus === 'error'
+                ? 'bg-red-600 hover:bg-red-700'
+                : 'bg-blue-600 hover:bg-blue-700'
+            } text-white`}
           >
-            <Save className="w-4 h-4" />
-            Save Template
+            {isSaving ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                <span>Saving...</span>
+              </>
+            ) : saveStatus === 'success' ? (
+              <>
+                <CheckCircle className="w-4 h-4" />
+                <span>Saved!</span>
+              </>
+            ) : saveStatus === 'error' ? (
+              <>
+                <AlertCircle className="w-4 h-4" />
+                <span>Error</span>
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4" />
+                <span>Save Settings</span>
+              </>
+            )}
           </button>
+          {!currentOutlet?.id && (
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              Please select an outlet to save settings
+            </span>
+          )}
+        </div>
           <button
             onClick={resetTemplate}
             className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"

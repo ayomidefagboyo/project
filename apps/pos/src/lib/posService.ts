@@ -1091,6 +1091,8 @@ class POSService {
    * Get receipt settings for outlet
    */
   async getReceiptSettings(outletId: string): Promise<{
+    id?: string;
+    outlet_id: string;
     header_text?: string;
     footer_text?: string;
     logo_url?: string;
@@ -1099,21 +1101,120 @@ class POSService {
     show_tax_breakdown: boolean;
     receipt_width: number;
     font_size: string;
+    created_at?: string;
+    updated_at?: string;
   }> {
     try {
-      const response = await apiClient.get<any>(`${this.baseUrl}/outlets/${outletId}/receipt-settings`);
+      const response = await apiClient.get<any>(`${this.baseUrl}/receipt-settings/${outletId}`);
       if (!response.data) throw new Error(response.error || 'Failed to fetch settings');
       return response.data;
     } catch (error) {
       logger.error('Error fetching receipt settings:', error);
       // Return default settings
       return {
+        outlet_id: outletId,
         show_qr_code: true,
         show_customer_points: true,
         show_tax_breakdown: true,
         receipt_width: 58,
         font_size: 'normal'
       };
+    }
+  }
+
+  /**
+   * Update receipt settings for outlet
+   */
+  async updateReceiptSettings(
+    outletId: string,
+    settings: {
+      header_text?: string;
+      footer_text?: string;
+      logo_url?: string;
+      show_qr_code?: boolean;
+      show_customer_points?: boolean;
+      show_tax_breakdown?: boolean;
+      receipt_width?: number;
+      font_size?: string;
+    }
+  ): Promise<{
+    id: string;
+    outlet_id: string;
+    header_text?: string;
+    footer_text?: string;
+    logo_url?: string;
+    show_qr_code: boolean;
+    show_customer_points: boolean;
+    show_tax_breakdown: boolean;
+    receipt_width: number;
+    font_size: string;
+    created_at: string;
+    updated_at: string;
+  }> {
+    try {
+      const response = await apiClient.put<any>(`${this.baseUrl}/receipt-settings/${outletId}`, settings);
+      if (!response.data) throw new Error(response.error || 'Failed to update settings');
+      return response.data;
+    } catch (error) {
+      logger.error('Error updating receipt settings:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Get outlet business information
+   */
+  async getOutletInfo(outletId: string): Promise<{
+    id: string;
+    name: string;
+    phone?: string;
+    email?: string;
+    website?: string;
+    address?: string | {
+      street?: string;
+      city?: string;
+      state?: string;
+      zip?: string;
+      country?: string;
+    };
+    [key: string]: any;
+  }> {
+    try {
+      const response = await apiClient.get<any>(`${this.baseUrl}/outlets/${outletId}`);
+      if (!response.data) throw new Error(response.error || 'Failed to fetch outlet info');
+      return response.data;
+    } catch (error) {
+      logger.error('Error fetching outlet info:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Update outlet business information (address, phone, email, website)
+   */
+  async updateOutletInfo(
+    outletId: string,
+    outletData: {
+      name?: string;
+      phone?: string;
+      email?: string;
+      website?: string;
+      address?: string | {
+        street?: string;
+        city?: string;
+        state?: string;
+        zip?: string;
+        country?: string;
+      };
+    }
+  ): Promise<any> {
+    try {
+      const response = await apiClient.put<any>(`${this.baseUrl}/outlets/${outletId}`, outletData);
+      if (!response.data) throw new Error(response.error || 'Failed to update outlet info');
+      return response.data;
+    } catch (error) {
+      logger.error('Error updating outlet info:', error);
+      throw this.handleError(error);
     }
   }
 
