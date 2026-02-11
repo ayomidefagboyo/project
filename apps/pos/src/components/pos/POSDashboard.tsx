@@ -64,6 +64,8 @@ interface HeldSale {
   total: number;
   cashier_id: string;
   cashier_name: string;
+  // Optional flag to indicate whether this held sale has been synced to the backend
+  synced?: boolean;
 }
 
 interface POSDashboardProps {}
@@ -613,6 +615,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
             total: r.total,
             cashier_id: r.cashier_id,
             cashier_name: r.cashier_name,
+            synced: true,
           }));
           setHeldSales(convertedReceipts);
           
@@ -683,79 +686,70 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   const handlePutOnHold = async () => {
     if (!currentOutlet?.id || cart.length === 0 || !currentUser) return;
 
-    try {
-      const totals = calculateCartTotals();
-      
-      // Prepare items for backend - include full product data for restoration
-      const items = cart.map(item => ({
-        product_id: item.product.id,
-        quantity: item.quantity,
-        unit_price: item.unitPrice,
-        discount: item.discount,
-        // Include product details for easier restoration
-        product_name: item.product.name,
-        sku: item.product.sku,
-        barcode: item.product.barcode,
-        tax_rate: item.product.tax_rate,
-        category: item.product.category,
-      }));
+    const totals = calculateCartTotals();
 
-      if (isOnline) {
-        // Save to backend
-        const receipt = await posService.createHeldReceipt({
-          outlet_id: currentOutlet.id,
-          cashier_id: currentUser.id,
-          items,
-          total: totals.total,
-        });
+    // Prepare items for backend - include full product data for restoration
+    const items = cart.map(item => ({
+      product_id: item.product.id,
+      quantity: item.quantity,
+      unit_price: item.unitPrice,
+      discount: item.discount,
+      // Include product details for easier restoration
+      product_name: item.product.name,
+      sku: item.product.sku,
+      barcode: item.product.barcode,
+      tax_rate: item.product.tax_rate,
+      category: item.product.category,
+    }));
 
-        // Convert backend response to frontend format
-        const newHeld: HeldSale = {
-          id: receipt.id,
-          cart, // Keep original cart with full product data
-          saved_at: receipt.saved_at,
-          total: receipt.total,
-          cashier_id: receipt.cashier_id,
-          cashier_name: receipt.cashier_name,
-        };
+    // Create a local held sale immediately for instant UI feedback
+    const localId = `hold_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const localHeld: HeldSale = {
+      id: localId,
+      cart,
+      saved_at: new Date().toISOString(),
+      total: totals.total,
+      cashier_id: currentUser.id,
+      cashier_name: currentUser.name || 'Cashier',
+      synced: false,
+    };
 
-        const updated = [...heldSales, newHeld];
-        await persistHeldSales(updated);
-      } else {
-        // Offline: save to localStorage only
-        const newHeld: HeldSale = {
-          id: `hold_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          cart,
-          saved_at: new Date().toISOString(),
-          total: totals.total,
-          cashier_id: currentUser.id,
-          cashier_name: currentUser.name || 'Cashier',
-        };
+    const updatedLocal = [...heldSales, localHeld];
+    await persistHeldSales(updatedLocal);
+    clearCart();
 
-        const updated = [...heldSales, newHeld];
-        await persistHeldSales(updated);
-      }
+    // If online, attempt to sync to backend in the background
+    if (isOnline) {
+      (async () => {
+        try {
+          const receipt = await posService.createHeldReceipt({
+            outlet_id: currentOutlet.id,
+            cashier_id: currentUser.id,
+            items,
+            total: totals.total,
+          });
 
-      clearCart();
-    } catch (err) {
-      logger.error('Failed to put sale on hold:', err);
-      // Fallback to localStorage
-      try {
-        const totals = calculateCartTotals();
-        const newHeld: HeldSale = {
-          id: `hold_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          cart,
-          saved_at: new Date().toISOString(),
-          total: totals.total,
-          cashier_id: currentUser?.id || '',
-          cashier_name: currentUser?.name || 'Cashier',
-        };
-        const updated = [...heldSales, newHeld];
-        await persistHeldSales(updated);
-        clearCart();
-      } catch (fallbackErr) {
-        logger.error('Failed to save to localStorage:', fallbackErr);
-      }
+          // Update the locally stored held sale with the real backend ID and mark as synced
+          const syncedList: HeldSale[] = updatedLocal.map(held =>
+            held.id === localId
+              ? {
+                  ...held,
+                  id: receipt.id,
+                  saved_at: receipt.saved_at,
+                  total: receipt.total,
+                  cashier_id: receipt.cashier_id,
+                  cashier_name: receipt.cashier_name,
+                  synced: true,
+                }
+              : held
+          );
+
+          await persistHeldSales(syncedList);
+        } catch (err) {
+          logger.error('Failed to sync held receipt to backend (kept locally):', err);
+          // Keep the local held sale; it will remain visible on this terminal
+        }
+      })();
     }
   };
 
@@ -1015,13 +1009,12 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       return;
     }
 
-    try {
-      const items = cart.map(item => ({
-        product_id: item.product.id,
-        quantity: item.quantity,
-        unit_price: item.unitPrice,
-        discount_amount: item.discount * item.quantity
-      }));
+    const items = cart.map(item => ({
+      product_id: item.product.id,
+      quantity: item.quantity,
+      unit_price: item.unitPrice,
+      discount_amount: item.discount * item.quantity
+    }));
 
       // Build split payments array
       const splitPayments: Array<{ method: PaymentMethod; amount: number }> = [];
@@ -1041,53 +1034,79 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
         ? JSON.stringify({ split_payments: splitPayments.map(sp => ({ method: sp.method, amount: sp.amount })) })
         : undefined;
       
-      const transactionRequest: any = {
-        outlet_id: currentOutlet.id,
-        cashier_id: currentUser.id,
-        items,
-        payment_method: splitPayments.length === 1 ? splitPayments[0].method : PaymentMethod.CASH, // Primary method
-        tendered_amount: totalPaid,
-        // Per-line discounts already included in items; keep transaction-level discount 0 for now
-        discount_amount: 0,
-        notes,
-        customer_id: selectedCustomer?.id,
-        customer_name: selectedCustomer?.name,
-      };
+    const transactionRequest: any = {
+      outlet_id: currentOutlet.id,
+      cashier_id: currentUser.id,
+      items,
+      payment_method: splitPayments.length === 1 ? splitPayments[0].method : PaymentMethod.CASH, // Primary method
+      tendered_amount: totalPaid,
+      // Per-line discounts already included in items; keep transaction-level discount 0 for now
+      discount_amount: 0,
+      notes,
+      customer_id: selectedCustomer?.id,
+      customer_name: selectedCustomer?.name,
+    };
 
-      let transaction;
+    try {
+      // Always store transaction locally first for instant UX and offline safety
+      const offlineId = await posService.storeOfflineTransaction(transactionRequest);
+
+      // Optimistically clear UI for the next customer
+      clearCart();
+      setActivePayments({});
+      setTenderModal(null);
+      setRestoredHeldReceiptId(null);
+      setSelectedCustomer(null);
+
+      // If online, try to sync this specific transaction in the background
       if (isOnline) {
-        transaction = await posService.createTransaction(transactionRequest);
-
-        // Handle receipt printing
-        if (mode === 'save_and_print' && transaction?.id) {
+        (async () => {
           try {
-            const printResult = await posService.printReceipt(transaction.id);
-            // Open print dialog with receipt content
-            if (printResult?.receipt_content) {
-              const printWindow = window.open('', '_blank');
-              if (printWindow) {
-                printWindow.document.write(`
-                  <html>
-                    <head><title>Receipt</title></head>
-                    <body style="font-family: monospace; padding: 20px;">
-                      <pre style="white-space: pre-wrap;">${printResult.receipt_content}</pre>
-                      <script>window.onload = () => window.print();</script>
-                    </body>
-                  </html>
-                `);
-                printWindow.document.close();
+            const transaction = await posService.createTransaction(transactionRequest);
+
+            // On success, reload products to reflect new stock levels
+            loadProducts();
+
+            // Remove from offline queue if it was stored there
+            try {
+              await offlineDatabase.removeOfflineTransaction(offlineId);
+            } catch (removeErr) {
+              logger.warn('Failed to remove offline transaction after sync:', removeErr);
+            }
+
+            // Handle receipt printing after backend confirms the transaction
+            if (mode === 'save_and_print' && transaction?.id) {
+              try {
+                const printResult = await posService.printReceipt(transaction.id);
+                if (printResult?.receipt_content) {
+                  const printWindow = window.open('', '_blank');
+                  if (printWindow) {
+                    printWindow.document.write(`
+                      <html>
+                        <head><title>Receipt</title></head>
+                        <body style="font-family: monospace; padding: 20px;">
+                          <pre style="white-space: pre-wrap;">${printResult.receipt_content}</pre>
+                          <script>window.onload = () => window.print();</script>
+                        </body>
+                      </html>
+                    `);
+                    printWindow.document.close();
+                  }
+                }
+              } catch (printError: any) {
+                logger.error('Receipt print error:', printError);
+                error(`Receipt printing failed: ${printError.message || 'Unknown error'}`, 5000);
               }
             }
-          } catch (printError: any) {
-            logger.error('Receipt print error:', printError);
-            error(`Receipt printing failed: ${printError.message || 'Unknown error'}`, 5000);
+          } catch (syncErr: any) {
+            logger.error('Online sync for transaction failed, keeping offline copy:', syncErr);
+            // Transaction remains in offline queue and will be retried on next online sync
+            setOfflineTransactionCount(prev => prev + 1);
+            error('Sale saved offline. It will sync automatically when online.', 5000);
           }
-        }
-        
-        // Reload products to update stock quantities
-        loadProducts();
+        })();
       } else {
-        await posService.storeOfflineTransaction(transactionRequest);
+        // Pure offline mode – increment counter so cashier sees pending syncs
         setOfflineTransactionCount(prev => prev + 1);
       }
 
