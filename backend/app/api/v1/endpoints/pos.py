@@ -2169,6 +2169,31 @@ async def authenticate_with_pin(auth_data: StaffPinAuth):
 # RECEIPT SETTINGS ENDPOINTS
 # ===============================================
 
+def _normalize_receipt_settings_row(row: Dict[str, Any], outlet_id: str) -> Dict[str, Any]:
+    """
+    Ensure receipt settings row has all required fields for ReceiptSettingsResponse.
+    This prevents 500s if the DB row is missing columns or contains NULLs.
+    """
+    now = datetime.utcnow().isoformat()
+    # Use existing timestamps if present; otherwise default.
+    created_at = row.get('created_at') or now
+    updated_at = row.get('updated_at') or now
+
+    return {
+        'id': row.get('id') or str(uuid.uuid4()),
+        'outlet_id': row.get('outlet_id') or outlet_id,
+        'header_text': row.get('header_text'),
+        'footer_text': row.get('footer_text'),
+        'logo_url': row.get('logo_url'),
+        'show_qr_code': True if row.get('show_qr_code') is None else row.get('show_qr_code'),
+        'show_customer_points': True if row.get('show_customer_points') is None else row.get('show_customer_points'),
+        'show_tax_breakdown': True if row.get('show_tax_breakdown') is None else row.get('show_tax_breakdown'),
+        'receipt_width': row.get('receipt_width') or 58,
+        'font_size': row.get('font_size') or 'normal',
+        'created_at': created_at,
+        'updated_at': updated_at,
+    }
+
 @router.get("/receipt-settings/{outlet_id}", response_model=ReceiptSettingsResponse)
 async def get_receipt_settings(
     outlet_id: str,
@@ -2185,28 +2210,21 @@ async def get_receipt_settings(
             .execute()
         
         if result.data and len(result.data) > 0:
-            settings_data = result.data[0]
+            settings_data = _normalize_receipt_settings_row(result.data[0], outlet_id)
             return ReceiptSettingsResponse(**settings_data)
         
         # Return default settings if none exist
-        default_settings = {
-            'id': str(uuid.uuid4()),
-            'outlet_id': outlet_id,
-            'header_text': None,
-            'footer_text': None,
-            'logo_url': None,
-            'show_qr_code': True,
-            'show_customer_points': True,
-            'show_tax_breakdown': True,
-            'receipt_width': 58,
-            'font_size': 'normal',
-            'created_at': datetime.utcnow().isoformat(),
-            'updated_at': datetime.utcnow().isoformat()
-        }
+        default_settings = _normalize_receipt_settings_row({}, outlet_id)
         return ReceiptSettingsResponse(**default_settings)
         
     except Exception as e:
         logger.error(f"Error fetching receipt settings: {e}")
+        # Helpful hint if the table isn't deployed yet
+        if "receipt_settings" in str(e) and ("does not exist" in str(e) or "42P01" in str(e)):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="receipt_settings table is missing in the database. Create it in Supabase, then retry."
+            )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch receipt settings: {str(e)}"
@@ -2283,12 +2301,18 @@ async def update_receipt_settings(
                 detail="Failed to save receipt settings"
             )
         
-        return ReceiptSettingsResponse(**result.data[0])
+        saved = _normalize_receipt_settings_row(result.data[0], outlet_id)
+        return ReceiptSettingsResponse(**saved)
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error updating receipt settings: {e}")
+        if "receipt_settings" in str(e) and ("does not exist" in str(e) or "42P01" in str(e)):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="receipt_settings table is missing in the database. Create it in Supabase, then retry."
+            )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update receipt settings: {str(e)}"
