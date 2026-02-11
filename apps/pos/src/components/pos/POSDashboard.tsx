@@ -161,21 +161,13 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     }
 
     // If user is authenticated but no staff profiles exist, show no staff message
-    if (currentUser && staffProfiles.length === 0) {
+    if (staffProfiles.length === 0) {
       return 'no_staff';
     }
 
-    // If user is authenticated but staff not authenticated, redirect to reconfigure terminal
-    if (currentUser && !isStaffAuthenticated) {
-      // Clear terminal configuration to force reconfiguration
-      localStorage.removeItem('pos_terminal_config');
-      localStorage.removeItem('pos_staff_session');
-      // Trigger page reload to go back to terminal setup phase
-      window.location.reload();
-      return 'pos_dashboard'; // This won't actually render due to reload
-    }
-
-    // If everything is ready, show POS dashboard
+    // Otherwise, show POS dashboard.
+    // Staff authentication and terminal setup are now handled at the App level,
+    // so we never clear terminal configuration from here.
     return 'pos_dashboard';
   };
 
