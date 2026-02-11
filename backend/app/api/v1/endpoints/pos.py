@@ -378,9 +378,9 @@ async def create_transaction(
                     detail="Insufficient payment amount"
                 )
 
-        # Get cashier's name for display
-        cashier_result = supabase.table('staff_profiles').select('name').eq('id', transaction.cashier_id).execute()
-        cashier_name = cashier_result.data[0]['name'] if cashier_result.data else 'Unknown'
+        # Get cashier's name for display (staff_profiles uses display_name, not name)
+        cashier_result = supabase.table('staff_profiles').select('display_name').eq('id', transaction.cashier_id).execute()
+        cashier_name = cashier_result.data[0]['display_name'] if cashier_result.data else 'Unknown'
 
         # Prepare transaction data
         transaction_data = {
@@ -894,9 +894,18 @@ async def create_held_receipt(
     try:
         supabase = get_supabase_admin()
         
-        # Get cashier name
-        user_result = supabase.table('users').select('name').eq('id', receipt.cashier_id).execute()
-        cashier_name = user_result.data[0]['name'] if user_result.data else 'Cashier'
+        # Get cashier name: POS uses staff_profile id, so try staff_profiles.display_name first, then users.name
+        cashier_name = "Cashier"
+        try:
+            staff_result = supabase.table(Tables.STAFF_PROFILES).select('display_name').eq('id', receipt.cashier_id).execute()
+            if staff_result.data and len(staff_result.data) > 0:
+                cashier_name = staff_result.data[0].get('display_name') or cashier_name
+            else:
+                user_result = supabase.table('users').select('name').eq('id', receipt.cashier_id).execute()
+                if user_result.data and len(user_result.data) > 0:
+                    cashier_name = user_result.data[0].get('name') or cashier_name
+        except Exception:
+            pass
         
         # Prepare held receipt data
         receipt_id = str(uuid.uuid4())
