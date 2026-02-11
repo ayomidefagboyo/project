@@ -21,6 +21,7 @@ import { offlineDatabase } from '../../lib/offlineDatabase';
 import { ToastContainer, useToast } from '../ui/Toast';
 import logger from '../../lib/logger';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
+import { useTerminalId } from '../../hooks/useTerminalId';
 
 // Sub-components (we'll create these next)
 import POSProductGrid from './POSProductGrid';
@@ -70,6 +71,7 @@ interface POSDashboardProps {}
 const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) => {
   // Context and state
   const { currentUser, currentOutlet } = useOutlet();
+  const { terminalId } = useTerminalId();
   const { toasts, success, error, removeToast } = useToast();
 
   // POS State
@@ -215,11 +217,10 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   // Initialize cash drawer session on mount
   useEffect(() => {
     const initializeCashDrawer = async () => {
-      if (!currentOutlet?.id || !currentUser?.id || !isOnline) return;
+      if (!currentOutlet?.id || !currentUser?.id || !isOnline || !terminalId) return;
 
       try {
         // Check if there's an active session
-        const terminalId = `terminal-${currentOutlet.id}`;
         const activeSession = await posService.getActiveCashDrawerSession(currentOutlet.id, terminalId);
         
         if (!activeSession) {
