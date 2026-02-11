@@ -125,6 +125,7 @@ const ReceiptEditor: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'success' | 'error' | null>(null);
+  const [uiMessage, setUiMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   // Load saved template from backend on mount
   useEffect(() => {
@@ -188,6 +189,7 @@ const ReceiptEditor: React.FC = () => {
         // Note: localStorage caching happens after state update via useEffect on template change
       } catch (error) {
         logger.error('Failed to load receipt settings from backend:', error);
+        setUiMessage({ type: 'info', text: 'Could not load settings from server. Showing last saved (offline) settings.' });
         // Fallback to localStorage if backend fails
         const saved = localStorage.getItem('pos-receipt-template');
         if (saved) {
@@ -216,12 +218,13 @@ const ReceiptEditor: React.FC = () => {
   // Save template changes to backend
   const saveTemplate = async () => {
     if (!currentOutlet?.id) {
-      alert('Please select an outlet first');
+      setUiMessage({ type: 'error', text: 'Please select an outlet first.' });
       return;
     }
     
     setIsSaving(true);
     setSaveStatus(null);
+    setUiMessage(null);
     
     try {
       // Save receipt settings to backend
@@ -250,11 +253,16 @@ const ReceiptEditor: React.FC = () => {
       localStorage.setItem('pos-receipt-template', JSON.stringify(template));
       
       setSaveStatus('success');
+      setUiMessage({ type: 'success', text: 'Settings saved successfully.' });
       setTimeout(() => setSaveStatus(null), 3000);
     } catch (error) {
       logger.error('Failed to save receipt settings:', error);
       setSaveStatus('error');
-      alert('Failed to save receipt settings. Please try again.');
+      const msg =
+        error instanceof Error
+          ? error.message
+          : 'Failed to save receipt settings. Please try again.';
+      setUiMessage({ type: 'error', text: msg });
     } finally {
       setIsSaving(false);
     }
@@ -297,6 +305,38 @@ const ReceiptEditor: React.FC = () => {
       ...prev,
       [section]: { ...prev[section], ...updates }
     }));
+  };
+
+  const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Allow re-selecting the same file later
+    e.target.value = '';
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setUiMessage({ type: 'error', text: 'Please select an image file (PNG, JPG, SVG, etc.).' });
+      return;
+    }
+
+    // Keep reasonably small to avoid huge DB rows / slow loads
+    const maxBytes = 2 * 1024 * 1024; // 2MB
+    if (file.size > maxBytes) {
+      setUiMessage({ type: 'error', text: 'Logo is too large. Please use an image under 2MB.' });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!dataUrl) {
+        setUiMessage({ type: 'error', text: 'Failed to read the image. Please try again.' });
+        return;
+      }
+      updateTemplate('header', { showLogo: true, logoUrl: dataUrl });
+      setUiMessage({ type: 'success', text: 'Logo added. Click “Save Settings” to persist it.' });
+    };
+    reader.onerror = () => setUiMessage({ type: 'error', text: 'Failed to read the image. Please try again.' });
+    reader.readAsDataURL(file);
   };
 
   const renderEditor = () => {
@@ -369,6 +409,45 @@ const ReceiptEditor: React.FC = () => {
                 />
                 <span className="text-sm text-gray-700 dark:text-gray-300">Show business logo</span>
               </label>
+
+              {template.header.showLogo && (
+                <div className="pl-6 space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Logo URL (optional)
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://... or paste image URL"
+                      value={template.header.logoUrl || ''}
+                      onChange={(e) => updateTemplate('header', { logoUrl: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Tip: You can also upload a small logo below (stored in your receipt settings).
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <label className="inline-flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-lg cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm">
+                      <Upload className="w-4 h-4" />
+                      Upload logo
+                      <input type="file" accept="image/*" className="hidden" onChange={handleLogoFileChange} />
+                    </label>
+
+                    {template.header.logoUrl && (
+                      <button
+                        type="button"
+                        onClick={() => updateTemplate('header', { logoUrl: undefined })}
+                        className="px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -643,28 +722,40 @@ const ReceiptEditor: React.FC = () => {
     }[template.styling.lineSpacing];
 
     const widthClass = {
-      '58mm': 'w-48',
-      '80mm': 'w-64',
+      // Approx pixel widths for common receipt paper sizes
+      // 58mm ~ 220px, 80mm ~ 300px (varies by printer margins)
+      '58mm': 'w-56',
+      '80mm': 'w-72',
       'A4': 'w-full max-w-2xl'
     }[template.styling.paperWidth];
 
     return (
-      <div className={`bg-white p-4 border border-gray-300 rounded-lg ${widthClass} ${fontSizeClass} ${fontFamilyClass} ${lineSpacingClass} mx-auto shadow-lg`}>
+      <div
+        className={`bg-white px-4 py-3 border border-gray-300 rounded-lg ${widthClass} ${fontSizeClass} ${fontFamilyClass} ${lineSpacingClass} mx-auto shadow-lg overflow-hidden`}
+      >
         {/* Header */}
         <div className="text-center border-b border-gray-300 pb-2 mb-2">
           {template.header.showLogo && (
             <div className="mb-2">
-              <div className="w-16 h-16 bg-gray-200 rounded mx-auto flex items-center justify-center">
-                <ImageIcon className="w-8 h-8 text-gray-400" />
-              </div>
+              {template.header.logoUrl ? (
+                <img
+                  src={template.header.logoUrl}
+                  alt="Business logo"
+                  className="w-16 h-16 object-contain mx-auto rounded bg-white"
+                />
+              ) : (
+                <div className="w-16 h-16 bg-gray-200 rounded mx-auto flex items-center justify-center">
+                  <ImageIcon className="w-8 h-8 text-gray-400" />
+                </div>
+              )}
             </div>
           )}
 
-          <div className="font-bold text-lg">{template.header.businessName}</div>
-          <div className="whitespace-pre-line">{template.header.address}</div>
-          <div>{template.header.phone}</div>
-          {template.header.email && <div>{template.header.email}</div>}
-          {template.header.website && <div>{template.header.website}</div>}
+          <div className="font-bold text-lg leading-tight break-words">{template.header.businessName}</div>
+          <div className="whitespace-pre-wrap break-words text-gray-700">{template.header.address}</div>
+          <div className="break-words">{template.header.phone}</div>
+          {template.header.email && <div className="break-words">{template.header.email}</div>}
+          {template.header.website && <div className="break-words">{template.header.website}</div>}
         </div>
 
         {/* Transaction Info */}
@@ -678,13 +769,19 @@ const ReceiptEditor: React.FC = () => {
         {/* Items */}
         <div className="border-y border-gray-300 py-2 my-2">
           {sampleTransaction.items.map((item, index) => (
-            <div key={index} className="flex justify-between mb-1">
-              <div className={`flex-1 ${template.body.itemAlignment === 'center' ? 'text-center' : template.body.itemAlignment === 'right' ? 'text-right' : 'text-left'}`}>
-                <div>{item.name}</div>
-                {template.body.showItemCodes && <div className="text-gray-500">{item.code}</div>}
-                <div className="text-gray-600">{item.quantity} x {formatCurrency(item.price)}</div>
+            <div key={index} className="flex items-start justify-between gap-3 mb-2">
+              <div
+                className={`min-w-0 flex-1 break-words ${template.body.itemAlignment === 'center' ? 'text-center' : template.body.itemAlignment === 'right' ? 'text-right' : 'text-left'
+                  }`}
+              >
+                <div className="font-medium leading-snug">{item.name}</div>
+                {template.body.showItemCodes && <div className="text-gray-500 break-words">{item.code}</div>}
+                <div className="text-gray-600 tabular-nums">{item.quantity} x {formatCurrency(item.price)}</div>
               </div>
-              <div className={`${template.body.priceAlignment === 'center' ? 'text-center' : template.body.priceAlignment === 'left' ? 'text-left' : 'text-right'}`}>
+              <div
+                className={`shrink-0 w-24 tabular-nums ${template.body.priceAlignment === 'center' ? 'text-center' : template.body.priceAlignment === 'left' ? 'text-left' : 'text-right'
+                  }`}
+              >
                 {formatCurrency(item.total)}
               </div>
             </div>
@@ -693,33 +790,33 @@ const ReceiptEditor: React.FC = () => {
 
         {/* Totals */}
         <div className="space-y-1">
-          <div className="flex justify-between">
-            <span>Subtotal:</span>
-            <span>{formatCurrency(sampleTransaction.subtotal)}</span>
+          <div className="flex justify-between gap-3">
+            <span className="text-gray-700">Subtotal:</span>
+            <span className="shrink-0 tabular-nums text-right">{formatCurrency(sampleTransaction.subtotal)}</span>
           </div>
           {template.body.showTaxBreakdown && (
-            <div className="flex justify-between">
-              <span>VAT (7.5%):</span>
-              <span>{formatCurrency(sampleTransaction.tax_amount)}</span>
+            <div className="flex justify-between gap-3">
+              <span className="text-gray-700">VAT (7.5%):</span>
+              <span className="shrink-0 tabular-nums text-right">{formatCurrency(sampleTransaction.tax_amount)}</span>
             </div>
           )}
           {template.body.showDiscounts && sampleTransaction.discount_amount > 0 && (
-            <div className="flex justify-between text-green-600">
+            <div className="flex justify-between gap-3 text-green-600">
               <span>Discount:</span>
-              <span>-{formatCurrency(sampleTransaction.discount_amount)}</span>
+              <span className="shrink-0 tabular-nums text-right">-{formatCurrency(sampleTransaction.discount_amount)}</span>
             </div>
           )}
-          <div className="flex justify-between font-bold border-t border-gray-300 pt-1">
+          <div className="flex justify-between gap-3 font-bold border-t border-gray-300 pt-1">
             <span>Total:</span>
-            <span>{formatCurrency(sampleTransaction.total_amount)}</span>
+            <span className="shrink-0 tabular-nums text-right">{formatCurrency(sampleTransaction.total_amount)}</span>
           </div>
-          <div className="flex justify-between">
+          <div className="flex justify-between gap-3">
             <span>Tendered:</span>
-            <span>{formatCurrency(sampleTransaction.tendered_amount)}</span>
+            <span className="shrink-0 tabular-nums text-right">{formatCurrency(sampleTransaction.tendered_amount)}</span>
           </div>
-          <div className="flex justify-between">
+          <div className="flex justify-between gap-3">
             <span>Change:</span>
-            <span>{formatCurrency(sampleTransaction.change_amount)}</span>
+            <span className="shrink-0 tabular-nums text-right">{formatCurrency(sampleTransaction.change_amount)}</span>
           </div>
         </div>
 
@@ -757,6 +854,20 @@ const ReceiptEditor: React.FC = () => {
     <div className="flex gap-6 h-full">
       {/* Editor Panel */}
       <div className={`${previewMode === 'edit' ? 'flex-1' : 'w-80'} bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 overflow-y-auto`}>
+        {uiMessage && (
+          <div
+            className={`mb-4 rounded-lg border p-3 text-sm ${
+              uiMessage.type === 'success'
+                ? 'border-green-200 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-900/20 dark:text-green-200'
+                : uiMessage.type === 'error'
+                ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200'
+                : 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-200'
+            }`}
+          >
+            {uiMessage.text}
+          </div>
+        )}
+
         {/* Section Tabs */}
         <div className="flex flex-wrap gap-2 mb-6">
           {[
