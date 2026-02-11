@@ -820,12 +820,6 @@ const ReceiptEditor: React.FC = () => {
               </>
             )}
           </button>
-          {!currentOutlet?.id && (
-            <span className="text-sm text-gray-500 dark:text-gray-400">
-              Please select an outlet to save settings
-            </span>
-          )}
-        </div>
           <button
             onClick={resetTemplate}
             className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
@@ -833,6 +827,11 @@ const ReceiptEditor: React.FC = () => {
             <RotateCcw className="w-4 h-4" />
             Reset
           </button>
+          {!currentOutlet?.id && (
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              Please select an outlet to save settings
+            </span>
+          )}
         </div>
       </div>
 
