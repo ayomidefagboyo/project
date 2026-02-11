@@ -1387,8 +1387,8 @@ class POSService {
       return response.data.receipts || [];
     } catch (error) {
       logger.error('Error fetching held receipts:', error);
-      // Return empty array on error to allow offline fallback
-      return [];
+      // Propagate error so caller can decide how to fall back
+      throw this.handleError(error);
     }
   }
 
