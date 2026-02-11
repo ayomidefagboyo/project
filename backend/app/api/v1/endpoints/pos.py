@@ -32,6 +32,8 @@ from app.schemas.pos import (
     # Staff Profiles
     StaffProfileCreate, StaffProfileUpdate, StaffProfileResponse,
     StaffProfileListResponse, StaffPinAuth, StaffAuthResponse,
+    # Receipt Settings
+    ReceiptSettingsUpdate, ReceiptSettingsResponse,
     # Base types
     PaymentMethod, TransactionStatus, MovementType, SyncStatus, ReceiptType
 )
@@ -2160,6 +2162,214 @@ async def authenticate_with_pin(auth_data: StaffPinAuth):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Authentication failed"
+        )
+
+
+# ===============================================
+# RECEIPT SETTINGS ENDPOINTS
+# ===============================================
+
+@router.get("/receipt-settings/{outlet_id}", response_model=ReceiptSettingsResponse)
+async def get_receipt_settings(
+    outlet_id: str,
+    current_user=Depends(CurrentUser())
+):
+    """Get receipt customization settings for outlet"""
+    try:
+        supabase = get_supabase_admin()
+        
+        # Try to get existing settings
+        result = supabase.table(Tables.RECEIPT_SETTINGS)\
+            .select('*')\
+            .eq('outlet_id', outlet_id)\
+            .execute()
+        
+        if result.data and len(result.data) > 0:
+            settings_data = result.data[0]
+            return ReceiptSettingsResponse(**settings_data)
+        
+        # Return default settings if none exist
+        default_settings = {
+            'id': str(uuid.uuid4()),
+            'outlet_id': outlet_id,
+            'header_text': None,
+            'footer_text': None,
+            'logo_url': None,
+            'show_qr_code': True,
+            'show_customer_points': True,
+            'show_tax_breakdown': True,
+            'receipt_width': 58,
+            'font_size': 'normal',
+            'created_at': datetime.utcnow().isoformat(),
+            'updated_at': datetime.utcnow().isoformat()
+        }
+        return ReceiptSettingsResponse(**default_settings)
+        
+    except Exception as e:
+        logger.error(f"Error fetching receipt settings: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch receipt settings: {str(e)}"
+        )
+
+@router.put("/receipt-settings/{outlet_id}", response_model=ReceiptSettingsResponse)
+async def update_receipt_settings(
+    outlet_id: str,
+    settings_update: ReceiptSettingsUpdate,
+    current_user=Depends(CurrentUser())
+):
+    """Update receipt customization settings for outlet"""
+    try:
+        supabase = get_supabase_admin()
+        
+        # Check if settings exist
+        existing = supabase.table(Tables.RECEIPT_SETTINGS)\
+            .select('id')\
+            .eq('outlet_id', outlet_id)\
+            .execute()
+        
+        update_data = {
+            'outlet_id': outlet_id,
+            'updated_at': datetime.utcnow().isoformat()
+        }
+        
+        # Only include fields that are provided (not None)
+        if settings_update.header_text is not None:
+            update_data['header_text'] = settings_update.header_text
+        if settings_update.footer_text is not None:
+            update_data['footer_text'] = settings_update.footer_text
+        if settings_update.logo_url is not None:
+            update_data['logo_url'] = settings_update.logo_url
+        if settings_update.show_qr_code is not None:
+            update_data['show_qr_code'] = settings_update.show_qr_code
+        if settings_update.show_customer_points is not None:
+            update_data['show_customer_points'] = settings_update.show_customer_points
+        if settings_update.show_tax_breakdown is not None:
+            update_data['show_tax_breakdown'] = settings_update.show_tax_breakdown
+        if settings_update.receipt_width is not None:
+            update_data['receipt_width'] = settings_update.receipt_width
+        if settings_update.font_size is not None:
+            update_data['font_size'] = settings_update.font_size
+        
+        if existing.data and len(existing.data) > 0:
+            # Update existing
+            result = supabase.table(Tables.RECEIPT_SETTINGS)\
+                .update(update_data)\
+                .eq('outlet_id', outlet_id)\
+                .execute()
+        else:
+            # Create new
+            update_data['id'] = str(uuid.uuid4())
+            update_data['created_at'] = datetime.utcnow().isoformat()
+            # Set defaults for fields not provided
+            if 'show_qr_code' not in update_data:
+                update_data['show_qr_code'] = True
+            if 'show_customer_points' not in update_data:
+                update_data['show_customer_points'] = True
+            if 'show_tax_breakdown' not in update_data:
+                update_data['show_tax_breakdown'] = True
+            if 'receipt_width' not in update_data:
+                update_data['receipt_width'] = 58
+            if 'font_size' not in update_data:
+                update_data['font_size'] = 'normal'
+            
+            result = supabase.table(Tables.RECEIPT_SETTINGS)\
+                .insert(update_data)\
+                .execute()
+        
+        if not result.data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to save receipt settings"
+            )
+        
+        return ReceiptSettingsResponse(**result.data[0])
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating receipt settings: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update receipt settings: {str(e)}"
+        )
+
+
+# ===============================================
+# OUTLET BUSINESS INFO ENDPOINTS (for Settings sync)
+# ===============================================
+
+@router.get("/outlets/{outlet_id}")
+async def get_outlet_info(
+    outlet_id: str,
+    current_user=Depends(CurrentUser())
+):
+    """Get outlet business information (name, address, phone, etc.)"""
+    try:
+        supabase = get_supabase_admin()
+        
+        result = supabase.table(Tables.OUTLETS)\
+            .select('*')\
+            .eq('id', outlet_id)\
+            .execute()
+        
+        if not result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Outlet not found"
+            )
+        
+        return result.data[0]
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching outlet info: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch outlet info: {str(e)}"
+        )
+
+@router.put("/outlets/{outlet_id}")
+async def update_outlet_info(
+    outlet_id: str,
+    outlet_data: Dict[str, Any],
+    current_user=Depends(CurrentUser())
+):
+    """Update outlet business information (address, phone, email, website, etc.)"""
+    try:
+        supabase = get_supabase_admin()
+        
+        # Only allow updating specific fields for business info
+        allowed_fields = ['name', 'phone', 'email', 'website', 'address']
+        update_data = {
+            'updated_at': datetime.utcnow().isoformat()
+        }
+        
+        for field in allowed_fields:
+            if field in outlet_data:
+                update_data[field] = outlet_data[field]
+        
+        result = supabase.table(Tables.OUTLETS)\
+            .update(update_data)\
+            .eq('id', outlet_id)\
+            .execute()
+        
+        if not result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Outlet not found"
+            )
+        
+        return result.data[0]
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating outlet info: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update outlet info: {str(e)}"
         )
 
 
