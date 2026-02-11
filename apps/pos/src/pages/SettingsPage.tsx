@@ -21,6 +21,8 @@ import {
   Wifi
 } from 'lucide-react';
 import ReceiptEditor from '../components/settings/ReceiptEditor';
+import { useOutlet } from '../contexts/OutletContext';
+import { useTerminalId } from '../hooks/useTerminalId';
 
 interface SettingsTab {
   id: string;
@@ -88,6 +90,8 @@ const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('receipts');
   const [darkMode, setDarkMode] = useState(false);
   const [systemPreference, setSystemPreference] = useState<'light' | 'dark' | 'system'>('system');
+  const { currentOutlet } = useOutlet();
+  const { terminalId } = useTerminalId();
 
   // Initialize theme on component mount
   useEffect(() => {
@@ -136,13 +140,23 @@ const SettingsPage: React.FC = () => {
           />
         );
       case 'hardware':
-        return <HardwareSetupTab />;
+        return (
+          <HardwareSetupTab
+            outletId={currentOutlet?.id}
+            terminalId={terminalId || undefined}
+          />
+        );
       case 'terminal':
-        return <TerminalSettingsTab />;
+        return (
+          <TerminalSettingsTab
+            outletId={currentOutlet?.id}
+            terminalId={terminalId || undefined}
+          />
+        );
       case 'staff':
-        return <StaffSecurityTab />;
+        return <StaffSecurityTab outletId={currentOutlet?.id} />;
       case 'outlet':
-        return <OutletSettingsTab />;
+        return <OutletSettingsTab outletId={currentOutlet?.id} />;
       default:
         return <ReceiptCustomizationTab />;
     }
@@ -291,17 +305,107 @@ const AppearanceTab: React.FC<AppearanceTabProps> = ({ darkMode, systemPreferenc
   </div>
 );
 
-const HardwareSetupTab = () => {
-  const [printers, setPrinters] = useState([
+interface HardwareSetupTabProps {
+  outletId?: string;
+  terminalId?: string;
+}
+
+type PrinterStatus = 'connected' | 'disconnected';
+type ScannerStatus = 'connected' | 'disconnected';
+
+interface PrinterConfig {
+  id: string;
+  name: string;
+  type: 'thermal' | 'label' | string;
+  status: PrinterStatus;
+  defaultPrint: 'receipts' | 'labels' | string;
+}
+
+interface ScannerConfig {
+  id: string;
+  name: string;
+  type: 'usb' | 'bluetooth' | string;
+  status: ScannerStatus;
+}
+
+interface CashDrawerConfig {
+  id: string;
+  name: string;
+  type: 'rj11' | string;
+  status: 'connected' | 'disconnected';
+}
+
+interface HardwarePreferences {
+  autoOpenDrawerMode: 'on-sale' | 'cash-only' | 'manual';
+  autoPrintMode: 'always' | 'ask' | 'never';
+  scannerBeepEnabled: boolean;
+  cutPaperEnabled: boolean;
+  duplicateReceiptsEnabled: boolean;
+}
+
+interface HardwareState {
+  printers: PrinterConfig[];
+  scanners: ScannerConfig[];
+  cashDrawers: CashDrawerConfig[];
+  prefs: HardwarePreferences;
+}
+
+const defaultHardwareState: HardwareState = {
+  printers: [
     { id: 'thermal-1', name: 'Receipt Printer', type: 'thermal', status: 'connected', defaultPrint: 'receipts' },
     { id: 'label-1', name: 'Label Printer', type: 'label', status: 'disconnected', defaultPrint: 'labels' }
-  ]);
-  const [scanners, setScanners] = useState([
+  ],
+  scanners: [
     { id: 'scanner-1', name: 'Barcode Scanner', type: 'usb', status: 'connected' }
-  ]);
-  const [cashDrawers, setCashDrawers] = useState([
+  ],
+  cashDrawers: [
     { id: 'drawer-1', name: 'Cash Drawer', type: 'rj11', status: 'connected' }
-  ]);
+  ],
+  prefs: {
+    autoOpenDrawerMode: 'on-sale',
+    autoPrintMode: 'always',
+    scannerBeepEnabled: true,
+    cutPaperEnabled: true,
+    duplicateReceiptsEnabled: false
+  }
+};
+
+const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalId }) => {
+  const [state, setState] = useState<HardwareState>(defaultHardwareState);
+
+  const storageKey = outletId && terminalId ? `pos_hardware_${outletId}_${terminalId}` : null;
+
+  // Load persisted hardware config for this outlet + terminal
+  useEffect(() => {
+    if (!storageKey) return;
+
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<HardwareState>;
+      setState(prev => ({
+        printers: parsed.printers && parsed.printers.length ? parsed.printers : prev.printers,
+        scanners: parsed.scanners && parsed.scanners.length ? parsed.scanners : prev.scanners,
+        cashDrawers: parsed.cashDrawers && parsed.cashDrawers.length ? parsed.cashDrawers : prev.cashDrawers,
+        prefs: {
+          ...prev.prefs,
+          ...(parsed.prefs || {})
+        }
+      }));
+    } catch {
+      // Ignore malformed data and keep defaults
+    }
+  }, [storageKey]);
+
+  // Persist whenever hardware state changes
+  useEffect(() => {
+    if (!storageKey) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+    } catch {
+      // Ignore quota/storage errors
+    }
+  }, [state, storageKey]);
 
   return (
     <div className="p-6">
@@ -426,7 +530,16 @@ const HardwareSetupTab = () => {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Auto-open cash drawer
                 </label>
-                <select className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                <select
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  value={state.prefs.autoOpenDrawerMode}
+                  onChange={e =>
+                    setState(prev => ({
+                      ...prev,
+                      prefs: { ...prev.prefs, autoOpenDrawerMode: e.target.value as HardwarePreferences['autoOpenDrawerMode'] }
+                    }))
+                  }
+                >
                   <option value="on-sale">On every sale</option>
                   <option value="cash-only">Cash payments only</option>
                   <option value="manual">Manual only</option>
@@ -437,7 +550,16 @@ const HardwareSetupTab = () => {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Receipt auto-print
                 </label>
-                <select className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                <select
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  value={state.prefs.autoPrintMode}
+                  onChange={e =>
+                    setState(prev => ({
+                      ...prev,
+                      prefs: { ...prev.prefs, autoPrintMode: e.target.value as HardwarePreferences['autoPrintMode'] }
+                    }))
+                  }
+                >
                   <option value="always">Always print</option>
                   <option value="ask">Ask customer</option>
                   <option value="never">Manual only</option>
@@ -447,15 +569,45 @@ const HardwareSetupTab = () => {
 
             <div className="space-y-3">
               <label className="flex items-center gap-2">
-                <input type="checkbox" className="rounded border-gray-300" defaultChecked />
+                <input
+                  type="checkbox"
+                  className="rounded border-gray-300"
+                  checked={state.prefs.scannerBeepEnabled}
+                  onChange={e =>
+                    setState(prev => ({
+                      ...prev,
+                      prefs: { ...prev.prefs, scannerBeepEnabled: e.target.checked }
+                    }))
+                  }
+                />
                 <span className="text-sm text-gray-700 dark:text-gray-300">Enable barcode scanner beep</span>
               </label>
               <label className="flex items-center gap-2">
-                <input type="checkbox" className="rounded border-gray-300" defaultChecked />
+                <input
+                  type="checkbox"
+                  className="rounded border-gray-300"
+                  checked={state.prefs.cutPaperEnabled}
+                  onChange={e =>
+                    setState(prev => ({
+                      ...prev,
+                      prefs: { ...prev.prefs, cutPaperEnabled: e.target.checked }
+                    }))
+                  }
+                />
                 <span className="text-sm text-gray-700 dark:text-gray-300">Cut receipt paper after printing</span>
               </label>
               <label className="flex items-center gap-2">
-                <input type="checkbox" className="rounded border-gray-300" />
+                <input
+                  type="checkbox"
+                  className="rounded border-gray-300"
+                  checked={state.prefs.duplicateReceiptsEnabled}
+                  onChange={e =>
+                    setState(prev => ({
+                      ...prev,
+                      prefs: { ...prev.prefs, duplicateReceiptsEnabled: e.target.checked }
+                    }))
+                  }
+                />
                 <span className="text-sm text-gray-700 dark:text-gray-300">Print duplicate receipts</span>
               </label>
             </div>
@@ -466,11 +618,58 @@ const HardwareSetupTab = () => {
   );
 };
 
-const TerminalSettingsTab = () => {
-  const [terminalName, setTerminalName] = useState('Register 1');
-  const [autoLogout, setAutoLogout] = useState('30');
-  const [soundsEnabled, setSoundsEnabled] = useState(true);
-  const [keypadLayout, setKeypadLayout] = useState('standard');
+interface TerminalSettingsTabProps {
+  outletId?: string;
+  terminalId?: string;
+}
+
+interface TerminalSettingsState {
+  terminalName: string;
+  autoLogout: string;
+  soundsEnabled: boolean;
+  keypadLayout: 'standard' | 'phone' | 'calculator';
+}
+
+const defaultTerminalSettings: TerminalSettingsState = {
+  terminalName: 'Register 1',
+  autoLogout: '30',
+  soundsEnabled: true,
+  keypadLayout: 'standard'
+};
+
+const TerminalSettingsTab: React.FC<TerminalSettingsTabProps> = ({ outletId, terminalId }) => {
+  const [settings, setSettings] = useState<TerminalSettingsState>(defaultTerminalSettings);
+
+  const storageKey = outletId && terminalId ? `pos_terminal_settings_${outletId}_${terminalId}` : null;
+
+  // Load persisted terminal settings
+  useEffect(() => {
+    if (!storageKey) return;
+
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<TerminalSettingsState>;
+      setSettings(prev => ({
+        terminalName: parsed.terminalName ?? prev.terminalName,
+        autoLogout: parsed.autoLogout ?? prev.autoLogout,
+        soundsEnabled: parsed.soundsEnabled ?? prev.soundsEnabled,
+        keypadLayout: (parsed.keypadLayout as TerminalSettingsState['keypadLayout']) ?? prev.keypadLayout
+      }));
+    } catch {
+      // Ignore malformed data
+    }
+  }, [storageKey]);
+
+  // Persist on change
+  useEffect(() => {
+    if (!storageKey) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(settings));
+    } catch {
+      // Ignore storage errors
+    }
+  }, [settings, storageKey]);
 
   return (
     <div className="p-6">
@@ -488,8 +687,8 @@ const TerminalSettingsTab = () => {
               </label>
               <input
                 type="text"
-                value={terminalName}
-                onChange={(e) => setTerminalName(e.target.value)}
+                value={settings.terminalName}
+                onChange={(e) => setSettings(prev => ({ ...prev, terminalName: e.target.value }))}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               />
             </div>
@@ -518,8 +717,8 @@ const TerminalSettingsTab = () => {
                 Auto logout after (minutes)
               </label>
               <select
-                value={autoLogout}
-                onChange={(e) => setAutoLogout(e.target.value)}
+                value={settings.autoLogout}
+                onChange={(e) => setSettings(prev => ({ ...prev, autoLogout: e.target.value }))}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               >
                 <option value="15">15 minutes</option>
@@ -557,8 +756,13 @@ const TerminalSettingsTab = () => {
                 Keypad Layout
               </label>
               <select
-                value={keypadLayout}
-                onChange={(e) => setKeypadLayout(e.target.value)}
+                  value={settings.keypadLayout}
+                  onChange={(e) =>
+                    setSettings(prev => ({
+                      ...prev,
+                      keypadLayout: e.target.value as TerminalSettingsState['keypadLayout']
+                    }))
+                  }
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               >
                 <option value="standard">Standard (123...)</option>
@@ -593,9 +797,48 @@ const TerminalSettingsTab = () => {
   );
 };
 
-const StaffSecurityTab = () => {
-  const [requirePinForVoids, setRequirePinForVoids] = useState(true);
-  const [maxDiscountPercent, setMaxDiscountPercent] = useState('10');
+interface StaffSecurityTabProps {
+  outletId?: string;
+}
+
+interface StaffSecurityState {
+  requirePinForVoids: boolean;
+  maxDiscountPercent: string;
+}
+
+const defaultStaffSecurity: StaffSecurityState = {
+  requirePinForVoids: true,
+  maxDiscountPercent: '10'
+};
+
+const StaffSecurityTab: React.FC<StaffSecurityTabProps> = ({ outletId }) => {
+  const [state, setState] = useState<StaffSecurityState>(defaultStaffSecurity);
+
+  const storageKey = outletId ? `pos_staff_security_${outletId}` : null;
+
+  useEffect(() => {
+    if (!storageKey) return;
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<StaffSecurityState>;
+      setState(prev => ({
+        requirePinForVoids: parsed.requirePinForVoids ?? prev.requirePinForVoids,
+        maxDiscountPercent: parsed.maxDiscountPercent ?? prev.maxDiscountPercent
+      }));
+    } catch {
+      // ignore
+    }
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (!storageKey) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+    } catch {
+      // ignore
+    }
+  }, [state, storageKey]);
 
   return (
     <div className="p-6">
@@ -664,8 +907,8 @@ const StaffSecurityTab = () => {
                   Maximum discount % (without approval)
                 </label>
                 <select
-                  value={maxDiscountPercent}
-                  onChange={(e) => setMaxDiscountPercent(e.target.value)}
+                  value={state.maxDiscountPercent}
+                  onChange={e => setState(prev => ({ ...prev, maxDiscountPercent: e.target.value }))}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
                   <option value="5">5%</option>
@@ -692,8 +935,8 @@ const StaffSecurityTab = () => {
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
-                  checked={requirePinForVoids}
-                  onChange={(e) => setRequirePinForVoids(e.target.checked)}
+                  checked={state.requirePinForVoids}
+                  onChange={e => setState(prev => ({ ...prev, requirePinForVoids: e.target.checked }))}
                   className="rounded border-gray-300"
                 />
                 <span className="text-sm text-gray-700 dark:text-gray-300">Require manager PIN for voids</span>
@@ -731,10 +974,51 @@ const StaffSecurityTab = () => {
   );
 };
 
-const OutletSettingsTab = () => {
-  const [businessName, setBusinessName] = useState('Sample Supermarket');
-  const [taxRate, setTaxRate] = useState('7.5');
-  const [currency, setCurrency] = useState('NGN');
+interface OutletSettingsTabProps {
+  outletId?: string;
+}
+
+interface OutletSettingsState {
+  businessName: string;
+  taxRate: string;
+  currency: string;
+}
+
+const defaultOutletSettings: OutletSettingsState = {
+  businessName: 'Sample Supermarket',
+  taxRate: '7.5',
+  currency: 'NGN'
+};
+
+const OutletSettingsTab: React.FC<OutletSettingsTabProps> = ({ outletId }) => {
+  const [state, setState] = useState<OutletSettingsState>(defaultOutletSettings);
+
+  const storageKey = outletId ? `pos_outlet_settings_${outletId}` : null;
+
+  useEffect(() => {
+    if (!storageKey) return;
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<OutletSettingsState>;
+      setState(prev => ({
+        businessName: parsed.businessName ?? prev.businessName,
+        taxRate: parsed.taxRate ?? prev.taxRate,
+        currency: parsed.currency ?? prev.currency
+      }));
+    } catch {
+      // ignore
+    }
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (!storageKey) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+    } catch {
+      // ignore
+    }
+  }, [state, storageKey]);
 
   return (
     <div className="p-6">
@@ -752,8 +1036,8 @@ const OutletSettingsTab = () => {
               </label>
               <input
                 type="text"
-                value={businessName}
-                onChange={(e) => setBusinessName(e.target.value)}
+                value={state.businessName}
+                onChange={e => setState(prev => ({ ...prev, businessName: e.target.value }))}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               />
             </div>
@@ -805,8 +1089,8 @@ const OutletSettingsTab = () => {
               </label>
               <input
                 type="number"
-                value={taxRate}
-                onChange={(e) => setTaxRate(e.target.value)}
+                  value={state.taxRate}
+                  onChange={e => setState(prev => ({ ...prev, taxRate: e.target.value }))}
                 step="0.1"
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               />
@@ -817,8 +1101,8 @@ const OutletSettingsTab = () => {
                 Currency
               </label>
               <select
-                value={currency}
-                onChange={(e) => setCurrency(e.target.value)}
+                  value={state.currency}
+                  onChange={e => setState(prev => ({ ...prev, currency: e.target.value }))}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               >
                 <option value="NGN">Nigerian Naira (₦)</option>
