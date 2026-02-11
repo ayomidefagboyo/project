@@ -909,14 +909,30 @@ async def create_held_receipt(
         except Exception:
             pass
         
-        # Prepare held receipt data
+        # Prepare held receipt data (ensure JSON-serializable types)
         receipt_id = str(uuid.uuid4())
+
+        # Serialize items with JSON-friendly types (e.g. Decimal -> float)
+        try:
+            items_json = [item.model_dump(mode="json") for item in receipt.items]
+        except AttributeError:
+            # Fallback for older Pydantic versions
+            items_json = []
+            for item in receipt.items:
+                item_dict = item.dict()
+                # Safely cast known numeric fields if present
+                if "unit_price" in item_dict:
+                    item_dict["unit_price"] = float(item_dict["unit_price"])
+                if "discount" in item_dict:
+                    item_dict["discount"] = float(item_dict["discount"])
+                items_json.append(item_dict)
+
         receipt_data = {
             'id': receipt_id,
             'outlet_id': receipt.outlet_id,
             'cashier_id': receipt.cashier_id,
             'cashier_name': cashier_name,
-            'items': [item.dict() for item in receipt.items],
+            'items': items_json,
             'total': float(receipt.total),
             'saved_at': datetime.utcnow().isoformat(),
             'created_at': datetime.utcnow().isoformat(),
