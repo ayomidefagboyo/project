@@ -87,13 +87,14 @@ export function useRealtimeSync({
 
     // console.log('🔴 Starting COMPREHENSIVE real-time sync for outlet:', outletId);
     const activeChannels: RealtimeChannel[] = [];
+    const channelRunId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     // ==========================================
     // 1. PRODUCTS REAL-TIME
     // ==========================================
     if (callbacksRef.current.onProductChange) {
       const productChannel = supabase
-        .channel(`products:${outletId}`)
+        .channel(`products:${outletId}:${channelRunId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'pos_products', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
             console.log('📦 Product changed:', payload.eventType, payload.new || payload.old);
@@ -113,7 +114,7 @@ export function useRealtimeSync({
     // ==========================================
     if (callbacksRef.current.onTransactionChange) {
       const transactionChannel = supabase
-        .channel(`transactions:${outletId}`)
+        .channel(`transactions:${outletId}:${channelRunId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'pos_transactions', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
             console.log('💰 Transaction changed:', payload.eventType, payload.new || payload.old);
@@ -130,7 +131,7 @@ export function useRealtimeSync({
     // ==========================================
     if (callbacksRef.current.onInventoryChange) {
       const inventoryChannel = supabase
-        .channel(`inventory:${outletId}`)
+        .channel(`inventory:${outletId}:${channelRunId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'pos_stock_movements', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
             console.log('📊 Inventory changed:', payload.eventType, payload.new || payload.old);
@@ -147,7 +148,7 @@ export function useRealtimeSync({
     // ==========================================
     if (callbacksRef.current.onStockTransferChange) {
       const transferChannel = supabase
-        .channel(`transfers:${outletId}`)
+        .channel(`transfers:${outletId}:${channelRunId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'pos_stock_transfers', 
           filter: `from_outlet_id=eq.${outletId}` },
           (payload) => {
@@ -165,7 +166,7 @@ export function useRealtimeSync({
     // ==========================================
     if (callbacksRef.current.onCashDrawerChange) {
       const cashDrawerChannel = supabase
-        .channel(`cash_drawer:${outletId}`)
+        .channel(`cash_drawer:${outletId}:${channelRunId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'pos_cash_drawer_sessions', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
             console.log('💵 Cash drawer changed:', payload.eventType, payload.new || payload.old);
@@ -182,7 +183,7 @@ export function useRealtimeSync({
     // ==========================================
     if (callbacksRef.current.onCustomerChange) {
       const customerChannel = supabase
-        .channel(`customers:${outletId}`)
+        .channel(`customers:${outletId}:${channelRunId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'customers', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
             console.log('👤 Customer changed:', payload.eventType, payload.new || payload.old);
@@ -199,7 +200,7 @@ export function useRealtimeSync({
     // ==========================================
     if (callbacksRef.current.onInvoiceChange) {
       const invoiceChannel = supabase
-        .channel(`invoices:${outletId}`)
+        .channel(`invoices:${outletId}:${channelRunId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
             console.log('🧾 Invoice changed:', payload.eventType, payload.new || payload.old);
@@ -216,7 +217,7 @@ export function useRealtimeSync({
     // ==========================================
     if (callbacksRef.current.onStaffChange) {
       const staffChannel = supabase
-        .channel(`staff:${outletId}`)
+        .channel(`staff:${outletId}:${channelRunId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'staff_profiles', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
             console.log('👥 Staff changed:', payload.eventType, payload.new || payload.old);

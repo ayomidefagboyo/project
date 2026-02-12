@@ -221,6 +221,16 @@
     filter: none;
   }
 
+  .btn-brand-soft {
+    background-color: rgba(var(--brand-color-rgb), 0.12);
+    color: var(--brand-color);
+    border-color: rgba(var(--brand-color-rgb), 0.28);
+  }
+
+  .btn-brand-soft:hover {
+    background-color: rgba(var(--brand-color-rgb), 0.18);
+  }
+
   .text-brand {
     color: var(--brand-color);
   }

@@ -42,6 +42,37 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _is_missing_cashier_name_error(exc: Exception) -> bool:
+    """Detect schema/cache errors for missing pos_transactions.cashier_name."""
+    message = str(exc).lower()
+    return (
+        "cashier_name" in message
+        and (
+            "does not exist" in message
+            or "could not find" in message
+            or "schema cache" in message
+            or "pgrst204" in message
+            or "42703" in message
+        )
+    )
+
+
+def _insert_pos_transaction_compat(supabase, transaction_data: Dict[str, Any]):
+    """
+    Insert into pos_transactions with backward compatibility for older schemas
+    that don't have the cashier_name column.
+    """
+    try:
+        return supabase.table('pos_transactions').insert(transaction_data).execute()
+    except Exception as exc:
+        if _is_missing_cashier_name_error(exc) and 'cashier_name' in transaction_data:
+            fallback_data = dict(transaction_data)
+            fallback_data.pop('cashier_name', None)
+            logger.warning("pos_transactions.cashier_name missing; retrying insert without cashier_name")
+            return supabase.table('pos_transactions').insert(fallback_data).execute()
+        raise
+
+
 # ===============================================
 # PRODUCT MANAGEMENT ENDPOINTS
 # ===============================================
@@ -413,7 +444,7 @@ async def create_transaction(
         }
 
         # Insert transaction
-        tx_result = supabase.table('pos_transactions').insert(transaction_data).execute()
+        tx_result = _insert_pos_transaction_compat(supabase, transaction_data)
         if not tx_result.data:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1136,7 +1167,7 @@ async def return_transaction(
         }
 
         # Insert return transaction
-        return_result = supabase.table('pos_transactions').insert(return_transaction_data).execute()
+        return_result = _insert_pos_transaction_compat(supabase, return_transaction_data)
         if not return_result.data:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

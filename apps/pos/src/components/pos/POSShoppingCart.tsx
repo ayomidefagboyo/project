@@ -61,7 +61,7 @@ const POSShoppingCart: React.FC<POSShoppingCartProps> = ({
           <div className="text-center">
             <ShoppingCart className="h-14 w-14 text-stone-300 mx-auto mb-3" />
             <h3 className="text-lg font-semibold text-slate-900 mb-1">Cart is empty</h3>
-            <p className="text-stone-500 text-sm">Tap products to start a sale</p>
+            <p className="text-stone-500 text-sm">Scan or enter product to start a sale</p>
           </div>
         </div>
       </div>

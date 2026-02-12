@@ -458,6 +458,11 @@ function AppContent() {
   }
 
   // Operational phase - normal POS functionality
+  const normalizedStaffRole = (currentStaff?.role || '').toLowerCase();
+  const canAccessSettings = normalizedStaffRole === 'manager';
+  const canAccessReceive = normalizedStaffRole !== 'cashier';
+  const canAccessEod = normalizedStaffRole !== 'cashier';
+
   const headerContent =
     location.pathname === '/products'
       ? productManagementHeader
@@ -466,14 +471,14 @@ function AppContent() {
         : null; // EOD and other pages handle their own headers
 
   return (
-    <AppLayout headerContent={headerContent}>
+    <AppLayout headerContent={headerContent} staffRole={currentStaff?.role}>
       <Routes>
         <Route path="/" element={<POSDashboard ref={posDashboardRef} />} />
         <Route path="/transactions" element={<TransactionsPage />} />
         <Route path="/products" element={<ProductManagement ref={productManagementRef} />} />
-        <Route path="/receive" element={<ReceiveItemsPage />} />
-        <Route path="/eod" element={<POSEODDashboard />} />
-        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/receive" element={canAccessReceive ? <ReceiveItemsPage /> : <Navigate to="/" replace />} />
+        <Route path="/eod" element={canAccessEod ? <POSEODDashboard /> : <Navigate to="/" replace />} />
+        <Route path="/settings" element={canAccessSettings ? <SettingsPage /> : <Navigate to="/" replace />} />
         <Route path="/auth" element={<AuthWrapper onAuthSuccess={() => window.location.href = '/'} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
