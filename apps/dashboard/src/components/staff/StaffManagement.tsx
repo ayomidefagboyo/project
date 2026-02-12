@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, User, Shield, Eye, EyeOff, Trash2, Edit, CheckCircle, Copy, X } from 'lucide-react';
+import { Plus, User, Shield, Eye, EyeOff, Trash2, Edit, CheckCircle, X } from 'lucide-react';
 import { useOutlet } from '@/contexts/OutletContext';
 import { staffService, rolePermissions, StaffProfile, CreateStaffData } from '@/lib/staffService';
 import Toast from '@/components/ui/Toast';
@@ -33,13 +33,9 @@ const StaffManagement: React.FC = () => {
   });
   const [successModal, setSuccessModal] = useState<{
     visible: boolean,
-    staffCode: string,
-    pin: string,
     name: string
   }>({
     visible: false,
-    staffCode: '',
-    pin: '',
     name: ''
   });
 
@@ -50,15 +46,6 @@ const StaffManagement: React.FC = () => {
 
   const hideToast = () => {
     setToast(prev => ({ ...prev, visible: false }));
-  };
-
-  const copyToClipboard = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast('Copied to clipboard!', 'success');
-    } catch (err) {
-      showToast('Failed to copy to clipboard', 'error');
-    }
   };
 
   // Load existing staff profiles
@@ -145,8 +132,6 @@ const StaffManagement: React.FC = () => {
         // Show success modal with staff details
         setSuccessModal({
           visible: true,
-          staffCode: response.data.staff_code,
-          pin: newStaff.pin,
           name: newStaff.display_name
         });
 
@@ -428,48 +413,9 @@ const StaffManagement: React.FC = () => {
               <p className="text-sm text-gray-600 mb-6">
                 {successModal.name} has been added to your team
               </p>
-
-              <div className="bg-gray-50 rounded-lg p-4 mb-6">
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-medium text-gray-700">Staff Code:</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-mono bg-white px-2 py-1 rounded border">
-                        {successModal.staffCode}
-                      </span>
-                      <button
-                        onClick={() => copyToClipboard(successModal.staffCode)}
-                        className="p-1 hover:bg-gray-200 rounded"
-                        title="Copy staff code"
-                      >
-                        <Copy className="h-4 w-4 text-gray-500" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-medium text-gray-700">PIN:</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-mono bg-white px-2 py-1 rounded border">
-                        {successModal.pin}
-                      </span>
-                      <button
-                        onClick={() => copyToClipboard(successModal.pin)}
-                        className="p-1 hover:bg-gray-200 rounded"
-                        title="Copy PIN"
-                      >
-                        <Copy className="h-4 w-4 text-gray-500" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded">
-                  <p className="text-xs text-amber-800 font-medium">
-                    ⚠️ Important: Save this PIN securely. Staff will need it to access the POS system.
-                  </p>
-                </div>
-              </div>
+              <p className="text-sm text-gray-500 mb-6">
+                Credentials are hidden for privacy. Staff can use their assigned access details in POS.
+              </p>
 
               <button
                 onClick={() => setSuccessModal(prev => ({ ...prev, visible: false }))}
