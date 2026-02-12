@@ -797,6 +797,7 @@ class BulkStockAdjustment(BaseModel):
 class HeldReceiptItemCreate(BaseModel):
     """Schema for held receipt item"""
     product_id: str = Field(..., description="Product ID")
+    product_name: str = Field("Product", description="Product name for display when loading later")
     quantity: int = Field(..., ge=1, description="Quantity")
     unit_price: Decimal = Field(..., gt=0, description="Unit price")
     discount: Decimal = Field(0, ge=0, description="Discount per item")
