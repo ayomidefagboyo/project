@@ -592,7 +592,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
             cart: r.items.map((item: any) => ({
               product: {
                 id: item.product_id,
-                name: item.product_name || 'Product',
+                name: item.product_name || (item.product && item.product.name) || 'Product',
                 unit_price: item.unit_price,
                 tax_rate: item.tax_rate || 0.075,
                 quantity_on_hand: 0, // Will be fetched when needed
@@ -679,7 +679,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
 
   const toggleHeldExpanded = (id: string) => {
     setExpandedHeldIds(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+      prev.includes(id) ? [] : [id]
     );
   };
 
@@ -1603,25 +1603,25 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                             Load
                           </button>
                           <button
-                            onClick={() => handleRemoveHeldSale(sale.id)}
-                            className="px-3 py-1.5 text-sm font-bold text-red-600 hover:text-red-700"
+                            type="button"
+                            onClick={() => toggleHeldExpanded(sale.id)}
+                            className="px-2 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900"
                           >
-                            Remove
+                            {expandedHeldIds.includes(sale.id) ? 'Hide items' : 'Show items'}
+                          </button>
+                          <button
+                            onClick={() => handleRemoveHeldSale(sale.id)}
+                            className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded"
+                            title="Remove"
+                            aria-label="Remove"
+                          >
+                            <span className="text-lg leading-none">×</span>
                           </button>
                         </div>
                       </div>
 
-                      {/* Inline item details - expandable, one line per item */}
-                      <button
-                        type="button"
-                        onClick={() => toggleHeldExpanded(sale.id)}
-                        className="mb-1 text-xs font-semibold text-slate-600 hover:text-slate-900"
-                      >
-                        {expandedHeldIds.includes(sale.id) ? 'Hide items' : 'Show items'}
-                      </button>
-
                       {expandedHeldIds.includes(sale.id) && (
-                        <div className="mt-1 border-t border-slate-200 pt-2 space-y-1">
+                        <div className="mt-2 border-t border-slate-200 pt-2 space-y-1">
                           {sale.cart.map((item) => (
                             <div
                               key={item.product.id}
