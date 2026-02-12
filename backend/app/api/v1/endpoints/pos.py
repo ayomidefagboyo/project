@@ -24,6 +24,7 @@ from app.schemas.pos import (
     TransactionListResponse, TransactionSearchRequest,
     # Inventory
     StockMovementCreate, StockMovementResponse,
+    InventoryTransferCreate, InventoryTransferResponse,
     # Cash Drawer
     CashDrawerSessionCreate, CashDrawerSessionClose, CashDrawerSessionResponse,
     # Statistics
@@ -36,7 +37,7 @@ from app.schemas.pos import (
     # Receipt Settings
     ReceiptSettingsUpdate, ReceiptSettingsResponse,
     # Base types
-    PaymentMethod, TransactionStatus, MovementType, SyncStatus, ReceiptType
+    PaymentMethod, TransactionStatus, MovementType, SyncStatus, ReceiptType, TransferStatus
 )
 
 router = APIRouter()
@@ -109,6 +110,20 @@ def _insert_pos_transaction_compat(supabase, transaction_data: Dict[str, Any]):
     )
 
 
+def _safe_json_loads(value: Any) -> Dict[str, Any]:
+    """Parse JSON notes safely and return an object."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return {}
+    return {}
+
+
 # ===============================================
 # PRODUCT MANAGEMENT ENDPOINTS
 # ===============================================
@@ -120,6 +135,7 @@ async def get_products(
     size: int = Query(20, ge=1, le=100, description="Page size"),
     search: Optional[str] = Query(None, description="Search products"),
     category: Optional[str] = Query(None, description="Filter by category"),
+    updated_after: Optional[str] = Query(None, description="Fetch products updated after this ISO timestamp"),
     active_only: bool = Query(True, description="Show only active products"),
     current_user=Depends(CurrentUser())
 ):
@@ -135,6 +151,9 @@ async def get_products(
 
         if category:
             query = query.eq('category', category)
+
+        if updated_after:
+            query = query.gt('updated_at', updated_after)
 
         if search:
             # Search in name, sku, or barcode
@@ -789,6 +808,18 @@ async def create_stock_adjustment(
                 detail="Insufficient stock for this adjustment"
             )
 
+        # Persist the stock level change.
+        product_update = supabase.table('pos_products').update({
+            'quantity_on_hand': new_quantity,
+            'updated_at': datetime.utcnow().isoformat()
+        }).eq('id', movement.product_id).execute()
+
+        if not product_update.data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to update product stock"
+            )
+
         # Create stock movement record
         movement_data = {
             'id': str(uuid.uuid4()),
@@ -863,6 +894,403 @@ async def get_stock_movements(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch stock movements: {str(e)}"
+        )
+
+
+@router.post("/inventory/transfers", response_model=InventoryTransferResponse)
+async def create_inventory_transfer(
+    transfer: InventoryTransferCreate,
+    current_user=Depends(CurrentUser())
+):
+    """Transfer inventory between outlets and post transfer movements."""
+    try:
+        supabase = get_supabase_admin()
+
+        if transfer.from_outlet_id == transfer.to_outlet_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Source and destination outlets cannot be the same"
+            )
+
+        now_iso = datetime.utcnow().isoformat()
+        transfer_id = str(uuid.uuid4())
+        transfer_number = f"TRF-{datetime.utcnow().strftime('%Y%m%d')}-{transfer_id[:8].upper()}"
+        performed_by = current_user.get('id') or 'system'
+
+        outlet_result = supabase.table('outlets').select('id,name').in_(
+            'id', [transfer.from_outlet_id, transfer.to_outlet_id]
+        ).execute()
+        outlet_map = {
+            outlet.get('id'): outlet.get('name') or 'Outlet'
+            for outlet in (outlet_result.data or [])
+            if outlet.get('id')
+        }
+        from_outlet_name = outlet_map.get(transfer.from_outlet_id, 'Source Outlet')
+        to_outlet_name = outlet_map.get(transfer.to_outlet_id, 'Destination Outlet')
+
+        response_items: List[Dict[str, Any]] = []
+        total_items = 0
+        total_value = Decimal('0')
+
+        for item in transfer.items:
+            quantity = int(item.quantity_requested)
+            if quantity <= 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Transfer quantity must be greater than zero"
+                )
+
+            source_result = supabase.table('pos_products').select('*').eq('id', item.product_id).execute()
+            if not source_result.data:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Source product {item.product_id} not found"
+                )
+
+            source_product = source_result.data[0]
+            if source_product.get('outlet_id') != transfer.from_outlet_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Product {item.product_id} does not belong to source outlet"
+                )
+
+            available_qty = int(source_product.get('quantity_on_hand') or 0)
+            if available_qty < quantity:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Insufficient stock for {source_product.get('name') or source_product.get('sku') or 'item'}"
+                )
+
+            destination_result = supabase.table('pos_products').select('*')\
+                .eq('outlet_id', transfer.to_outlet_id)\
+                .eq('sku', source_product.get('sku'))\
+                .limit(1)\
+                .execute()
+
+            destination_product = destination_result.data[0] if destination_result.data else None
+            if not destination_product:
+                source_unit_price = source_product.get('unit_price')
+                safe_unit_price = float(source_unit_price) if source_unit_price is not None else 0.01
+                if safe_unit_price <= 0:
+                    safe_unit_price = 0.01
+
+                destination_payload = {
+                    'id': str(uuid.uuid4()),
+                    'outlet_id': transfer.to_outlet_id,
+                    'sku': source_product.get('sku'),
+                    'barcode': source_product.get('barcode'),
+                    'name': source_product.get('name'),
+                    'description': source_product.get('description'),
+                    'category': source_product.get('category'),
+                    'unit_price': safe_unit_price,
+                    'cost_price': source_product.get('cost_price') or 0,
+                    'tax_rate': source_product.get('tax_rate') or 0,
+                    'quantity_on_hand': 0,
+                    'reorder_level': source_product.get('reorder_level') or 0,
+                    'reorder_quantity': source_product.get('reorder_quantity') or 0,
+                    'is_active': True if source_product.get('is_active') is None else source_product.get('is_active'),
+                    'vendor_id': source_product.get('vendor_id'),
+                    'image_url': source_product.get('image_url'),
+                    'display_order': source_product.get('display_order') or 0,
+                    'created_at': now_iso,
+                    'updated_at': now_iso
+                }
+                destination_create = supabase.table('pos_products').insert(destination_payload).execute()
+                if not destination_create.data:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Failed to create destination product for transfer"
+                    )
+                destination_product = destination_create.data[0]
+
+            source_before = available_qty
+            source_after = source_before - quantity
+            destination_before = int(destination_product.get('quantity_on_hand') or 0)
+            destination_after = destination_before + quantity
+
+            source_update = supabase.table('pos_products').update({
+                'quantity_on_hand': source_after,
+                'updated_at': now_iso
+            }).eq('id', source_product['id']).execute()
+            if not source_update.data:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Failed to update source outlet stock"
+                )
+
+            destination_update = supabase.table('pos_products').update({
+                'quantity_on_hand': destination_after,
+                'updated_at': now_iso
+            }).eq('id', destination_product['id']).execute()
+            if not destination_update.data:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Failed to update destination outlet stock"
+                )
+
+            unit_cost = Decimal(str(source_product.get('cost_price') or 0))
+            line_total_value = unit_cost * Decimal(quantity)
+            total_value += line_total_value
+            total_items += quantity
+
+            transfer_note = json.dumps({
+                'transfer_id': transfer_id,
+                'transfer_number': transfer_number,
+                'from_outlet_id': transfer.from_outlet_id,
+                'to_outlet_id': transfer.to_outlet_id,
+                'from_outlet_name': from_outlet_name,
+                'to_outlet_name': to_outlet_name,
+                'transfer_reason': transfer.transfer_reason,
+                'transfer_notes': transfer.notes,
+                'product_name': source_product.get('name'),
+                'product_sku': source_product.get('sku'),
+                'status': TransferStatus.RECEIVED.value
+            }, default=str)
+
+            out_movement = {
+                'id': str(uuid.uuid4()),
+                'product_id': source_product['id'],
+                'outlet_id': transfer.from_outlet_id,
+                'movement_type': MovementType.TRANSFER_OUT.value,
+                'quantity_change': -quantity,
+                'quantity_before': source_before,
+                'quantity_after': source_after,
+                'reference_id': transfer_id,
+                'reference_type': 'stock_transfer',
+                'unit_cost': float(unit_cost) if unit_cost > 0 else None,
+                'total_value': float(line_total_value) if unit_cost > 0 else None,
+                'notes': transfer_note,
+                'performed_by': performed_by,
+                'movement_date': now_iso
+            }
+            in_movement = {
+                'id': str(uuid.uuid4()),
+                'product_id': destination_product['id'],
+                'outlet_id': transfer.to_outlet_id,
+                'movement_type': MovementType.TRANSFER_IN.value,
+                'quantity_change': quantity,
+                'quantity_before': destination_before,
+                'quantity_after': destination_after,
+                'reference_id': transfer_id,
+                'reference_type': 'stock_transfer',
+                'unit_cost': float(unit_cost) if unit_cost > 0 else None,
+                'total_value': float(line_total_value) if unit_cost > 0 else None,
+                'notes': transfer_note,
+                'performed_by': performed_by,
+                'movement_date': now_iso
+            }
+
+            out_result = supabase.table('pos_stock_movements').insert(out_movement).execute()
+            in_result = supabase.table('pos_stock_movements').insert(in_movement).execute()
+            if not out_result.data or not in_result.data:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Failed to create stock movement records for transfer"
+                )
+
+            response_items.append({
+                'id': str(uuid.uuid4()),
+                'product_id': source_product['id'],
+                'product_name': source_product.get('name') or 'Product',
+                'sku': source_product.get('sku') or '',
+                'quantity_requested': quantity,
+                'quantity_sent': quantity,
+                'quantity_received': quantity,
+                'unit_cost': float(unit_cost) if unit_cost > 0 else None,
+                'batch_number': item.batch_number,
+                'expiry_date': item.expiry_date,
+                'notes': item.notes
+            })
+
+        transfer_response = {
+            'id': transfer_id,
+            'transfer_number': transfer_number,
+            'from_outlet_id': transfer.from_outlet_id,
+            'to_outlet_id': transfer.to_outlet_id,
+            'from_outlet_name': from_outlet_name,
+            'to_outlet_name': to_outlet_name,
+            'status': TransferStatus.RECEIVED.value,
+            'transfer_reason': transfer.transfer_reason,
+            'total_items': total_items,
+            'total_value': float(total_value),
+            'requested_by': performed_by,
+            'approved_by': performed_by,
+            'received_by': performed_by,
+            'notes': transfer.notes,
+            'requested_at': now_iso,
+            'approved_at': now_iso,
+            'received_at': now_iso,
+            'items': response_items
+        }
+
+        return InventoryTransferResponse(**transfer_response)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating inventory transfer: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create inventory transfer: {str(e)}"
+        )
+
+
+@router.get("/inventory/transfers")
+async def list_inventory_transfers(
+    outlet_id: Optional[str] = Query(None, description="Filter by outlet"),
+    status_filter: Optional[TransferStatus] = Query(None, alias="status", description="Filter by status"),
+    date_from: Optional[date] = Query(None, description="Start date"),
+    date_to: Optional[date] = Query(None, description="End date"),
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(50, ge=1, le=200, description="Page size"),
+    current_user=Depends(CurrentUser())
+):
+    """List inventory transfers derived from stock transfer movements."""
+    try:
+        supabase = get_supabase_admin()
+
+        if status_filter and status_filter != TransferStatus.RECEIVED:
+            return {'items': [], 'total': 0, 'page': page, 'size': size}
+
+        query = supabase.table('pos_stock_movements').select('*').eq('reference_type', 'stock_transfer')
+        if outlet_id:
+            query = query.eq('outlet_id', outlet_id)
+        if date_from:
+            query = query.gte('movement_date', f"{date_from.isoformat()}T00:00:00")
+        if date_to:
+            end_exclusive = date_to + timedelta(days=1)
+            query = query.lt('movement_date', f"{end_exclusive.isoformat()}T00:00:00")
+
+        # Pull a bounded set and page after grouping by transfer reference.
+        result = query.order('movement_date', desc=True).limit(2000).execute()
+        movements = result.data or []
+        if not movements:
+            return {'items': [], 'total': 0, 'page': page, 'size': size}
+
+        product_ids = {
+            movement.get('product_id')
+            for movement in movements
+            if movement.get('product_id')
+        }
+        product_map: Dict[str, Dict[str, Any]] = {}
+        if product_ids:
+            products_result = supabase.table('pos_products').select('id,name,sku').in_(
+                'id', list(product_ids)
+            ).execute()
+            product_map = {
+                product.get('id'): product
+                for product in (products_result.data or [])
+                if product.get('id')
+            }
+
+        grouped: Dict[str, Dict[str, Any]] = {}
+        for movement in movements:
+            reference_id = movement.get('reference_id')
+            if not reference_id:
+                continue
+
+            metadata = _safe_json_loads(movement.get('notes'))
+            transfer = grouped.setdefault(reference_id, {
+                'id': reference_id,
+                'transfer_number': metadata.get('transfer_number') or f"TRF-{reference_id[:8].upper()}",
+                'from_outlet_id': metadata.get('from_outlet_id'),
+                'to_outlet_id': metadata.get('to_outlet_id'),
+                'from_outlet_name': metadata.get('from_outlet_name') or 'Source Outlet',
+                'to_outlet_name': metadata.get('to_outlet_name') or 'Destination Outlet',
+                'status': metadata.get('status') or TransferStatus.RECEIVED.value,
+                'transfer_reason': metadata.get('transfer_reason'),
+                'requested_by': movement.get('performed_by') or 'system',
+                'approved_by': movement.get('performed_by') or 'system',
+                'received_by': movement.get('performed_by') or 'system',
+                'notes': metadata.get('transfer_notes') or '',
+                'requested_at': movement.get('movement_date'),
+                'approved_at': movement.get('movement_date'),
+                'received_at': movement.get('movement_date'),
+                '_item_map': {}
+            })
+
+            movement_date = movement.get('movement_date')
+            if movement_date and transfer['requested_at']:
+                transfer['requested_at'] = min(transfer['requested_at'], movement_date)
+            if movement_date and transfer['received_at']:
+                transfer['received_at'] = max(transfer['received_at'], movement_date)
+
+            movement_type = movement.get('movement_type')
+            quantity = abs(int(movement.get('quantity_change') or 0))
+            product_id = movement.get('product_id')
+            if not product_id:
+                continue
+
+            product_meta = product_map.get(product_id, {})
+            item_key = metadata.get('product_sku') or product_id
+            item_map = transfer['_item_map']
+            transfer_item = item_map.setdefault(item_key, {
+                'id': str(uuid.uuid4()),
+                'product_id': product_id,
+                'product_name': metadata.get('product_name') or product_meta.get('name') or 'Product',
+                'sku': metadata.get('product_sku') or product_meta.get('sku') or '',
+                'quantity_requested': 0,
+                'quantity_sent': 0,
+                'quantity_received': 0,
+                'unit_cost': movement.get('unit_cost'),
+                'batch_number': None,
+                'expiry_date': None,
+                'notes': None
+            })
+
+            if movement_type == MovementType.TRANSFER_OUT.value:
+                transfer_item['quantity_requested'] += quantity
+                transfer_item['quantity_sent'] += quantity
+                transfer['from_outlet_id'] = transfer['from_outlet_id'] or movement.get('outlet_id')
+            elif movement_type == MovementType.TRANSFER_IN.value:
+                transfer_item['quantity_received'] += quantity
+                transfer['to_outlet_id'] = transfer['to_outlet_id'] or movement.get('outlet_id')
+
+        transfer_items: List[Dict[str, Any]] = []
+        for transfer in grouped.values():
+            items = list(transfer.pop('_item_map').values())
+            transfer['items'] = items
+            transfer['total_items'] = sum(
+                item['quantity_requested'] or item['quantity_received']
+                for item in items
+            )
+            transfer['total_value'] = float(sum(
+                (item.get('unit_cost') or 0) * (
+                    item.get('quantity_sent')
+                    or item.get('quantity_requested')
+                    or item.get('quantity_received')
+                    or 0
+                )
+                for item in items
+            ))
+            transfer_items.append(transfer)
+
+        transfer_items.sort(
+            key=lambda item: item.get('requested_at') or '',
+            reverse=True
+        )
+
+        total = len(transfer_items)
+        offset = (page - 1) * size
+        paginated = transfer_items[offset: offset + size]
+
+        # Validate payload shape against response schema for consistency.
+        validated_items = [InventoryTransferResponse(**item).model_dump(mode='json') for item in paginated]
+
+        return {
+            'items': validated_items,
+            'total': total,
+            'page': page,
+            'size': size
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing inventory transfers: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list inventory transfers: {str(e)}"
         )
 
 

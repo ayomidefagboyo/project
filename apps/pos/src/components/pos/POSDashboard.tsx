@@ -640,6 +640,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       } else if (action === 'DELETE') {
         logger.log('🗑️ Real-time: Product deleted', data.id);
         setProducts(prev => prev.filter(p => p.id !== data.id));
+        await offlineDatabase.removeProduct(data.id);
       }
     },
     onInventoryChange: (action, data) => {
@@ -663,25 +664,67 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
 
     try {
       setIsLoading(true);
-      const response = await posService.getProducts(currentOutlet.id, {
+      const localResult = await posService.getCachedProducts(currentOutlet.id, {
         category: selectedCategory || undefined,
         activeOnly: true,
-        size: 100 // Load products for local search
+        page: 1,
+        size: 5000
       });
 
-      setProducts(response?.items || []);
-      setPosError(null);
+      const hasLocalProducts = (localResult.items || []).length > 0;
+      if (hasLocalProducts) {
+        setProducts(localResult.items);
+        setPosError(null);
+        setIsLoading(false);
+      }
+
+      const isOnlineNow = typeof navigator === 'undefined' ? true : navigator.onLine;
+      if (!isOnlineNow) {
+        if (!hasLocalProducts) {
+          setPosError('No products cached yet. Connect once to sync catalog.');
+        }
+        return;
+      }
+
+      await posService.syncProductCatalog(currentOutlet.id, {
+        forceFull: !hasLocalProducts
+      });
+
+      const refreshedLocal = await posService.getCachedProducts(currentOutlet.id, {
+        category: selectedCategory || undefined,
+        activeOnly: true,
+        page: 1,
+        size: 5000
+      });
+
+      if ((refreshedLocal.items || []).length > 0) {
+        setProducts(refreshedLocal.items);
+        setPosError(null);
+      } else if (!hasLocalProducts) {
+        // Fallback: if sync produced nothing, attempt direct online read once.
+        const response = await posService.getProducts(currentOutlet.id, {
+          category: selectedCategory || undefined,
+          activeOnly: true,
+          size: 100
+        });
+        setProducts(response?.items || []);
+        setPosError((response?.items || []).length > 0 ? null : 'No products found for this outlet.');
+      }
     } catch (err) {
-      logger.error('Error loading products online, trying offline:', err);
-      // Fallback to offline DB explicitly
+      logger.error('Error loading products from cache/sync:', err);
       try {
-        const offlineProducts = await offlineDatabase.getProducts(currentOutlet.id);
-        if (offlineProducts && offlineProducts.length > 0) {
-          setProducts(offlineProducts);
+        const offlineProducts = await posService.getCachedProducts(currentOutlet.id, {
+          category: selectedCategory || undefined,
+          activeOnly: true,
+          page: 1,
+          size: 5000
+        });
+        if (offlineProducts.items && offlineProducts.items.length > 0) {
+          setProducts(offlineProducts.items);
           setPosError(null);
           logger.log('Loaded products from offline database');
         } else {
-          setPosError('No products found. Please connect to internet to sync.');
+          setPosError('No products found. Connect to internet once to sync local catalog.');
         }
       } catch (offlineErr) {
         logger.error('Offline load failed:', offlineErr);

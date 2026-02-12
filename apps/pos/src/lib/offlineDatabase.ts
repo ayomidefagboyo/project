@@ -74,6 +74,9 @@ const tokenize = (text: string): string[] => {
 interface OfflineDatabase {
   init(): Promise<void>;
   storeProducts(products: POSProduct[]): Promise<void>;
+  replaceOutletProducts(outletId: string, products: POSProduct[]): Promise<void>;
+  removeProduct(productId: string): Promise<void>;
+  getAllProducts(outletId: string): Promise<POSProduct[]>;
   getProducts(outletId: string): Promise<POSProduct[]>;
   // Transaction History Methods
   storeTransactions(transactions: POSTransaction[]): Promise<void>;
@@ -121,6 +124,25 @@ class DexieOfflineDatabase implements OfflineDatabase {
     await db.products.bulkPut(indexedProducts);
   }
 
+  async replaceOutletProducts(outletId: string, products: POSProduct[]): Promise<void> {
+    const indexedProducts: IndexedPOSProduct[] = products.map(p => ({
+      ...p,
+      name_tokens: tokenize(p.name),
+      last_sync: new Date().toISOString()
+    }));
+
+    await db.transaction('rw', db.products, async () => {
+      await db.products.where('outlet_id').equals(outletId).delete();
+      if (indexedProducts.length > 0) {
+        await db.products.bulkPut(indexedProducts);
+      }
+    });
+  }
+
+  async removeProduct(productId: string): Promise<void> {
+    await db.products.delete(productId);
+  }
+
   async getProducts(outletId: string): Promise<POSProduct[]> {
     // Return all active products for outlet
     // Use simple outlet_id index and filter is_active client-side for reliability
@@ -128,6 +150,13 @@ class DexieOfflineDatabase implements OfflineDatabase {
       .where('outlet_id')
       .equals(outletId)
       .filter(p => p.is_active)
+      .toArray();
+  }
+
+  async getAllProducts(outletId: string): Promise<POSProduct[]> {
+    return await db.products
+      .where('outlet_id')
+      .equals(outletId)
       .toArray();
   }
 
