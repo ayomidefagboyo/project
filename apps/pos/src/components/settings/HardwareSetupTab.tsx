@@ -17,6 +17,20 @@ import {
   saveHardwareState,
   type ScannerConfig,
 } from '../../lib/hardwareProfiles';
+import {
+  HARDWARE_BRAND_OPTIONS,
+  HARDWARE_CONNECTION_OPTIONS,
+  type HardwareCapabilityOverrides,
+  type HardwareConnection,
+  type HardwareDeviceKind,
+  getHardwareAdapterLabel,
+  inferHardwareAdapterId,
+  inferHardwareBrand,
+  inferHardwareConnection,
+  listHardwareAdapters,
+  resolveAdapterCapabilities,
+  supportsHardwareAction,
+} from '../../lib/hardwareAdapters';
 
 interface HardwareSetupTabProps {
   outletId?: string;
@@ -29,7 +43,6 @@ interface ScanTestResult {
   at: string;
 }
 
-type HardwareDeviceKind = 'printer' | 'scanner' | 'drawer';
 type HardwareModalKind = HardwareDeviceKind | 'profile';
 type HardwareModalMode = 'add' | 'edit';
 
@@ -44,6 +57,10 @@ interface HardwareEditModalState {
     type: string;
     status: 'connected' | 'disconnected';
     profileId: string;
+    brand: string;
+    model: string;
+    connection: string;
+    adapterId: string;
     defaultPrint?: string;
   };
 }
@@ -84,6 +101,25 @@ const escapeHtml = (value: string): string =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+
+const formatHardwareToken = (value: string): string =>
+  value.replace(/[_-]/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase());
+
+const capabilitySummary = (
+  kind: HardwareDeviceKind,
+  adapterId: string,
+  overrides?: HardwareCapabilityOverrides
+): string => {
+  const capabilities = resolveAdapterCapabilities(kind, adapterId, overrides);
+  const labels: string[] = [];
+  if (capabilities.receiptPrint) labels.push('receipt');
+  if (capabilities.labelPrint) labels.push('label');
+  if (capabilities.cutPaper) labels.push('cut');
+  if (capabilities.openDrawer) labels.push('drawer');
+  if (capabilities.barcodeScan) labels.push('scan');
+  if (capabilities.scannerBeep) labels.push('beep');
+  return labels.length > 0 ? labels.join(', ') : 'none';
+};
 
 const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalId, currentUserId }) => {
   const [state, setState] = useState<HardwareState>(() => createDefaultHardwareState());
@@ -167,6 +203,16 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
 
   const openPrinterModal = (mode: HardwareModalMode, printer?: PrinterConfig) => {
     const fallbackProfileId = selectedPolicy.id || state.terminalDefaultProfileId;
+    const type = String(printer?.type ?? 'thermal');
+    const brand = inferHardwareBrand(printer?.brand, 'printer');
+    const connection = inferHardwareConnection(printer?.connection, 'printer');
+    const adapterId = inferHardwareAdapterId({
+      kind: 'printer',
+      brand,
+      type,
+      connection,
+      requestedAdapterId: printer?.adapterId,
+    });
 
     setEditModal({
       kind: 'printer',
@@ -176,9 +222,13 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
       submitLabel: mode === 'add' ? 'Add Printer' : 'Save Changes',
       data: {
         name: printer?.name ?? `Printer ${printers.length + 1}`,
-        type: String(printer?.type ?? 'thermal'),
+        type,
         status: printer?.status ?? 'connected',
         profileId: printer?.profileId ?? fallbackProfileId,
+        brand,
+        model: printer?.model ?? `${formatHardwareToken(brand)} Printer`,
+        connection,
+        adapterId,
         defaultPrint: String(printer?.defaultPrint ?? 'receipts'),
       },
     });
@@ -186,6 +236,16 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
 
   const openScannerModal = (mode: HardwareModalMode, scanner?: ScannerConfig) => {
     const fallbackProfileId = selectedPolicy.id || state.terminalDefaultProfileId;
+    const type = String(scanner?.type ?? 'usb');
+    const brand = inferHardwareBrand(scanner?.brand, 'scanner');
+    const connection = inferHardwareConnection(scanner?.connection ?? scanner?.type, 'scanner');
+    const adapterId = inferHardwareAdapterId({
+      kind: 'scanner',
+      brand,
+      type,
+      connection,
+      requestedAdapterId: scanner?.adapterId,
+    });
 
     setEditModal({
       kind: 'scanner',
@@ -195,15 +255,29 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
       submitLabel: mode === 'add' ? 'Add Scanner' : 'Save Changes',
       data: {
         name: scanner?.name ?? `Scanner ${scanners.length + 1}`,
-        type: String(scanner?.type ?? 'usb'),
+        type,
         status: scanner?.status ?? 'connected',
         profileId: scanner?.profileId ?? fallbackProfileId,
+        brand,
+        model: scanner?.model ?? `${formatHardwareToken(brand)} Scanner`,
+        connection,
+        adapterId,
       },
     });
   };
 
   const openDrawerModal = (mode: HardwareModalMode, drawer?: CashDrawerConfig) => {
     const fallbackProfileId = selectedPolicy.id || state.terminalDefaultProfileId;
+    const type = String(drawer?.type ?? 'rj11');
+    const brand = inferHardwareBrand(drawer?.brand, 'drawer');
+    const connection = inferHardwareConnection(drawer?.connection ?? drawer?.type, 'drawer');
+    const adapterId = inferHardwareAdapterId({
+      kind: 'drawer',
+      brand,
+      type,
+      connection,
+      requestedAdapterId: drawer?.adapterId,
+    });
 
     setEditModal({
       kind: 'drawer',
@@ -213,17 +287,34 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
       submitLabel: mode === 'add' ? 'Add Drawer' : 'Save Changes',
       data: {
         name: drawer?.name ?? `Drawer ${cashDrawers.length + 1}`,
-        type: String(drawer?.type ?? 'rj11'),
+        type,
         status: drawer?.status ?? 'connected',
         profileId: drawer?.profileId ?? fallbackProfileId,
+        brand,
+        model: drawer?.model ?? `${formatHardwareToken(brand)} Drawer`,
+        connection,
+        adapterId,
       },
     });
   };
 
   const getTypeOptions = (kind: HardwareDeviceKind): string[] => {
     if (kind === 'printer') return ['thermal', 'label'];
-    if (kind === 'scanner') return ['usb', 'bluetooth'];
-    return ['rj11', 'usb'];
+    if (kind === 'scanner') return ['usb', 'bluetooth', 'integrated'];
+    return ['rj11', 'serial', 'usb', 'network'];
+  };
+
+  const getBrandOptions = (kind: HardwareDeviceKind): string[] => HARDWARE_BRAND_OPTIONS[kind];
+
+  const getConnectionOptions = (kind: HardwareDeviceKind): string[] =>
+    HARDWARE_CONNECTION_OPTIONS[kind];
+
+  const getAdapterOptions = (kind: HardwareDeviceKind, brand: string) => {
+    const requestedBrand = inferHardwareBrand(brand, kind);
+    const matches = listHardwareAdapters(kind).filter(
+      (adapter) => adapter.brands.includes('generic') || adapter.brands.includes(requestedBrand)
+    );
+    return matches.length > 0 ? matches : listHardwareAdapters(kind);
   };
 
   const openRemoveModal = (kind: HardwareModalKind, id: string, name: string) => {
@@ -300,6 +391,19 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
     const name = editModal.data.name.trim();
     const type = editModal.data.type.trim();
     const profileId = editModal.data.profileId.trim();
+    const brand = inferHardwareBrand(editModal.data.brand, editModal.kind);
+    const model = editModal.data.model.trim() || `${formatHardwareToken(brand)} Device`;
+    const connection = inferHardwareConnection(
+      editModal.data.connection,
+      editModal.kind
+    ) as HardwareConnection;
+    const adapterId = inferHardwareAdapterId({
+      kind: editModal.kind,
+      brand,
+      type,
+      connection,
+      requestedAdapterId: editModal.data.adapterId,
+    });
 
     if (!name) {
       error('Name is required.');
@@ -328,6 +432,11 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
         status: editModal.data.status,
         profileId,
         defaultPrint,
+        brand,
+        model,
+        connection,
+        adapterId,
+        capabilities: printers.find((item) => item.id === editModal.id)?.capabilities,
       };
 
       setState((prev) => ({
@@ -349,6 +458,11 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
         type,
         status: editModal.data.status,
         profileId,
+        brand,
+        model,
+        connection,
+        adapterId,
+        capabilities: scanners.find((item) => item.id === editModal.id)?.capabilities,
       };
 
       setState((prev) => ({
@@ -369,6 +483,11 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
       type,
       status: editModal.data.status,
       profileId,
+      brand,
+      model,
+      connection,
+      adapterId,
+      capabilities: cashDrawers.find((item) => item.id === editModal.id)?.capabilities,
     };
 
     setState((prev) => ({
@@ -419,9 +538,17 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
     success(`Updated profile "${name}".`);
   };
 
-  const playScannerBeep = (profileId?: string) => {
+  const playScannerBeep = (profileId?: string, scanner?: ScannerConfig) => {
     const policy = resolveHardwarePolicy(state, profileId || selectedPolicy.id);
     if (!policy.scannerBeepEnabled) return;
+    if (scanner) {
+      const scannerCapabilities = resolveAdapterCapabilities(
+        'scanner',
+        scanner.adapterId,
+        scanner.capabilities
+      );
+      if (!supportsHardwareAction(scannerCapabilities, 'scanner-beep')) return;
+    }
 
     try {
       const windowWithWebkitAudio = window as Window & { webkitAudioContext?: typeof AudioContext };
@@ -454,6 +581,22 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
       return;
     }
 
+    const printerCapabilities = resolveAdapterCapabilities(
+      'printer',
+      printer.adapterId,
+      printer.capabilities
+    );
+    const printAction = printer.defaultPrint === 'labels' ? 'print-label' : 'print-receipt';
+    if (!supportsHardwareAction(printerCapabilities, printAction)) {
+      warning(
+        `${printer.name} (${getHardwareAdapterLabel(printer.adapterId, 'printer')}) does not support ${printer.defaultPrint} printing.`
+      );
+      return;
+    }
+    if (selectedPolicy.cutPaperEnabled && !supportsHardwareAction(printerCapabilities, 'cut-paper')) {
+      info(`${printer.name} does not support paper cut. Receipt will still print.`, 3500);
+    }
+
     const printWindow = window.open('', '_blank', 'width=420,height=700');
     if (!printWindow) {
       error('Allow pop-ups to run test print.');
@@ -469,6 +612,10 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
       `Type: ${printer.type}`,
       `Default Role: ${printer.defaultPrint}`,
       `Policy: ${getProfileName(printer.profileId)}`,
+      `Brand/Model: ${formatHardwareToken(String(printer.brand))} ${printer.model}`,
+      `Connection: ${formatHardwareToken(String(printer.connection))}`,
+      `Adapter: ${getHardwareAdapterLabel(printer.adapterId, 'printer')}`,
+      `Capabilities: ${capabilitySummary('printer', printer.adapterId, printer.capabilities)}`,
       `Outlet: ${outletId || 'N/A'}`,
       `Terminal: ${terminalId || 'N/A'}`,
       `Date: ${now.toLocaleDateString()}`,
@@ -512,6 +659,17 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
       warning(`"${scanner.name}" is disconnected.`);
       return;
     }
+    const scannerCapabilities = resolveAdapterCapabilities(
+      'scanner',
+      scanner.adapterId,
+      scanner.capabilities
+    );
+    if (!supportsHardwareAction(scannerCapabilities, 'scan-barcode')) {
+      warning(
+        `${scanner.name} (${getHardwareAdapterLabel(scanner.adapterId, 'scanner')}) does not support barcode scan test.`
+      );
+      return;
+    }
 
     setScanModal({
       scannerId: scanner.id,
@@ -535,7 +693,8 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
       ...prev,
       [scanModal.scannerId]: { value: scanned, at: scannedAt },
     }));
-    playScannerBeep(scanModal.scannerProfileId);
+    const scanner = scanners.find((item) => item.id === scanModal.scannerId);
+    playScannerBeep(scanModal.scannerProfileId, scanner);
     success(`Captured barcode: ${scanned}`);
     setScanModal(null);
   };
@@ -543,6 +702,17 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
   const handleOpenDrawer = async (drawer: CashDrawerConfig) => {
     if (drawer.status !== 'connected') {
       warning(`"${drawer.name}" is disconnected.`);
+      return;
+    }
+    const drawerCapabilities = resolveAdapterCapabilities(
+      'drawer',
+      drawer.adapterId,
+      drawer.capabilities
+    );
+    if (!supportsHardwareAction(drawerCapabilities, 'open-drawer')) {
+      warning(
+        `${drawer.name} (${getHardwareAdapterLabel(drawer.adapterId, 'drawer')}) does not support remote drawer open.`
+      );
       return;
     }
 
@@ -576,6 +746,35 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
     } finally {
       setDrawerActionId(null);
     }
+  };
+
+  const updateEditModalWithAdapter = (
+    updates: Partial<HardwareEditModalState['data']>,
+    forceAdapterId = false
+  ) => {
+    setEditModal((prev) => {
+      if (!prev) return prev;
+      const merged = { ...prev.data, ...updates };
+      if (forceAdapterId) {
+        return { ...prev, data: merged };
+      }
+
+      const inferredAdapterId = inferHardwareAdapterId({
+        kind: prev.kind,
+        brand: merged.brand,
+        type: merged.type,
+        connection: merged.connection,
+        requestedAdapterId: merged.adapterId,
+      });
+
+      return {
+        ...prev,
+        data: {
+          ...merged,
+          adapterId: inferredAdapterId,
+        },
+      };
+    });
   };
 
   return (
@@ -741,6 +940,12 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
                       <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                         {printer.type} • {printer.defaultPrint} • {getProfileName(printer.profileId)}
                       </div>
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                        {formatHardwareToken(String(printer.brand))} {printer.model} • {formatHardwareToken(String(printer.connection))} • {getHardwareAdapterLabel(printer.adapterId, 'printer')}
+                      </div>
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                        Capabilities: {capabilitySummary('printer', printer.adapterId, printer.capabilities)}
+                      </div>
                       {lastPrintTestAt[printer.id] && (
                         <div className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-0.5">
                           Test: {formatHardwareTime(lastPrintTestAt[printer.id])}
@@ -813,6 +1018,12 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
                       <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                         {scanner.type.toUpperCase()} • {getProfileName(scanner.profileId)}
                       </div>
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                        {formatHardwareToken(String(scanner.brand))} {scanner.model} • {formatHardwareToken(String(scanner.connection))} • {getHardwareAdapterLabel(scanner.adapterId, 'scanner')}
+                      </div>
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                        Capabilities: {capabilitySummary('scanner', scanner.adapterId, scanner.capabilities)}
+                      </div>
                       {lastScanTest[scanner.id] && (
                         <div className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-0.5 break-all">
                           {lastScanTest[scanner.id].value}
@@ -884,6 +1095,12 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
                       </div>
                       <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                         {drawer.type.toUpperCase()} • {getProfileName(drawer.profileId)}
+                      </div>
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                        {formatHardwareToken(String(drawer.brand))} {drawer.model} • {formatHardwareToken(String(drawer.connection))} • {getHardwareAdapterLabel(drawer.adapterId, 'drawer')}
+                      </div>
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                        Capabilities: {capabilitySummary('drawer', drawer.adapterId, drawer.capabilities)}
                       </div>
                       {lastDrawerOpenAt[drawer.id] && (
                         <div className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-0.5">
@@ -1021,16 +1238,7 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Name</label>
                 <input
                   value={editModal.data.name}
-                  onChange={(e) =>
-                    setEditModal((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            data: { ...prev.data, name: e.target.value },
-                          }
-                        : prev
-                    )
-                  }
+                  onChange={(e) => updateEditModalWithAdapter({ name: e.target.value }, true)}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   autoFocus
                 />
@@ -1040,16 +1248,7 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Type</label>
                 <select
                   value={editModal.data.type}
-                  onChange={(e) =>
-                    setEditModal((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            data: { ...prev.data, type: e.target.value },
-                          }
-                        : prev
-                    )
-                  }
+                  onChange={(e) => updateEditModalWithAdapter({ type: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
                   {getTypeOptions(editModal.kind).map((option) => (
@@ -1068,14 +1267,9 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
                 <select
                   value={editModal.data.status}
                   onChange={(e) =>
-                    setEditModal((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            data: { ...prev.data, status: e.target.value as 'connected' | 'disconnected' },
-                          }
-                        : prev
-                    )
+                    updateEditModalWithAdapter({
+                      status: e.target.value as 'connected' | 'disconnected',
+                    }, true)
                   }
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
@@ -1088,16 +1282,7 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Policy</label>
                 <select
                   value={editModal.data.profileId}
-                  onChange={(e) =>
-                    setEditModal((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            data: { ...prev.data, profileId: e.target.value },
-                          }
-                        : prev
-                    )
-                  }
+                  onChange={(e) => updateEditModalWithAdapter({ profileId: e.target.value }, true)}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
                   {profiles.map((profile) => (
@@ -1106,6 +1291,65 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Brand</label>
+                <select
+                  value={editModal.data.brand}
+                  onChange={(e) => updateEditModalWithAdapter({ brand: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                >
+                  {getBrandOptions(editModal.kind).map((brandOption) => (
+                    <option key={brandOption} value={brandOption}>
+                      {formatHardwareToken(brandOption)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Model</label>
+                <input
+                  value={editModal.data.model}
+                  onChange={(e) => updateEditModalWithAdapter({ model: e.target.value }, true)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Connection</label>
+                <select
+                  value={editModal.data.connection}
+                  onChange={(e) => updateEditModalWithAdapter({ connection: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                >
+                  {getConnectionOptions(editModal.kind).map((connectionOption) => (
+                    <option key={connectionOption} value={connectionOption}>
+                      {formatHardwareToken(connectionOption)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Adapter</label>
+                <select
+                  value={editModal.data.adapterId}
+                  onChange={(e) =>
+                    updateEditModalWithAdapter({ adapterId: e.target.value }, true)
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                >
+                  {getAdapterOptions(editModal.kind, editModal.data.brand).map((adapter) => (
+                    <option key={adapter.id} value={adapter.id}>
+                      {adapter.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                  Capabilities: {capabilitySummary(editModal.kind, editModal.data.adapterId)}
+                </p>
               </div>
 
               {editModal.kind === 'printer' && (

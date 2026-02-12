@@ -21,6 +21,12 @@ interface AddStaffFormData {
   permissions: string[];
 }
 
+interface StaffActionConfirmState {
+  type: 'deactivate' | 'reset_attempts';
+  profileId: string;
+  displayName: string;
+}
+
 const StaffManagementModal: React.FC<StaffManagementModalProps> = ({ isOpen, onClose }) => {
   const { currentOutlet } = useOutlet();
   const { success, error, warning } = useToast();
@@ -28,6 +34,7 @@ const StaffManagementModal: React.FC<StaffManagementModalProps> = ({ isOpen, onC
   const [loading, setLoading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingProfile, setEditingProfile] = useState<StaffProfile | null>(null);
+  const [actionConfirm, setActionConfirm] = useState<StaffActionConfirmState | null>(null);
   const [showPin, setShowPin] = useState(false);
   const [formData, setFormData] = useState<AddStaffFormData>({
     display_name: '',
@@ -67,8 +74,8 @@ const StaffManagementModal: React.FC<StaffManagementModalProps> = ({ isOpen, onC
       setLoading(true);
       const response = await staffService.getStaffProfiles(currentOutlet.id);
       setStaffProfiles(response.profiles);
-    } catch (error) {
-      console.error('Error loading staff profiles:', error);
+    } catch (err) {
+      console.error('Error loading staff profiles:', err);
       error('Failed to load staff profiles');
     } finally {
       setLoading(false);
@@ -145,9 +152,9 @@ const StaffManagementModal: React.FC<StaffManagementModalProps> = ({ isOpen, onC
       setEditingProfile(null);
       await loadStaffProfiles();
 
-    } catch (error: any) {
-      console.error('Error saving staff profile:', error);
-      error(error.message || 'Failed to save staff profile');
+    } catch (err: any) {
+      console.error('Error saving staff profile:', err);
+      error(err.message || 'Failed to save staff profile');
     } finally {
       setLoading(false);
     }
@@ -165,39 +172,46 @@ const StaffManagementModal: React.FC<StaffManagementModalProps> = ({ isOpen, onC
     setShowAddForm(true);
   };
 
-  const handleDelete = async (profileId: string, displayName: string) => {
-    if (!confirm(`Are you sure you want to deactivate ${displayName}? They will no longer be able to log in.`)) {
-      return;
-    }
-
-    try {
-      setLoading(true);
-      await staffService.deleteStaffProfile(profileId);
-      success('Staff profile deactivated successfully');
-      await loadStaffProfiles();
-    } catch (error: any) {
-      console.error('Error deleting staff profile:', error);
-      error(error.message || 'Failed to deactivate staff profile');
-    } finally {
-      setLoading(false);
-    }
+  const handleDelete = (profileId: string, displayName: string) => {
+    setActionConfirm({
+      type: 'deactivate',
+      profileId,
+      displayName
+    });
   };
 
-  const handleResetAttempts = async (profileId: string, displayName: string) => {
-    if (!confirm(`Reset failed login attempts for ${displayName}?`)) {
-      return;
-    }
+  const handleResetAttempts = (profileId: string, displayName: string) => {
+    setActionConfirm({
+      type: 'reset_attempts',
+      profileId,
+      displayName
+    });
+  };
+
+  const handleConfirmStaffAction = async () => {
+    if (!actionConfirm) return;
 
     try {
       setLoading(true);
-      await staffService.resetFailedAttempts(profileId);
-      success('Failed login attempts reset successfully');
+      if (actionConfirm.type === 'deactivate') {
+        await staffService.deleteStaffProfile(actionConfirm.profileId);
+        success('Staff profile deactivated successfully');
+      } else {
+        await staffService.resetFailedAttempts(actionConfirm.profileId);
+        success('Failed login attempts reset successfully');
+      }
       await loadStaffProfiles();
-    } catch (error: any) {
-      console.error('Error resetting failed attempts:', error);
-      error(error.message || 'Failed to reset failed attempts');
+    } catch (err: any) {
+      if (actionConfirm.type === 'deactivate') {
+        console.error('Error deleting staff profile:', err);
+        error(err.message || 'Failed to deactivate staff profile');
+      } else {
+        console.error('Error resetting failed attempts:', err);
+        error(err.message || 'Failed to reset failed attempts');
+      }
     } finally {
       setLoading(false);
+      setActionConfirm(null);
     }
   };
 
@@ -485,6 +499,39 @@ const StaffManagementModal: React.FC<StaffManagementModalProps> = ({ isOpen, onC
           )}
         </div>
       </div>
+
+      {actionConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              {actionConfirm.type === 'deactivate' ? 'Deactivate Staff Profile' : 'Reset Failed Attempts'}
+            </h3>
+            <p className="text-sm text-gray-600">
+              {actionConfirm.type === 'deactivate'
+                ? `Are you sure you want to deactivate ${actionConfirm.displayName}? They will no longer be able to log in.`
+                : `Reset failed login attempts for ${actionConfirm.displayName}?`}
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setActionConfirm(null)}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmStaffAction}
+                className={`px-4 py-2 text-white rounded-lg ${
+                  actionConfirm.type === 'deactivate'
+                    ? 'bg-red-600 hover:bg-red-700'
+                    : 'bg-amber-600 hover:bg-amber-700'
+                }`}
+              >
+                {actionConfirm.type === 'deactivate' ? 'Deactivate' : 'Reset Attempts'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

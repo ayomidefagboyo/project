@@ -31,45 +31,32 @@ const navItems = [
     label: 'Register',
     sublabel: 'Ring Up Sales',
     icon: Monitor,
-    color: 'green',
   },
   {
     path: '/transactions',
     label: 'Transactions',
     sublabel: 'Sales History',
     icon: Receipt,
-    color: 'blue',
   },
   {
     path: '/products',
     label: 'Items',
     sublabel: 'Products & Inventory',
     icon: Package,
-    color: 'purple',
   },
   {
     path: '/receive',
     label: 'Receive Items',
     sublabel: 'Vendor Invoices',
     icon: Truck,
-    color: 'teal',
   },
   {
     path: '/eod',
     label: 'End of Day',
     sublabel: 'Close & Reconcile',
     icon: Calendar,
-    color: 'amber',
   },
 ];
-
-const colorMap: Record<string, { active: string; idle: string; icon: string; text: string; sub: string }> = {
-  green:  { active: 'bg-green-100  border-green-300', idle: 'hover:bg-green-50',  icon: 'bg-green-600',  text: 'text-green-900',  sub: 'text-green-600' },
-  blue:   { active: 'bg-blue-100   border-blue-300',  idle: 'hover:bg-blue-50',   icon: 'bg-blue-600',   text: 'text-blue-900',   sub: 'text-blue-600' },
-  purple: { active: 'bg-purple-100 border-purple-300', idle: 'hover:bg-purple-50', icon: 'bg-purple-600', text: 'text-purple-900', sub: 'text-purple-600' },
-  teal:   { active: 'bg-teal-100   border-teal-300',  idle: 'hover:bg-teal-50',   icon: 'bg-teal-600',   text: 'text-teal-900',   sub: 'text-teal-600' },
-  amber:  { active: 'bg-amber-100  border-amber-300', idle: 'hover:bg-amber-50',  icon: 'bg-amber-600',  text: 'text-amber-900',  sub: 'text-amber-600' },
-};
 
 const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent }) => {
   const { currentUser, currentOutlet } = useOutlet();
@@ -94,79 +81,93 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent }) => {
   const isActive = (path: string) => location.pathname === path;
 
   return (
-    <div className="w-screen h-screen overflow-hidden bg-gray-50 flex">
+    <div className="w-screen h-screen overflow-hidden bg-stone-50 flex">
       {/* ======== Sidebar ======== */}
       {showSidebar && (
         <>
           {/* Overlay */}
           <div
-            className="fixed inset-0 bg-black/40 z-40 transition-opacity"
+            className="fixed inset-0 bg-slate-900/35 backdrop-blur-[1px] z-40 transition-opacity"
             onClick={() => setShowSidebar(false)}
           />
 
           {/* Panel */}
-          <div className="fixed left-0 top-0 h-full w-72 bg-white shadow-2xl z-50 flex flex-col">
+          <div className="fixed left-0 top-0 h-full w-[90vw] max-w-[24rem] bg-stone-50 shadow-2xl border-r border-stone-200 z-50 flex flex-col">
             {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+            <div className="flex items-center justify-between px-6 py-6 border-b border-stone-200">
               <div>
-                <h2 className="text-base font-bold text-gray-900 capitalize">
+                <p className="text-[11px] font-medium tracking-[0.14em] uppercase text-stone-500">POS Terminal</p>
+                <h2 className="text-[20px] font-semibold text-slate-900 capitalize mt-1.5">
                   {currentOutlet?.name || 'Point of Sale'}
                 </h2>
-                <p className="text-xs text-gray-500 mt-0.5">POS Terminal</p>
               </div>
               <button
                 onClick={() => setShowSidebar(false)}
-                className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+                className="p-2.5 rounded-xl text-stone-500 hover:text-slate-900 hover:bg-stone-200/70 transition-colors"
               >
-                <X className="w-5 h-5 text-gray-400" />
+                <X className="w-6 h-6" />
               </button>
             </div>
 
-            {/* Navigation – large touch targets */}
-            <nav className="flex-1 px-3 py-4 space-y-2 overflow-y-auto">
+            {/* Navigation */}
+            <nav className="flex-1 px-4 py-5 overflow-y-auto">
+              <p className="px-3 pb-2 text-[11px] font-medium tracking-[0.14em] uppercase text-stone-500">
+                Operations
+              </p>
+              <div className="space-y-2">
               {navItems.map((item) => {
                 const active = isActive(item.path);
-                const c = colorMap[item.color];
                 const Icon = item.icon;
                 return (
                   <Link
                     key={item.path}
                     to={item.path}
                     onClick={() => setShowSidebar(false)}
-                    className={`flex items-center gap-4 px-4 py-4 rounded-2xl border-2 transition-all active:scale-[0.97] ${
+                    className={`group flex items-center gap-4 px-4 py-4 rounded-2xl border transition-all active:scale-[0.99] ${
                       active
-                        ? `${c.active}`
-                        : `border-transparent ${c.idle}`
+                        ? 'bg-white border-stone-300 shadow-[0_1px_2px_rgba(0,0,0,0.05)]'
+                        : 'border-transparent hover:bg-stone-100/80'
                     }`}
                   >
-                    <div className={`w-12 h-12 ${c.icon} rounded-xl flex items-center justify-center flex-shrink-0`}>
-                      <Icon className="w-6 h-6 text-white" />
+                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
+                      active
+                        ? 'bg-slate-900 text-stone-100'
+                        : 'bg-stone-200 text-slate-600 group-hover:bg-stone-300'
+                    }`}>
+                      <Icon className="w-6 h-6" />
                     </div>
                     <div>
-                      <span className={`text-base font-bold ${c.text} block leading-tight`}>
+                      <span className={`text-[18px] font-semibold block leading-tight ${
+                        active ? 'text-slate-900' : 'text-slate-700'
+                      }`}>
                         {item.label}
                       </span>
-                      <span className={`text-sm ${c.sub}`}>{item.sublabel}</span>
+                      <span className="text-[14px] text-stone-500">{item.sublabel}</span>
                     </div>
                   </Link>
                 );
               })}
+              </div>
             </nav>
 
-            {/* Bottom Section – touch-friendly */}
-            <div className="px-3 py-4 border-t border-gray-100 space-y-2">
+            {/* Bottom Section */}
+            <div className="px-4 py-5 border-t border-stone-200">
+              <p className="px-3 pb-2 text-[11px] font-medium tracking-[0.14em] uppercase text-stone-500">
+                System
+              </p>
+              <div className="space-y-2">
               {/* Clock Out */}
               <button
                 type="button"
                 onClick={() => { setShowSidebar(false); handleClockOut(); }}
-                className="w-full flex items-center gap-4 px-4 py-4 rounded-2xl hover:bg-red-50 active:scale-[0.97] transition-all"
+                className="w-full flex items-center gap-4 px-4 py-4 rounded-2xl border border-transparent hover:bg-white hover:border-stone-300 active:scale-[0.99] transition-all"
               >
-                <div className="w-12 h-12 bg-red-500 rounded-xl flex items-center justify-center flex-shrink-0">
-                  <LogOut className="w-6 h-6 text-white" />
+                <div className="w-12 h-12 bg-stone-200 text-slate-700 rounded-xl flex items-center justify-center flex-shrink-0">
+                  <LogOut className="w-6 h-6" />
                 </div>
                 <div className="text-left">
-                  <span className="text-base font-bold text-red-800 block leading-tight">Clock Out</span>
-                  <span className="text-sm text-red-600">End Shift</span>
+                  <span className="text-[18px] font-semibold text-slate-900 block leading-tight">Clock Out</span>
+                  <span className="text-[14px] text-stone-500">End Shift</span>
                 </div>
               </button>
 
@@ -177,16 +178,17 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent }) => {
                   setShowSidebar(false);
                   navigate('/settings');
                 }}
-                className="w-full flex items-center gap-4 px-4 py-4 rounded-2xl hover:bg-gray-100 active:scale-[0.97] transition-all"
+                className="w-full flex items-center gap-4 px-4 py-4 rounded-2xl border border-transparent hover:bg-white hover:border-stone-300 active:scale-[0.99] transition-all"
               >
-                <div className="w-12 h-12 bg-gray-400 rounded-xl flex items-center justify-center flex-shrink-0">
-                  <Settings className="w-6 h-6 text-white" />
+                <div className="w-12 h-12 bg-stone-200 text-slate-700 rounded-xl flex items-center justify-center flex-shrink-0">
+                  <Settings className="w-6 h-6" />
                 </div>
                 <div className="text-left">
-                  <span className="text-base font-bold text-gray-800 block leading-tight">Settings</span>
-                  <span className="text-sm text-gray-500">Preferences</span>
+                  <span className="text-[18px] font-semibold text-slate-900 block leading-tight">Settings</span>
+                  <span className="text-[14px] text-stone-500">Preferences</span>
                 </div>
               </button>
+              </div>
             </div>
           </div>
         </>
@@ -201,9 +203,9 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent }) => {
             <div className="flex items-center space-x-3 flex-shrink-0">
               <button
                 onClick={() => setShowSidebar(true)}
-                className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
+                className="p-3 hover:bg-gray-200 rounded-xl transition-colors"
               >
-                <Menu className="w-6 h-6 text-gray-600" />
+                <Menu className="w-7 h-7 text-gray-600" />
               </button>
               <div>
                 <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight capitalize">

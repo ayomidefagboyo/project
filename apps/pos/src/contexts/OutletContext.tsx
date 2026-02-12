@@ -4,6 +4,11 @@ import type { Outlet, Permission, BusinessSettings } from '@/types';
 import { dataService } from '@/lib/dataService';
 import { authService } from '@/lib/auth';
 import type { AuthUser } from '@/lib/auth';
+import {
+  applyBrandColorToDocument,
+  readBrandColorFromStorage,
+  resolveBrandColorFromSettings,
+} from '@/lib/brandTheme';
 
 interface OutletContextType {
   currentOutlet: Outlet | null;
@@ -55,6 +60,12 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
   const [isLoading, setIsLoading] = useState(!cachedState);
   // Bump this to re-trigger initializeAuth (e.g. after login)
   const [authTrigger, setAuthTrigger] = useState(0);
+
+  // Apply cached/local brand color immediately for a consistent first paint.
+  useEffect(() => {
+    const initialColor = resolveBrandColorFromSettings(cachedState?.settings ?? null) || readBrandColorFromStorage();
+    applyBrandColorToDocument(initialColor);
+  }, []);
 
   // Callable from outside to re-initialize auth without page reload
   const reInitAuth = () => setAuthTrigger(prev => prev + 1);
@@ -193,6 +204,10 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
 
     loadBusinessSettings();
   }, [currentOutlet]);
+
+  useEffect(() => {
+    applyBrandColorToDocument(resolveBrandColorFromSettings(businessSettings));
+  }, [businessSettings]);
 
   const hasPermission = (permission: Permission): boolean => {
     if (!currentUser) return false;

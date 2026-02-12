@@ -43,7 +43,13 @@ import NoStaffMessage from './NoStaffMessage';
 import ClockOutConfirmModal from '../modals/ClockOutConfirmModal';
 import LoginForm from '../auth/LoginForm';
 import TransactionHistory from './TransactionHistory';
-import { loadHardwareState, resolveReceiptPolicy } from '../../lib/hardwareProfiles';
+import {
+  loadHardwareState,
+  resolvePrimaryCashDrawer,
+  resolveReceiptPolicy,
+  resolveReceiptPrinter,
+} from '../../lib/hardwareProfiles';
+import { resolveAdapterCapabilities, supportsHardwareAction } from '../../lib/hardwareAdapters';
 
 export interface CartItem {
   product: POSProduct;
@@ -159,9 +165,26 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     }).format(amount);
   };
 
-  const getHardwarePolicyForTerminal = (outletId?: string, activeTerminalId?: string) => {
+  const getHardwareRuntimeForTerminal = (outletId?: string, activeTerminalId?: string) => {
     const hardwareState = loadHardwareState(outletId, activeTerminalId);
-    return resolveReceiptPolicy(hardwareState);
+    const policy = resolveReceiptPolicy(hardwareState);
+    const receiptPrinter = resolveReceiptPrinter(hardwareState);
+    const drawer = resolvePrimaryCashDrawer(hardwareState, policy.id);
+
+    const receiptPrinterCapabilities = receiptPrinter
+      ? resolveAdapterCapabilities('printer', receiptPrinter.adapterId, receiptPrinter.capabilities)
+      : null;
+    const drawerCapabilities = drawer
+      ? resolveAdapterCapabilities('drawer', drawer.adapterId, drawer.capabilities)
+      : null;
+
+    return {
+      policy,
+      receiptPrinter,
+      receiptPrinterCapabilities,
+      drawer,
+      drawerCapabilities,
+    };
   };
 
   // Determine what screen to show based on authentication state
@@ -1073,7 +1096,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     const outletId = currentOutlet.id;
     const cashierId = currentUser.id;
     const activeTerminalId = terminalId || undefined;
-    const hardwarePolicy = getHardwarePolicyForTerminal(outletId, activeTerminalId);
+    const hardwareRuntime = getHardwareRuntimeForTerminal(outletId, activeTerminalId);
+    const hardwarePolicy = hardwareRuntime.policy;
 
     const totals = calculateCartTotals();
     const totalPaid = (activePayments.cash || 0) + (activePayments.card || 0) + (activePayments.transfer || 0);
@@ -1109,9 +1133,13 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
         : undefined;
 
     const hasCashComponent = (activePayments.cash || 0) > 0;
+    const drawerCanOpen =
+      !!hardwareRuntime.drawerCapabilities &&
+      supportsHardwareAction(hardwareRuntime.drawerCapabilities, 'open-drawer');
     const shouldAutoOpenDrawer =
-      hardwarePolicy.autoOpenDrawerMode === 'on-sale' ||
-      (hardwarePolicy.autoOpenDrawerMode === 'cash-only' && hasCashComponent);
+      drawerCanOpen &&
+      (hardwarePolicy.autoOpenDrawerMode === 'on-sale' ||
+        (hardwarePolicy.autoOpenDrawerMode === 'cash-only' && hasCashComponent));
       
     const transactionRequest: any = {
       outlet_id: outletId,
@@ -1181,6 +1209,14 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
             }
 
             if (shouldPrintReceipt && transaction?.id) {
+              const canPrintReceipt =
+                !!hardwareRuntime.receiptPrinterCapabilities &&
+                supportsHardwareAction(hardwareRuntime.receiptPrinterCapabilities, 'print-receipt');
+              if (!canPrintReceipt) {
+                warning('Receipt printer is not configured for receipt printing on this terminal.', 5000);
+                return;
+              }
+
               try {
                 const copies = hardwarePolicy.duplicateReceiptsEnabled ? 2 : 1;
                 const printResult = await posService.printReceipt(transaction.id, copies);
@@ -1301,6 +1337,10 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
 
   // Determine what screen to show
   const screenToShow = getScreenToShow();
+  const remainingBalance = calculateRemainingBalance();
+  const isFullyPaid = remainingBalance <= 0;
+  const hasActivePayments = Object.keys(activePayments).length > 0;
+  const canFinalize = hasActivePayments && remainingBalance <= 0;
 
   // Show Manager Login Screen
   if (screenToShow === 'manager_login') {
@@ -1334,333 +1374,296 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   //   );
   // }
 
+  if (screenToShow === 'no_staff') {
+    return <NoStaffMessage />;
+  }
+
   return (
-    <div className="p-6 bg-white min-h-screen">
-        {/* Premium POS Interface */}
-        <div className="h-[calc(100vh-8rem)] overflow-hidden">
-          {/* Clean Layout */}
-          <div className="w-full h-full flex flex-col gap-6">
+    <div className="h-full bg-stone-50 p-4 lg:p-5">
+      <div className="h-[calc(100vh-8.5rem)] overflow-hidden">
+        <div className="w-full h-full flex flex-col gap-4">
+          <div className="rounded-2xl border border-stone-200 bg-white shadow-sm flex-1 min-h-0 flex flex-col">
+            <div className="flex-1 min-h-0 overflow-y-auto p-3">
+              <POSShoppingCart
+                cart={cart}
+                totals={cartTotals}
+                onUpdateQuantity={updateCartItemQuantity}
+                onUpdateDiscount={updateCartItemDiscount}
+                onRemoveItem={removeFromCart}
+                onClearCart={clearCart}
+              />
+            </div>
+          </div>
 
-            {/* Premium Cart Section */}
-            <div className="bg-white border border-gray-200 rounded-lg p-6 flex-1 overflow-hidden flex flex-col">
-
-              <div className="flex-1 overflow-y-auto">
-                <POSShoppingCart
-                  cart={cart}
-                  totals={cartTotals}
-                  onUpdateQuantity={updateCartItemQuantity}
-                  onUpdateDiscount={updateCartItemDiscount}
-                  onRemoveItem={removeFromCart}
-                  onClearCart={clearCart}
-                />
+          <div className="rounded-2xl border border-stone-200 bg-white shadow-sm px-4 py-4 flex-shrink-0">
+            {selectedCustomer && (
+              <div className="mb-3 pb-3 border-b border-stone-200">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="text-xs text-stone-500">Customer:</span>
+                    <span className="ml-2 text-base font-semibold text-slate-900 truncate">
+                      {selectedCustomer.name}
+                    </span>
+                    {selectedCustomer.phone && (
+                      <span className="ml-2 text-xs text-stone-500">({selectedCustomer.phone})</span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setSelectedCustomer(null)}
+                    className="text-sm text-red-600 hover:text-red-700 font-medium"
+                  >
+                    Remove
+                  </button>
+                </div>
               </div>
+            )}
+
+            <div className="mb-4 pb-4 border-b border-stone-200 space-y-3">
+              <div className="flex flex-wrap lg:flex-nowrap items-center lg:items-end justify-between gap-3">
+                <div className="flex items-center gap-2 flex-wrap justify-start">
+                  <button
+                    onClick={() => openTenderModal('cash')}
+                    disabled={cart.length === 0 || (isFullyPaid && !activePayments.cash)}
+                    className={`min-h-[64px] min-w-[138px] px-6 py-3 text-lg font-extrabold tracking-wide rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                      activePayments.cash
+                        ? 'btn-brand border-transparent'
+                        : 'bg-white text-slate-800 border-stone-300 hover:bg-stone-100'
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      {activePayments.cash ? <Check className="w-5 h-5" /> : null}
+                      CASH
+                      {activePayments.cash ? <span className="text-sm font-bold">{formatCurrency(activePayments.cash)}</span> : null}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => openTenderModal('card')}
+                    disabled={cart.length === 0 || (isFullyPaid && !activePayments.card)}
+                    className={`min-h-[64px] min-w-[138px] px-6 py-3 text-lg font-extrabold tracking-wide rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                      activePayments.card
+                        ? 'btn-brand border-transparent'
+                        : 'bg-white text-slate-800 border-stone-300 hover:bg-stone-100'
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      {activePayments.card ? <Check className="w-5 h-5" /> : null}
+                      CARD
+                      {activePayments.card ? <span className="text-sm font-bold">{formatCurrency(activePayments.card)}</span> : null}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => openTenderModal('transfer')}
+                    disabled={cart.length === 0 || (isFullyPaid && !activePayments.transfer)}
+                    className={`min-h-[64px] min-w-[138px] px-6 py-3 text-lg font-extrabold tracking-wide rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                      activePayments.transfer
+                        ? 'btn-brand border-transparent'
+                        : 'bg-white text-slate-800 border-stone-300 hover:bg-stone-100'
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      {activePayments.transfer ? <Check className="w-5 h-5" /> : null}
+                      TRANSFER
+                      {activePayments.transfer ? <span className="text-sm font-bold">{formatCurrency(activePayments.transfer)}</span> : null}
+                    </span>
+                  </button>
+                </div>
+
+                <div className="flex items-baseline gap-2 lg:ml-auto text-right">
+                  <span className="text-base font-bold uppercase tracking-wide text-stone-500">Amount Due</span>
+                  <span className="text-5xl font-black leading-none text-slate-900">
+                    {formatCurrency(cart.length === 0 ? 0 : remainingBalance)}
+                  </span>
+                </div>
+              </div>
+
+              {hasActivePayments && (() => {
+                const totalPaid = (activePayments.cash || 0) + (activePayments.card || 0) + (activePayments.transfer || 0);
+                return (
+                  <div className="text-sm font-semibold text-stone-600">
+                    <span className="font-bold">Payments: </span>
+                    {activePayments.cash && (
+                      <span>Cash {formatCurrency(activePayments.cash)}</span>
+                    )}
+                    {activePayments.cash && (activePayments.card || activePayments.transfer) && <span> · </span>}
+                    {activePayments.card && (
+                      <span>Card {formatCurrency(activePayments.card)}</span>
+                    )}
+                    {activePayments.card && activePayments.transfer && <span> · </span>}
+                    {activePayments.transfer && (
+                      <span>Transfer {formatCurrency(activePayments.transfer)}</span>
+                    )}
+                    <span className="font-bold text-slate-800 ml-2">
+                      ({formatCurrency(totalPaid)} / {formatCurrency(cartTotals.total)})
+                    </span>
+                    {remainingBalance > 0 && (
+                      <span className="text-amber-700 font-bold ml-2">
+                        · Remaining: {formatCurrency(remainingBalance)}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
-            {/* Premium Payment Section */}
-            <div className="bg-white border border-gray-200 rounded-lg px-6 py-4 flex-shrink-0">
-              {/* Customer Selection */}
-              {selectedCustomer && (
-                <div className="mb-3 pb-3 border-b border-gray-200">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-xs text-gray-500">Customer:</span>
-                      <span className="ml-2 text-sm font-semibold text-gray-900">{selectedCustomer.name}</span>
-                      {selectedCustomer.phone && (
-                        <span className="ml-2 text-xs text-gray-500">({selectedCustomer.phone})</span>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => setSelectedCustomer(null)}
-                      className="text-xs text-red-600 hover:text-red-700 font-medium"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              )}
+            {tenderModal && (() => {
+              const remaining = getRemainingForMethod(tenderModal.method);
+              const entered = parseFloat(tenderModal.amount) || 0;
+              const change = tenderModal.method === 'cash' && entered > remaining ? entered - remaining : 0;
+              const title = tenderModal.method === 'cash' ? 'Cash Payment' : tenderModal.method === 'card' ? 'Card Payment' : 'Transfer Payment';
 
-              {/* Amount Due Section - at top of payment section */}
-              <div className="mb-4 pb-4 border-b border-gray-200">
-                <div className="flex flex-col items-end gap-1">
-                  {/* Always show Amount Due (matches QuickBooks-style terminal) */}
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-sm font-medium text-gray-600">Amount Due:</span>
-                    <span className="text-4xl font-bold text-orange-600">
-                      {formatCurrency(
-                        cart.length === 0 ? 0 : calculateRemainingBalance()
-                      )}
-                    </span>
-                  </div>
-                  
-                  {/* Payment Split Details - only show when multiple payment methods are active */}
-                  {Object.keys(activePayments).length > 0 && (() => {
-                    const remaining = calculateRemainingBalance();
-                    const totalPaid = (activePayments.cash || 0) + (activePayments.card || 0) + (activePayments.transfer || 0);
-                    return (
-                      <div className="text-xs text-gray-600">
-                        <span className="font-semibold">Payments: </span>
-                        {activePayments.cash && (
-                          <span>Cash {formatCurrency(activePayments.cash)}</span>
-                        )}
-                        {activePayments.cash && (activePayments.card || activePayments.transfer) && <span> · </span>}
-                        {activePayments.card && (
-                          <span>Card {formatCurrency(activePayments.card)}</span>
-                        )}
-                        {activePayments.card && activePayments.transfer && <span> · </span>}
-                        {activePayments.transfer && (
-                          <span>Transfer {formatCurrency(activePayments.transfer)}</span>
-                        )}
-                        <span className="font-bold text-gray-900 ml-2">
-                          ({formatCurrency(totalPaid)} / {formatCurrency(cartTotals.total)})
-                        </span>
-                        {remaining > 0 && (
-                          <span className="text-orange-600 font-semibold ml-2">
-                            · Remaining: {formatCurrency(remaining)}
-                          </span>
-                        )}
+              return (
+                <>
+                  <div className="fixed inset-0 z-40 bg-black/40" onClick={closeTenderModal} />
+                  <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[92vw] max-w-md rounded-2xl border border-stone-300 bg-white shadow-2xl overflow-hidden">
+                    <div className="px-5 py-4 border-b border-stone-200 flex items-center justify-between">
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900">{title}</h3>
+                        <p className="text-xs text-stone-500 mt-0.5">Amount due: {formatCurrency(remaining)}</p>
                       </div>
-                    );
-                  })()}
-                </div>
-              </div>
+                      <button onClick={closeTenderModal} className="p-2 rounded-lg hover:bg-stone-100">
+                        <X className="w-5 h-5 text-stone-500" />
+                      </button>
+                    </div>
 
-              {/* QuickBooks-style tender modal */}
-              {tenderModal && (() => {
-                const remaining = getRemainingForMethod(tenderModal.method);
-                const entered = parseFloat(tenderModal.amount) || 0;
-                const change = tenderModal.method === 'cash' && entered > remaining ? entered - remaining : 0;
-                const title = tenderModal.method === 'cash' ? 'Cash Payment' : tenderModal.method === 'card' ? 'Card Payment' : 'Transfer Payment';
-
-                return (
-                  <>
-                    <div className="fixed inset-0 z-40 bg-black/40" onClick={closeTenderModal} />
-                    <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[92vw] max-w-md bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden">
-                      <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-                        <div>
-                          <h3 className="text-lg font-bold text-gray-900">{title}</h3>
-                          <p className="text-xs text-gray-500 mt-0.5">Amount due: {formatCurrency(remaining)}</p>
-                        </div>
-                        <button onClick={closeTenderModal} className="p-2 hover:bg-gray-100 rounded-lg">
-                          <X className="w-5 h-5 text-gray-500" />
+                    <div className="p-5 space-y-3">
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => updateTenderAmount(remaining.toString())}
+                          className="flex-1 px-3 py-2.5 rounded-lg border border-stone-300 bg-stone-100 hover:bg-stone-200 text-slate-800 text-sm font-semibold transition-colors"
+                        >
+                          Exact
+                        </button>
+                        <button
+                          onClick={() => updateTenderAmount((Math.ceil(remaining / 1000) * 1000).toString())}
+                          className="flex-1 px-3 py-2.5 rounded-lg border border-stone-300 bg-stone-100 hover:bg-stone-200 text-slate-800 text-sm font-semibold transition-colors"
+                        >
+                          Round ₦1k
+                        </button>
+                        <button
+                          onClick={() => updateTenderAmount((Math.ceil(remaining / 5000) * 5000).toString())}
+                          className="flex-1 px-3 py-2.5 rounded-lg border border-stone-300 bg-stone-100 hover:bg-stone-200 text-slate-800 text-sm font-semibold transition-colors"
+                        >
+                          Round ₦5k
                         </button>
                       </div>
 
-                      <div className="p-5 space-y-3">
-                        {/* Quick buttons */}
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => updateTenderAmount(remaining.toString())}
-                            className="flex-1 px-3 py-2 bg-orange-100 hover:bg-orange-200 text-orange-900 text-sm font-bold rounded-lg transition-colors"
-                          >
-                            Exact
-                          </button>
-                          <button
-                            onClick={() => updateTenderAmount((Math.ceil(remaining / 1000) * 1000).toString())}
-                            className="flex-1 px-3 py-2 bg-orange-100 hover:bg-orange-200 text-orange-900 text-sm font-bold rounded-lg transition-colors"
-                          >
-                            Round ₦1k
-                          </button>
-                          <button
-                            onClick={() => updateTenderAmount((Math.ceil(remaining / 5000) * 5000).toString())}
-                            className="flex-1 px-3 py-2 bg-orange-100 hover:bg-orange-200 text-orange-900 text-sm font-bold rounded-lg transition-colors"
-                          >
-                            Round ₦5k
-                          </button>
-                        </div>
-
-                        {/* Amount input */}
-                        <div className="flex items-start gap-3">
-                          <div className="flex-1">
-                            <label className="block text-xs font-medium text-gray-500 mb-1">Amount</label>
-                            <input
-                              type="number"
-                              value={tenderModal.amount}
-                              onChange={(e) => updateTenderAmount(e.target.value)}
-                              className="w-full px-3 py-2.5 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                              autoFocus
-                            />
-                            {tenderModal.error && (
-                              <p className="text-xs text-red-600 mt-1">{tenderModal.error}</p>
-                            )}
-                            {tenderModal.method !== 'cash' && (
-                              <p className="text-[11px] text-gray-400 mt-1">Card/Transfer cannot exceed amount due.</p>
-                            )}
-                          </div>
-
-                          {/* Change display (cash only) */}
-                          {change > 0 && (
-                            <div className="flex-shrink-0 bg-green-50 px-3 py-2 rounded-lg mt-6">
-                              <div className="text-xs text-green-600 font-medium">Change</div>
-                              <div className="text-base font-bold text-green-900">
-                                {formatCurrency(change)}
-                              </div>
-                            </div>
+                      <div className="flex items-start gap-3">
+                        <div className="flex-1">
+                          <label className="block text-xs font-medium text-stone-500 mb-1">Amount</label>
+                          <input
+                            type="number"
+                            value={tenderModal.amount}
+                            onChange={(e) => updateTenderAmount(e.target.value)}
+                            className="w-full px-3 py-2.5 text-lg border border-stone-300 rounded-lg focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                            autoFocus
+                          />
+                          {tenderModal.error && (
+                            <p className="text-xs text-red-600 mt-1">{tenderModal.error}</p>
+                          )}
+                          {tenderModal.method !== 'cash' && (
+                            <p className="text-[11px] text-stone-500 mt-1">Card/Transfer cannot exceed amount due.</p>
                           )}
                         </div>
-                      </div>
 
-                      <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-between">
-                        <button
-                          onClick={() => {
-                            // Clear this tender
-                            setActivePayments(prev => {
-                              const updated: { cash?: number; card?: number; transfer?: number } = { ...prev };
-                              delete updated[tenderModal.method];
-                              return updated;
-                            });
-                            setTenderModal(null);
-                          }}
-                          className="px-4 py-2 text-sm font-semibold text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-                        >
-                          Clear
-                        </button>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={closeTenderModal}
-                            className="px-4 py-2 text-sm font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            onClick={applyTender}
-                            className="px-4 py-2 text-sm font-semibold text-white bg-orange-600 hover:bg-orange-700 rounded-lg transition-colors"
-                          >
-                            OK
-                          </button>
-                        </div>
+                        {change > 0 && (
+                          <div className="flex-shrink-0 bg-emerald-50 px-3 py-2 rounded-lg mt-6">
+                            <div className="text-xs text-emerald-700 font-medium">Change</div>
+                            <div className="text-base font-bold text-emerald-900">
+                              {formatCurrency(change)}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </>
-                );
-              })()}
 
-              {/* Permanent Payment Method Buttons - Always visible, show active state */}
-              {(() => {
-                const remaining = calculateRemainingBalance();
-                const isFullyPaid = remaining <= 0;
-                
-                return (
-                  <div className="flex items-center space-x-3 mb-4">
-                    <button
-                      onClick={() => openTenderModal('cash')}
-                      disabled={cart.length === 0 || (isFullyPaid && !activePayments.cash)}
-                      className={`px-6 py-3 text-white text-lg font-bold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                        activePayments.cash
-                          ? 'bg-orange-700 shadow-lg shadow-orange-500/50 ring-2 ring-orange-400'
-                          : 'bg-orange-600 hover:bg-orange-700'
-                      }`}
-                    >
-                      <span className="inline-flex items-center gap-2">
-                        {activePayments.cash ? <Check className="w-5 h-5" /> : null}
-                        CASH
-                        {activePayments.cash ? <span className="text-sm font-bold">{formatCurrency(activePayments.cash)}</span> : null}
-                      </span>
-                    </button>
-                    <button
-                      onClick={() => openTenderModal('card')}
-                      disabled={cart.length === 0 || (isFullyPaid && !activePayments.card)}
-                      className={`px-6 py-3 text-white text-lg font-bold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                        activePayments.card
-                          ? 'bg-orange-700 shadow-lg shadow-orange-500/50 ring-2 ring-orange-400'
-                          : 'bg-orange-600 hover:bg-orange-700'
-                      }`}
-                    >
-                      <span className="inline-flex items-center gap-2">
-                        {activePayments.card ? <Check className="w-5 h-5" /> : null}
-                        CARD
-                        {activePayments.card ? <span className="text-sm font-bold">{formatCurrency(activePayments.card)}</span> : null}
-                      </span>
-                    </button>
-                    <button
-                      onClick={() => openTenderModal('transfer')}
-                      disabled={cart.length === 0 || (isFullyPaid && !activePayments.transfer)}
-                      className={`px-6 py-3 text-white text-lg font-bold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                        activePayments.transfer
-                          ? 'bg-orange-700 shadow-lg shadow-orange-500/50 ring-2 ring-orange-400'
-                          : 'bg-orange-600 hover:bg-orange-700'
-                      }`}
-                    >
-                      <span className="inline-flex items-center gap-2">
-                        {activePayments.transfer ? <Check className="w-5 h-5" /> : null}
-                        TRANSFER
-                        {activePayments.transfer ? <span className="text-sm font-bold">{formatCurrency(activePayments.transfer)}</span> : null}
-                      </span>
-                    </button>
+                    <div className="px-5 py-4 border-t border-stone-200 flex items-center justify-between">
+                      <button
+                        onClick={() => {
+                          setActivePayments(prev => {
+                            const updated: { cash?: number; card?: number; transfer?: number } = { ...prev };
+                            delete updated[tenderModal.method];
+                            return updated;
+                          });
+                          setTenderModal(null);
+                        }}
+                        className="px-4 py-2.5 text-sm font-semibold text-stone-600 hover:text-slate-900 hover:bg-stone-100 rounded-lg transition-colors"
+                      >
+                        Clear
+                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={closeTenderModal}
+                          className="px-4 py-2.5 text-sm font-semibold text-slate-700 bg-stone-100 hover:bg-stone-200 rounded-lg transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={applyTender}
+                          className="px-4 py-2.5 text-sm font-semibold rounded-lg transition-colors btn-brand"
+                        >
+                          OK
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                );
-              })()}
+                </>
+              );
+            })()}
 
-              {/* Core sales-terminal actions: fixed row at bottom, not moving */}
-              <div className="flex justify-end space-x-3">
-                {/* Cancel button - permanent, beside Put on Hold */}
-                <button
-                  onClick={() => {
-                    setActivePayments({});
-                    setTenderModal(null);
-                    clearCart();
-                  }}
-                  disabled={cart.length === 0 && Object.keys(activePayments).length === 0}
-                  className="px-4 py-3 bg-gray-500 hover:bg-gray-600 text-white text-lg font-bold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Cancel
-                </button>
-                {/*
-                  Rule for label/behavior:
-                  - If there are held sales AND current cart is empty => button shows "Held Receipts" (opens list)
-                  - If cart has items (starting another sale) => button shows "Put on Hold" to create another held receipt
-                */}
-                <button
-                  onClick={() => {
-                    const canShowHeldList = hasHeldSale && cart.length === 0;
-                    if (canShowHeldList) {
-                      setShowHeldModal(true);
-                    } else {
-                      handlePutOnHold();
-                    }
-                  }}
-                  disabled={!hasHeldSale && cart.length === 0}
-                  className="px-4 py-3 bg-orange-600 hover:bg-orange-700 text-white text-lg font-bold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {hasHeldSale && cart.length === 0 ? 'Held Receipts' : 'Put on Hold'}
-                </button>
-                {(() => {
-                  const hasActivePayments = Object.keys(activePayments).length > 0;
-                  const remaining = calculateRemainingBalance();
-                  const canFinalize = hasActivePayments && remaining <= 0;
-                  
-                  return (
-                    <>
-                      <button
-                        onClick={() => handleSplitPayment('save')}
-                        disabled={!canFinalize}
-                        className="px-4 py-3 bg-orange-600 hover:bg-orange-700 text-white text-lg font-bold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        Save Only
-                      </button>
-                      <button
-                        onClick={() => handleSplitPayment('save_and_print')}
-                        disabled={!canFinalize}
-                        className="px-4 py-3 bg-orange-600 hover:bg-orange-700 text-white text-lg font-bold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        Save &amp; Print
-                      </button>
-                    </>
-                  );
-                })()}
-              </div>
+            <div className="flex items-center gap-2 ml-auto flex-wrap justify-end">
+              <button
+                onClick={() => {
+                  setActivePayments({});
+                  setTenderModal(null);
+                  clearCart();
+                }}
+                disabled={cart.length === 0 && Object.keys(activePayments).length === 0}
+                className="min-h-[64px] px-6 py-3 bg-stone-600 hover:bg-stone-700 text-stone-100 text-lg font-extrabold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const canShowHeldList = hasHeldSale && cart.length === 0;
+                  if (canShowHeldList) {
+                    setShowHeldModal(true);
+                  } else {
+                    handlePutOnHold();
+                  }
+                }}
+                disabled={!hasHeldSale && cart.length === 0}
+                className="min-h-[64px] px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-800 text-lg font-extrabold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {hasHeldSale && cart.length === 0 ? 'Held Receipts' : 'Put on Hold'}
+              </button>
+              <button
+                onClick={() => handleSplitPayment('save')}
+                disabled={!canFinalize}
+                className="min-h-[64px] px-6 py-3 text-stone-100 text-lg font-extrabold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed btn-brand"
+              >
+                Save Only
+              </button>
+              <button
+                onClick={() => handleSplitPayment('save_and_print')}
+                disabled={!canFinalize}
+                className="min-h-[64px] px-6 py-3 text-stone-100 text-lg font-extrabold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed btn-brand"
+              >
+                Save &amp; Print
+              </button>
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Payment Modal */}
-        {showPaymentModal && (
-          <POSPaymentModal
-            totals={cartTotals}
-            isOnline={isOnline}
-            onPayment={handlePayment}
-            onCancel={() => setShowPaymentModal(false)}
-          />
-        )}
+      {/* Payment Modal */}
+      {showPaymentModal && (
+        <POSPaymentModal
+          totals={cartTotals}
+          isOnline={isOnline}
+          onPayment={handlePayment}
+          onCancel={() => setShowPaymentModal(false)}
+        />
+      )}
 
         {/* Held Receipts Modal */}
         {showHeldModal && (
@@ -1713,7 +1716,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                           </span>
                           <button
                             onClick={() => handleRestoreHeldSale(sale.id)}
-                            className="px-3 py-1.5 text-sm font-bold bg-orange-600 hover:bg-orange-700 text-white rounded-lg"
+                            className="px-3 py-1.5 text-sm font-bold bg-slate-900 hover:bg-slate-800 text-stone-100 rounded-lg"
                           >
                             Load
                           </button>
@@ -1899,7 +1902,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                 </button>
                 <button
                   onClick={() => resolvePrintDecision(true)}
-                  className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                  className="px-4 py-2 rounded-lg bg-slate-900 text-stone-100 hover:bg-slate-800"
                 >
                   Print
                 </button>
@@ -1951,7 +1954,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                     }
                   }}
                   placeholder="Search by name or phone..."
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-400 focus:border-transparent"
                   autoFocus
                 />
               </div>
@@ -2016,7 +2019,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                         }
                       }
                     }}
-                    className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-semibold text-sm"
+                    className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-stone-100 rounded-lg font-semibold text-sm"
                   >
                     Create New Customer
                   </button>

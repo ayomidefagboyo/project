@@ -235,14 +235,14 @@ function AppContent() {
 
   // Header content for POS terminal page
   const posTerminalHeader = (
-    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between w-full gap-4">
+    <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between w-full gap-3">
       {/* Search Bar with Dropdown */}
-      <div className="relative flex-1 max-w-2xl">
+      <div className="relative flex-1 max-w-3xl">
         <input
           type="search"
           id="pos-product-search-input"
           name="product-search-query"
-          placeholder="Find Products - Enter barcode or product name..."
+          placeholder="Scan barcode or search product name/SKU..."
           value={searchQuery}
           onChange={(e) => handleSearchChange(e.target.value)}
           onKeyPress={async (e) => {
@@ -268,7 +268,7 @@ function AppContent() {
           onFocus={() => {
             if (searchResults.length > 0) setShowSearchDropdown(true);
           }}
-          className="w-full px-4 py-2.5 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+          className="w-full h-12 px-4 text-[16px] border border-stone-300 rounded-xl bg-white focus:ring-2 focus:ring-slate-400 focus:border-transparent"
           autoComplete="chrome-off"
           autoCorrect="off"
           autoCapitalize="off"
@@ -290,27 +290,27 @@ function AppContent() {
             />
 
             {/* Dropdown Results */}
-            <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg z-20 mt-1 max-h-80 overflow-y-auto">
+            <div className="absolute top-full left-0 right-0 bg-white border border-stone-200 rounded-xl shadow-lg z-20 mt-1 max-h-80 overflow-y-auto">
               {searchResults.map((product) => (
                 <button
                   key={product.id}
                   onClick={() => addProductFromSearch(product)}
-                  className="w-full flex items-center px-3 py-2 hover:bg-gray-50 transition-colors text-left border-b border-gray-100 last:border-b-0"
+                  className="w-full flex items-center px-3 py-2.5 hover:bg-stone-50 transition-colors text-left border-b border-stone-100 last:border-b-0"
                 >
                   <div className="flex items-center justify-between w-full space-x-3">
                     {/* Left: name + identifiers, single line with ellipsis */}
-                    <div className="flex-1 min-w-0 text-xs text-gray-700">
-                      <span className="font-semibold text-gray-900 truncate inline-block max-w-[55%] align-middle">
+                    <div className="flex-1 min-w-0 text-sm text-stone-600">
+                      <span className="font-semibold text-slate-900 truncate inline-block max-w-[52%] align-middle">
                         {product.name}
                       </span>
-                      <span className="mx-1 text-gray-400">·</span>
+                      <span className="mx-1 text-stone-400">·</span>
                       <span className="truncate inline-block max-w-[20%] align-middle">
                         {product.sku}
                       </span>
                       {product.barcode && (
                         <>
-                          <span className="mx-1 text-gray-400">·</span>
-                          <span className="truncate inline-block max-w-[20%] align-middle text-gray-500">
+                          <span className="mx-1 text-stone-400">·</span>
+                          <span className="truncate inline-block max-w-[20%] align-middle text-stone-500">
                             {product.barcode}
                           </span>
                         </>
@@ -318,7 +318,7 @@ function AppContent() {
                     </div>
 
                     {/* Right: price */}
-                    <div className="flex-shrink-0 text-sm font-bold text-orange-600">
+                    <div className="flex-shrink-0 text-base font-bold text-slate-900">
                       {formatCurrency(product.unit_price)}
                     </div>
                   </div>
@@ -330,12 +330,12 @@ function AppContent() {
       </div>
 
       {/* Status Indicators - single row: + Add Customer | Cashier | Online icon (at far edge) */}
-      <div className="flex items-center gap-3 flex-shrink-0 flex-wrap justify-end">
+      <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
         {/* Add Customer */}
         <button
           type="button"
           onClick={() => posDashboardRef.current?.openCustomerSearch()}
-          className="px-4 py-2 rounded-full bg-blue-50 text-blue-700 text-sm font-semibold whitespace-nowrap active:scale-95 transition-transform"
+          className="h-12 px-5 rounded-xl border border-brand-soft bg-brand-soft text-brand text-[15px] font-semibold whitespace-nowrap active:scale-95 transition-transform"
         >
           + Add Customer
         </button>
@@ -344,7 +344,7 @@ function AppContent() {
         {currentStaff && (
           <button
             type="button"
-            className="px-4 py-2 rounded-full bg-gray-100 text-gray-700 text-sm font-semibold whitespace-nowrap active:scale-95 transition-transform"
+            className="h-12 px-5 rounded-xl border border-stone-300 bg-stone-100 text-slate-700 text-[15px] font-semibold whitespace-nowrap active:scale-95 transition-transform"
             onClick={handleStaffLogout}
           >
             {currentStaff.role}:{' '}
@@ -357,13 +357,13 @@ function AppContent() {
         {/* Online/Offline icon only - last at the edge */}
         <button
           type="button"
-          className={`flex items-center justify-center w-8 h-8 rounded-full border ${isOnline
-            ? 'border-green-500 text-green-600 bg-green-50'
-            : 'border-red-500 text-red-600 bg-red-50'
+          className={`flex items-center justify-center w-12 h-12 rounded-xl border ${isOnline
+            ? 'border-emerald-300 text-emerald-700 bg-emerald-50'
+            : 'border-red-300 text-red-700 bg-red-50'
             }`}
           title={isOnline ? 'Online' : 'Offline'}
         >
-          {isOnline ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
+          {isOnline ? <Wifi className="h-5 w-5" /> : <WifiOff className="h-5 w-5" />}
         </button>
       </div>
     </div>
@@ -433,7 +433,7 @@ function AppContent() {
               productManagementRef.current.handleShowNewRow();
             }
           }}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 sm:px-6 sm:py-2.5 rounded-lg font-semibold flex items-center gap-1.5 sm:gap-2 transition-colors text-sm whitespace-nowrap"
+          className="btn-brand text-white px-3 py-2 sm:px-6 sm:py-2.5 rounded-lg font-semibold flex items-center gap-1.5 sm:gap-2 transition-colors text-sm whitespace-nowrap"
         >
           <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
           <span>Add Product</span>
