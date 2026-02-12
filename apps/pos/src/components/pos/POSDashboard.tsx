@@ -39,7 +39,6 @@ import StockReportModal from './modals/StockReportModal';
 // Staff Management Modals
 import StaffManagementModal from './modals/StaffManagementModal';
 // import PinEntryModal from './PinEntryModal'; // REMOVED: No longer used
-import NoStaffMessage from './NoStaffMessage';
 import ClockOutConfirmModal from '../modals/ClockOutConfirmModal';
 import LoginForm from '../auth/LoginForm';
 import TransactionHistory from './TransactionHistory';
@@ -187,21 +186,16 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     };
   };
 
-  // Determine what screen to show based on authentication state
-  const getScreenToShow = (): 'manager_login' | 'no_staff' | 'pos_dashboard' => {
+  // Determine what screen to show based on authentication state.
+  // App.tsx already handles terminal setup + staff authentication, so POS should
+  // never gate the Register screen on local staff-profile fetch timing.
+  const getScreenToShow = (): 'manager_login' | 'pos_dashboard' => {
     // If no user is authenticated, show manager login
     if (!currentUser) {
       return 'manager_login';
     }
 
-    // If user is authenticated but no staff profiles exist, show no staff message
-    if (staffProfiles.length === 0) {
-      return 'no_staff';
-    }
-
     // Otherwise, show POS dashboard.
-    // Staff authentication and terminal setup are now handled at the App level,
-    // so we never clear terminal configuration from here.
     return 'pos_dashboard';
   };
 
@@ -1376,10 +1370,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   //     </div>
   //   );
   // }
-
-  if (screenToShow === 'no_staff') {
-    return <NoStaffMessage />;
-  }
 
   return (
     <div className="h-full bg-stone-50 p-4 lg:p-5">

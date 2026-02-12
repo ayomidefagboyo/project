@@ -9,6 +9,7 @@ from datetime import datetime, date, timedelta
 import uuid
 import logging
 import json
+import re
 from decimal import Decimal
 
 from app.core.database import get_supabase_admin, Tables
@@ -57,20 +58,55 @@ def _is_missing_cashier_name_error(exc: Exception) -> bool:
     )
 
 
+def _extract_missing_column_name(exc: Exception) -> Optional[str]:
+    """Extract missing-column name from PostgREST/Postgres error text."""
+    message = str(exc)
+    patterns = [
+        r"Could not find the '([^']+)' column",
+        r'column "([^"]+)" of relation "[^"]+" does not exist',
+        r'column "([^"]+)" does not exist',
+        r"column '([^']+)' does not exist",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, message, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
+
+
 def _insert_pos_transaction_compat(supabase, transaction_data: Dict[str, Any]):
     """
-    Insert into pos_transactions with backward compatibility for older schemas
-    that don't have the cashier_name column.
+    Insert into pos_transactions with backward compatibility for older schemas.
+    If a column is missing in prod schema cache, remove it and retry.
     """
-    try:
-        return supabase.table('pos_transactions').insert(transaction_data).execute()
-    except Exception as exc:
-        if _is_missing_cashier_name_error(exc) and 'cashier_name' in transaction_data:
-            fallback_data = dict(transaction_data)
-            fallback_data.pop('cashier_name', None)
-            logger.warning("pos_transactions.cashier_name missing; retrying insert without cashier_name")
-            return supabase.table('pos_transactions').insert(fallback_data).execute()
-        raise
+    payload = dict(transaction_data)
+    removed_columns = []
+
+    for _ in range(12):
+        try:
+            return supabase.table('pos_transactions').insert(payload).execute()
+        except Exception as exc:
+            missing_column = _extract_missing_column_name(exc)
+
+            # Keep explicit legacy check for existing known production failure shape.
+            if not missing_column and _is_missing_cashier_name_error(exc):
+                missing_column = 'cashier_name'
+
+            if missing_column and missing_column in payload:
+                payload.pop(missing_column, None)
+                removed_columns.append(missing_column)
+                logger.warning(
+                    "pos_transactions.%s missing in schema cache; retrying insert without it",
+                    missing_column
+                )
+                continue
+
+            # Not a missing-column issue we can recover from.
+            raise
+
+    raise RuntimeError(
+        f"Failed to insert pos_transactions after compatibility retries; removed columns={removed_columns}"
+    )
 
 
 # ===============================================
@@ -411,9 +447,18 @@ async def create_transaction(
                     detail="Insufficient payment amount"
                 )
 
-        # Get cashier's name for display (staff_profiles uses display_name, not name)
-        cashier_result = supabase.table('staff_profiles').select('display_name').eq('id', transaction.cashier_id).execute()
-        cashier_name = cashier_result.data[0]['display_name'] if cashier_result.data else 'Unknown'
+        # Get cashier's name for display (prefer staff_profiles, then users).
+        cashier_name = 'Unknown'
+        try:
+            cashier_result = supabase.table('staff_profiles').select('display_name').eq('id', transaction.cashier_id).execute()
+            if cashier_result.data:
+                cashier_name = cashier_result.data[0].get('display_name') or cashier_name
+            else:
+                user_result = supabase.table('users').select('name').eq('id', transaction.cashier_id).execute()
+                if user_result.data:
+                    cashier_name = user_result.data[0].get('name') or cashier_name
+        except Exception as cashier_lookup_error:
+            logger.warning(f"Cashier name lookup failed for {transaction.cashier_id}: {cashier_lookup_error}")
 
         # Prepare transaction data
         transaction_data = {
