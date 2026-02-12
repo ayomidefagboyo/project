@@ -446,6 +446,20 @@ export const resolveReceiptPrinter = (state: HardwareState): PrinterConfig | und
   state.printers.find((printer) => printer.status === 'connected') ||
   state.printers[0];
 
+export const resolveLabelPrinter = (state: HardwareState): PrinterConfig | undefined =>
+  state.printers.find(
+    (printer) =>
+      printer.defaultPrint === 'labels' &&
+      printer.status === 'connected'
+  ) ||
+  state.printers.find(
+    (printer) =>
+      printer.type === 'label' &&
+      printer.status === 'connected'
+  ) ||
+  state.printers.find((printer) => printer.defaultPrint === 'labels') ||
+  state.printers.find((printer) => printer.type === 'label');
+
 export const resolvePrimaryCashDrawer = (
   state: HardwareState,
   preferredProfileId?: string

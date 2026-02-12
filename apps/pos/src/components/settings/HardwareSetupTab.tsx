@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Monitor, Plus, Printer, Trash2, Wifi } from 'lucide-react';
 import { posService } from '../../lib/posService';
+import { printProductLabels } from '../../lib/labelPrinter';
 import { ToastContainer, useToast } from '../ui/Toast';
 import {
   type AutoOpenDrawerMode,
@@ -593,6 +594,36 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
       );
       return;
     }
+
+    if (printAction === 'print-label') {
+      const opened = printProductLabels(
+        [
+          {
+            name: 'Sample Product Label',
+            sku: 'LBL-TEST-001',
+            barcode: '123456789012',
+            price: 1500,
+          },
+        ],
+        {
+          title: `Label Test - ${printer.name}`,
+          copiesPerProduct: 1,
+          showPrice: true,
+          footerText: `${outletId || 'COMPAZZ'} • ${terminalId || 'TERMINAL'}`,
+        }
+      );
+
+      if (!opened) {
+        error('Allow pop-ups to run test label print.');
+        return;
+      }
+
+      const nowIso = new Date().toISOString();
+      setLastPrintTestAt((prev) => ({ ...prev, [printer.id]: nowIso }));
+      success(`Test label opened for "${printer.name}".`);
+      return;
+    }
+
     if (selectedPolicy.cutPaperEnabled && !supportsHardwareAction(printerCapabilities, 'cut-paper')) {
       info(`${printer.name} does not support paper cut. Receipt will still print.`, 3500);
     }
@@ -957,7 +988,7 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
                         onClick={() => handleTestPrint(printer)}
                         className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-xs"
                       >
-                        Test
+                        {printer.defaultPrint === 'labels' ? 'Label Test' : 'Test'}
                       </button>
                       <button
                         onClick={() => openPrinterModal('edit', printer)}
