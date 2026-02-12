@@ -349,7 +349,7 @@ class TransactionSearchRequest(BaseModel):
     cashier_id: Optional[str] = Field(None, description="Filter by cashier")
     payment_method: Optional[PaymentMethod] = Field(None, description="Filter by payment method")
     status: Optional[TransactionStatus] = Field(None, description="Filter by status")
-    limit: int = Field(50, ge=1, le=200, description="Maximum results")
+    limit: int = Field(50, ge=1, description="Maximum results")
 
 
 # ===============================================

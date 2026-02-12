@@ -76,6 +76,29 @@ interface HeldSale {
 
 interface POSDashboardProps {}
 
+interface LocalReceiptLineItem {
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  discount: number;
+}
+
+interface LocalReceiptPayload {
+  receiptNumber: string;
+  createdAtIso: string;
+  outletName: string;
+  cashierName: string;
+  customerName?: string;
+  items: LocalReceiptLineItem[];
+  subtotal: number;
+  totalDiscount: number;
+  totalTax: number;
+  total: number;
+  totalPaid: number;
+  payments: Array<{ method: PaymentMethod; amount: number }>;
+  pendingSync: boolean;
+}
+
 const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) => {
   // Context and state
   const { currentUser, currentOutlet } = useOutlet();
@@ -162,6 +185,137 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       currency: 'NGN',
       minimumFractionDigits: 2
     }).format(amount);
+  };
+
+  const escapeHtml = (value: string): string =>
+    value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+  const paymentMethodLabel = (method: PaymentMethod): string => {
+    if (method === PaymentMethod.CASH) return 'Cash';
+    if (method === PaymentMethod.POS) return 'Card';
+    if (method === PaymentMethod.TRANSFER) return 'Transfer';
+    if (method === PaymentMethod.CREDIT) return 'Credit';
+    if (method === PaymentMethod.MOBILE) return 'Mobile';
+    return 'Payment';
+  };
+
+  const truncateReceiptText = (value: string, maxLength = 30): string =>
+    value.length <= maxLength ? value : `${value.slice(0, Math.max(0, maxLength - 3))}...`;
+
+  const buildLocalReceiptContent = (payload: LocalReceiptPayload): string => {
+    const lines: string[] = [];
+    const createdAt = new Date(payload.createdAtIso);
+    const overpayAmount = Math.max(0, payload.totalPaid - payload.total);
+    const hasCashPayment = payload.payments.some((payment) => payment.method === PaymentMethod.CASH);
+
+    lines.push(payload.outletName || 'Compazz POS');
+    lines.push('Sales Receipt');
+    lines.push('----------------------------------------');
+    lines.push(`Receipt: ${payload.receiptNumber}`);
+    lines.push(`Date: ${createdAt.toLocaleString('en-NG')}`);
+    lines.push(`Cashier: ${payload.cashierName}`);
+    if (payload.customerName) {
+      lines.push(`Customer: ${payload.customerName}`);
+    }
+    lines.push('----------------------------------------');
+
+    payload.items.forEach((item) => {
+      const lineDiscount = Math.max(0, item.discount) * item.quantity;
+      const lineTotal = item.quantity * item.unitPrice - lineDiscount;
+      lines.push(truncateReceiptText(item.name || 'Item'));
+      lines.push(
+        `  ${item.quantity} x ${formatCurrency(item.unitPrice)} = ${formatCurrency(lineTotal)}`
+      );
+      if (lineDiscount > 0) {
+        lines.push(`  Discount: -${formatCurrency(lineDiscount)}`);
+      }
+    });
+
+    lines.push('----------------------------------------');
+    lines.push(`Subtotal: ${formatCurrency(payload.subtotal)}`);
+    if (payload.totalDiscount > 0) {
+      lines.push(`Discount: -${formatCurrency(payload.totalDiscount)}`);
+    }
+    if (payload.totalTax > 0) {
+      lines.push(`VAT (incl.): ${formatCurrency(payload.totalTax)}`);
+    }
+    lines.push(`Total: ${formatCurrency(payload.total)}`);
+    lines.push('----------------------------------------');
+
+    if (payload.payments.length === 0) {
+      lines.push(`Payment: ${formatCurrency(payload.totalPaid)}`);
+    } else {
+      payload.payments.forEach((payment) => {
+        lines.push(`${paymentMethodLabel(payment.method)}: ${formatCurrency(payment.amount)}`);
+      });
+    }
+
+    if (overpayAmount > 0) {
+      lines.push(`${hasCashPayment ? 'Change' : 'Cashback'}: ${formatCurrency(overpayAmount)}`);
+    }
+
+    if (payload.pendingSync) {
+      lines.push('----------------------------------------');
+      lines.push('Offline copy (pending sync)');
+    }
+
+    lines.push('Thank you');
+    return lines.join('\n');
+  };
+
+  const openReceiptPrintWindow = (
+    receiptContent: string,
+    options?: {
+      title?: string;
+      copies?: number;
+    }
+  ): boolean => {
+    const title = options?.title || 'Receipt';
+    const copies = Math.max(1, Math.min(5, Math.floor(options?.copies || 1)));
+    const printWindow = window.open('', '_blank', 'width=900,height=700');
+    if (!printWindow) return false;
+
+    const copyBlocks = Array.from({ length: copies })
+      .map((_, index) => {
+        const copyLabel = copies > 1 ? `<div class="copy-label">Copy ${index + 1}</div>` : '';
+        return `
+          <section class="copy">
+            ${copyLabel}
+            <pre>${escapeHtml(receiptContent)}</pre>
+          </section>
+        `;
+      })
+      .join('<hr class="cut" />');
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>${escapeHtml(title)}</title>
+          <style>
+            body { font-family: monospace; padding: 16px; color: #111827; }
+            pre { white-space: pre-wrap; font-size: 12px; margin: 0; }
+            .copy { margin-bottom: 12px; }
+            .copy-label { font-weight: 700; margin-bottom: 8px; text-transform: uppercase; }
+            .cut { border: 0; border-top: 1px dashed #9ca3af; margin: 14px 0; }
+            @media print {
+              body { padding: 0; }
+              .copy { break-inside: avoid; page-break-inside: avoid; }
+            }
+          </style>
+        </head>
+        <body>
+          ${copyBlocks}
+          <script>window.onload = () => window.print();</script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    return true;
   };
 
   const getHardwareRuntimeForTerminal = (outletId?: string, activeTerminalId?: string) => {

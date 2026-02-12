@@ -3,9 +3,9 @@
  * Modeled after Square POS Transactions view
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Search, RotateCcw, Receipt, X } from 'lucide-react';
-import { posService, type POSTransaction } from '../lib/posService';
+import { posService, type POSTransaction, PaymentMethod } from '../lib/posService';
 import { useOutlet } from '../contexts/OutletContext';
 import { useToast } from '../components/ui/Toast';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
@@ -19,19 +19,105 @@ interface ExtendedTransaction extends POSTransaction {
   voided_at?: string;
 }
 
+const TRANSACTIONS_PAGE_SIZE = 100;
+
 const TransactionsPage: React.FC = () => {
   const { currentOutlet } = useOutlet();
   const { success, error: showError } = useToast();
 
   const [transactions, setTransactions] = useState<ExtendedTransaction[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [paymentFilter, setPaymentFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
   const [selectedTransaction, setSelectedTransaction] = useState<ExtendedTransaction | null>(null);
   const [showVoidConfirm, setShowVoidConfirm] = useState(false);
   const [voidReason, setVoidReason] = useState('');
+
+  const filterLocalTransactions = useCallback(
+    (data: POSTransaction[]): ExtendedTransaction[] => {
+      const needle = searchQuery.trim().toLowerCase();
+      return data.filter((tx) => {
+        if (selectedDate) {
+          const txDate = tx.transaction_date ? tx.transaction_date.split('T')[0] : '';
+          if (txDate !== selectedDate) return false;
+        }
+        if (paymentFilter !== 'all' && tx.payment_method !== paymentFilter) return false;
+        if (statusFilter !== 'all' && tx.status !== statusFilter) return false;
+        if (needle) {
+          const txn = tx.transaction_number?.toLowerCase() || '';
+          const customer = tx.customer_name?.toLowerCase() || '';
+          const payment = tx.payment_method?.toLowerCase() || '';
+          if (!txn.includes(needle) && !customer.includes(needle) && !payment.includes(needle)) {
+            return false;
+          }
+        }
+        return true;
+      }) as ExtendedTransaction[];
+    },
+    [selectedDate, paymentFilter, statusFilter, searchQuery]
+  );
+
+  const loadTransactions = useCallback(async () => {
+    if (!currentOutlet?.id) return;
+
+    try {
+      setIsLoading(true);
+      const result = await posService.getTransactions(currentOutlet.id, {
+        page: currentPage,
+        size: TRANSACTIONS_PAGE_SIZE,
+        date_from: selectedDate || undefined,
+        date_to: selectedDate || undefined,
+        payment_method:
+          paymentFilter !== 'all' ? (paymentFilter as PaymentMethod) : undefined,
+        status: statusFilter !== 'all' ? statusFilter : undefined,
+        search: searchQuery || undefined,
+      });
+
+      setTransactions((result.items || []) as ExtendedTransaction[]);
+      setTotalCount(result.total || 0);
+    } catch (err) {
+      console.error('Error loading transactions:', err);
+      try {
+        const localData = await posService.getLocalTransactions(currentOutlet.id, 1000);
+        const filtered = filterLocalTransactions(localData);
+        const start = (currentPage - 1) * TRANSACTIONS_PAGE_SIZE;
+        const pageData = filtered.slice(start, start + TRANSACTIONS_PAGE_SIZE);
+        setTransactions(pageData);
+        setTotalCount(filtered.length);
+      } catch (localErr) {
+        console.error('Local cache also failed:', localErr);
+        setTransactions([]);
+        setTotalCount(0);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [
+    currentOutlet?.id,
+    currentPage,
+    selectedDate,
+    paymentFilter,
+    statusFilter,
+    searchQuery,
+    filterLocalTransactions,
+  ]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setCurrentPage(1);
+      setSearchQuery(searchInput.trim());
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [currentOutlet?.id]);
 
   // Real-time sync
   useRealtimeSync({
@@ -47,44 +133,9 @@ const TransactionsPage: React.FC = () => {
   });
 
   useEffect(() => {
-    if (currentOutlet?.id) {
-      loadTransactions();
-    }
-  }, [currentOutlet?.id]);
-
-  const loadTransactions = async () => {
     if (!currentOutlet?.id) return;
-
-    try {
-      // 1. Always try local cache first (instant results)
-      setIsLoading(true);
-      const localData = await posService.getLocalTransactions(currentOutlet.id, 500);
-      if (localData.length > 0) {
-        setTransactions(localData as ExtendedTransaction[]);
-        setIsLoading(false); // Show cached data immediately
-      }
-
-      // 2. Fetch fresh data in background and update
-      const result = await posService.getTransactions(currentOutlet.id, {
-        size: 500 // Increased cache size for multiple terminals
-      });
-      setTransactions((result.items || []) as ExtendedTransaction[]);
-    } catch (err) {
-      console.error('Error loading transactions:', err);
-      // If network fails, still show cached data (already loaded above)
-      if (transactions.length === 0) {
-        // Only show error if we have no cached data
-        try {
-          const localData = await posService.getLocalTransactions(currentOutlet.id, 500);
-          setTransactions(localData as ExtendedTransaction[]);
-        } catch (localErr) {
-          console.error('Local cache also failed:', localErr);
-        }
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    loadTransactions();
+  }, [currentOutlet?.id, loadTransactions]);
 
   const formatCurrency = (amount: number): string =>
     new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', minimumFractionDigits: 2 }).format(amount);
@@ -117,25 +168,9 @@ const TransactionsPage: React.FC = () => {
     return <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-green-100 text-green-800">Completed</span>;
   };
 
-  // Filters are applied in render
-  const filteredTransactions = transactions.filter(tx => {
-    // Date filter (compare local YYYY-MM-DD portion)
-    if (selectedDate) {
-      const txDate = tx.transaction_date ? tx.transaction_date.split('T')[0] : '';
-      if (txDate !== selectedDate) return false;
-    }
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      if (
-        !tx.transaction_number.toLowerCase().includes(q) &&
-        !tx.customer_name?.toLowerCase().includes(q) &&
-        !tx.payment_method.toLowerCase().includes(q)
-      ) return false;
-    }
-    if (paymentFilter !== 'all' && tx.payment_method !== paymentFilter) return false;
-    if (statusFilter !== 'all' && tx.status !== statusFilter) return false;
-    return true;
-  });
+  const totalPages = Math.max(1, Math.ceil(totalCount / TRANSACTIONS_PAGE_SIZE));
+  const rangeStart = totalCount === 0 ? 0 : (currentPage - 1) * TRANSACTIONS_PAGE_SIZE + 1;
+  const rangeEnd = totalCount === 0 ? 0 : Math.min(currentPage * TRANSACTIONS_PAGE_SIZE, totalCount);
 
   // Void handler
   const handleVoid = async () => {
@@ -169,15 +204,18 @@ const TransactionsPage: React.FC = () => {
             <input
               type="date"
               value={selectedDate}
-              onChange={e => setSelectedDate(e.target.value)}
+              onChange={e => {
+                setCurrentPage(1);
+                setSelectedDate(e.target.value);
+              }}
               className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
                 type="search"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
+                value={searchInput}
+                onChange={e => setSearchInput(e.target.value)}
                 placeholder="Search receipt #, customer..."
                 className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
@@ -188,7 +226,10 @@ const TransactionsPage: React.FC = () => {
           <div className="flex items-center gap-2 flex-shrink-0">
             <select
               value={paymentFilter}
-              onChange={e => setPaymentFilter(e.target.value)}
+              onChange={e => {
+                setCurrentPage(1);
+                setPaymentFilter(e.target.value);
+              }}
               className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
             >
               <option value="all">All Payments</option>
@@ -198,7 +239,10 @@ const TransactionsPage: React.FC = () => {
             </select>
             <select
               value={statusFilter}
-              onChange={e => setStatusFilter(e.target.value)}
+              onChange={e => {
+                setCurrentPage(1);
+                setStatusFilter(e.target.value);
+              }}
               className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
             >
               <option value="all">All Status</option>
@@ -223,7 +267,7 @@ const TransactionsPage: React.FC = () => {
           <div className="flex items-center justify-center py-20">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
           </div>
-        ) : filteredTransactions.length === 0 ? (
+        ) : transactions.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-gray-400">
             <Receipt className="w-12 h-12 mb-3" />
             <p className="text-lg font-medium">No transactions found</p>
@@ -231,7 +275,7 @@ const TransactionsPage: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-2">
-            {filteredTransactions.map(tx => (
+            {transactions.map(tx => (
               <button
                 key={tx.id}
                 onClick={() => setSelectedTransaction(tx)}
@@ -258,6 +302,31 @@ const TransactionsPage: React.FC = () => {
             ))}
           </div>
         )}
+      </div>
+
+      <div className="border-t border-gray-200 bg-white px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div className="text-sm text-gray-600">
+          Showing {rangeStart}-{rangeEnd} of {totalCount}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+            disabled={currentPage <= 1 || isLoading}
+            className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Previous
+          </button>
+          <span className="text-sm text-gray-700">
+            Page {currentPage} of {totalPages}
+          </span>
+          <button
+            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={currentPage >= totalPages || isLoading}
+            className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Next
+          </button>
+        </div>
       </div>
 
       {/* ─── Transaction Detail Drawer ─── */}
