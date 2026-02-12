@@ -6,6 +6,8 @@ import POSEODDashboard from './pages/EODDashboard';
 import TransactionsPage from './pages/TransactionsPage';
 import ReceiveItemsPage from './pages/ReceiveItemsPage';
 import SettingsPage from './pages/SettingsPage';
+import StocktakingPage from './pages/StocktakingPage';
+import TransferToOutletPage from './pages/TransferToOutletPage';
 import AppLayout from './components/layout/AppLayout';
 import { OutletProvider, useOutlet } from './contexts/OutletContext';
 import { Upload, Download, Plus, Wifi, WifiOff, ChevronDown } from 'lucide-react';
@@ -442,6 +444,24 @@ function AppContent() {
     </div>
   );
 
+  const stocktakingHeader = (
+    <div className="flex items-center justify-end w-full">
+      <div className="text-right">
+        <h2 className="text-lg sm:text-xl font-bold text-slate-900">Reconciliation &amp; Stocktaking</h2>
+        <p className="text-sm text-stone-500">Count physical stock and post variances in one action.</p>
+      </div>
+    </div>
+  );
+
+  const transferOutletHeader = (
+    <div className="flex items-center justify-end w-full">
+      <div className="text-right">
+        <h2 className="text-lg sm:text-xl font-bold text-slate-900">Transfer to Outlet</h2>
+        <p className="text-sm text-stone-500">Move stock between outlets with real-time quantity updates.</p>
+      </div>
+    </div>
+  );
+
   // Handle different terminal phases
   if (terminalPhase === 'setup') {
     return <TerminalSetup onSetupComplete={handleTerminalSetup} />;
@@ -459,13 +479,18 @@ function AppContent() {
 
   // Operational phase - normal POS functionality
   const normalizedStaffRole = (currentStaff?.role || '').toLowerCase();
-  const canAccessSettings = normalizedStaffRole === 'manager';
+  const isManager = normalizedStaffRole === 'manager';
+  const canAccessSettings = isManager;
   const canAccessReceive = normalizedStaffRole !== 'cashier';
   const canAccessEod = normalizedStaffRole !== 'cashier';
 
   const headerContent =
     location.pathname === '/products'
       ? productManagementHeader
+      : location.pathname === '/stocktaking'
+        ? stocktakingHeader
+        : location.pathname === '/transfer-outlet'
+          ? transferOutletHeader
       : location.pathname === '/'
         ? posTerminalHeader
         : null; // EOD and other pages handle their own headers
@@ -477,6 +502,8 @@ function AppContent() {
         <Route path="/transactions" element={<TransactionsPage />} />
         <Route path="/products" element={<ProductManagement ref={productManagementRef} />} />
         <Route path="/receive" element={canAccessReceive ? <ReceiveItemsPage /> : <Navigate to="/" replace />} />
+        <Route path="/stocktaking" element={isManager ? <StocktakingPage /> : <Navigate to="/" replace />} />
+        <Route path="/transfer-outlet" element={isManager ? <TransferToOutletPage /> : <Navigate to="/" replace />} />
         <Route path="/eod" element={canAccessEod ? <POSEODDashboard /> : <Navigate to="/" replace />} />
         <Route path="/settings" element={canAccessSettings ? <SettingsPage /> : <Navigate to="/" replace />} />
         <Route path="/auth" element={<AuthWrapper onAuthSuccess={() => window.location.href = '/'} />} />

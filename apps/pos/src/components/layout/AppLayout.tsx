@@ -15,6 +15,8 @@ import {
   Calendar,
   LogOut,
   Truck,
+  ClipboardCheck,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useOutlet } from '../../contexts/OutletContext';
@@ -26,7 +28,15 @@ interface AppLayoutProps {
 }
 
 // Sidebar navigation items
-const navItems = [
+interface NavItem {
+  path: string;
+  label: string;
+  sublabel: string;
+  icon: React.ComponentType<{ className?: string }>;
+  managerOnly?: boolean;
+}
+
+const navItems: NavItem[] = [
   {
     path: '/',
     label: 'Register',
@@ -52,6 +62,20 @@ const navItems = [
     icon: Truck,
   },
   {
+    path: '/stocktaking',
+    label: 'Stocktaking',
+    sublabel: 'Reconcile Inventory',
+    icon: ClipboardCheck,
+    managerOnly: true,
+  },
+  {
+    path: '/transfer-outlet',
+    label: 'Transfer Outlet',
+    sublabel: 'Move Stock',
+    icon: ArrowLeftRight,
+    managerOnly: true,
+  },
+  {
     path: '/eod',
     label: 'End of Day',
     sublabel: 'Close & Reconcile',
@@ -66,6 +90,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent, staffRol
   const navigate = useNavigate();
   const normalizedStaffRole = (staffRole || '').toLowerCase();
   const isCashier = normalizedStaffRole === 'cashier';
+  const isManager = normalizedStaffRole === 'manager';
   const canAccessSettings = normalizedStaffRole === 'manager';
 
   // Clock out handler – returns to staff auth (PIN entry), NOT main sign-in
@@ -84,6 +109,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent, staffRol
 
   const isActive = (path: string) => location.pathname === path;
   const visibleNavItems = navItems.filter((item) => {
+    if (item.managerOnly && !isManager) return false;
     if (isCashier && (item.path === '/receive' || item.path === '/eod')) return false;
     return true;
   });

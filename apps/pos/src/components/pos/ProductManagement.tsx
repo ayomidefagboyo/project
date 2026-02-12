@@ -64,15 +64,31 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
 
     try {
       setIsLoading(true);
-      const response = await posService.getProducts(currentOutlet.id, {
+      const cached = await posService.getCachedProducts(currentOutlet.id, {
         search: searchQuery || undefined,
         category: selectedCategory || undefined,
         activeOnly: false, // Show all products including inactive
-        size: 100 // API max limit
+        page: 1,
+        size: 20000
       });
 
-      setProducts(response?.items || []);
+      const hasCached = cached.items.length > 0;
+      setProducts(cached.items || []);
       setError(null);
+
+      const isOnlineNow = typeof navigator === 'undefined' ? true : navigator.onLine;
+      const shouldSyncFromBackend = !searchQuery.trim();
+      if (!isOnlineNow || !shouldSyncFromBackend) return;
+
+      await posService.syncProductCatalog(currentOutlet.id, { forceFull: !hasCached });
+      const refreshed = await posService.getCachedProducts(currentOutlet.id, {
+        search: searchQuery || undefined,
+        category: selectedCategory || undefined,
+        activeOnly: false,
+        page: 1,
+        size: 20000
+      });
+      setProducts(refreshed.items || []);
     } catch (err) {
       // Fallback to mock data when API is not available
       console.warn('API not available, using mock data:', err);

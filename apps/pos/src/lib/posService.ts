@@ -124,6 +124,14 @@ export interface ProductCreateRequest {
   expiry_date?: string;
 }
 
+export interface ProductListResult {
+  items: POSProduct[];
+  total: number;
+  page: number;
+  size: number;
+  offline?: boolean;
+}
+
 export interface InventoryStats {
   total_products: number;
   active_products: number;
@@ -281,6 +289,32 @@ export interface CreateTransferRequest {
   notes?: string;
 }
 
+export interface StockMovement {
+  id: string;
+  product_id: string;
+  outlet_id: string;
+  movement_type: 'sale' | 'return' | 'adjustment' | 'transfer_in' | 'transfer_out' | 'receive';
+  quantity_change: number;
+  quantity_before: number;
+  quantity_after: number;
+  reference_id?: string;
+  reference_type?: string;
+  unit_cost?: number;
+  total_value?: number;
+  notes?: string;
+  performed_by: string;
+  movement_date: string;
+}
+
+export interface StocktakeItem {
+  product_id: string;
+  current_quantity: number;
+  counted_quantity: number;
+  reason?: string;
+  notes?: string;
+  unit_cost?: number;
+}
+
 // ===============================================
 // ENHANCED TRANSACTION INTERFACES
 // ===============================================
@@ -303,6 +337,7 @@ export interface EnhancedCreateTransactionRequest extends CreateTransactionReque
 class POSService {
   private baseUrl = '/pos';
   private isInitialized = false;
+  private readonly productSyncPageSize = 100;
 
   constructor() {
     this.initializeOfflineDB();
@@ -316,6 +351,60 @@ class POSService {
     } catch (error) {
       logger.error('Failed to initialize offline database:', error);
     }
+  }
+
+  private getProductCursorSettingKey(outletId: string): string {
+    return `pos_products_cursor_${outletId}`;
+  }
+
+  private toTimestamp(value?: string | null): number {
+    if (!value) return 0;
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+
+  private getLatestUpdatedAt(items: POSProduct[]): string | null {
+    let latest: string | null = null;
+    let latestTs = 0;
+
+    for (const item of items) {
+      const ts = this.toTimestamp(item.updated_at);
+      if (ts > latestTs && item.updated_at) {
+        latestTs = ts;
+        latest = item.updated_at;
+      }
+    }
+
+    return latest;
+  }
+
+  private async fetchProductsPageFromApi(
+    outletId: string,
+    options: {
+      page: number;
+      size: number;
+      search?: string;
+      category?: string;
+      activeOnly?: boolean;
+      updatedAfter?: string;
+    }
+  ): Promise<ProductListResult> {
+    const safeSize = Math.min(Math.max(options.size, 1), this.productSyncPageSize);
+    const params = new URLSearchParams({
+      outlet_id: outletId,
+      page: options.page.toString(),
+      size: safeSize.toString(),
+      active_only: (options.activeOnly !== false).toString(),
+      ...options.search && { search: options.search },
+      ...options.category && { category: options.category },
+      ...options.updatedAfter && { updated_after: options.updatedAfter }
+    });
+
+    const response = await apiClient.get<ProductListResult>(`${this.baseUrl}/products?${params}`);
+    if (!response.data) {
+      throw new Error(response.error || 'Failed to fetch products');
+    }
+    return response.data;
   }
 
   // ===============================================
@@ -334,26 +423,24 @@ class POSService {
       category?: string;
       activeOnly?: boolean;
     } = {}
-  ) {
+  ): Promise<ProductListResult> {
     try {
-      // Try online first
-      const params = new URLSearchParams({
-        outlet_id: outletId,
-        page: (options.page || 1).toString(),
-        size: (options.size || 20).toString(),
-        active_only: (options.activeOnly !== false).toString(),
-        ...options.search && { search: options.search },
-        ...options.category && { category: options.category }
+      const requestedSize = options.size || 20;
+      const safeSize = Math.min(Math.max(requestedSize, 1), this.productSyncPageSize);
+      const response = await this.fetchProductsPageFromApi(outletId, {
+        page: options.page || 1,
+        size: safeSize,
+        search: options.search,
+        category: options.category,
+        activeOnly: options.activeOnly
       });
 
-      const response = await apiClient.get<{ items: POSProduct[]; total: number; page: number; size: number }>(`${this.baseUrl}/products?${params}`);
-
       // Cache products offline for future use
-      if (this.isInitialized && response.data?.items) {
-        await offlineDatabase.storeProducts(response.data.items);
+      if (this.isInitialized && response.items) {
+        await offlineDatabase.storeProducts(response.items);
       }
 
-      return response.data;
+      return response;
     } catch (error) {
       // Silently handle API errors when backend is not available
       if ((error as any)?.message?.includes('Network error') ||
@@ -370,11 +457,23 @@ class POSService {
           let filteredProducts: POSProduct[] = [];
 
           if (options.search) {
-            // Use optimized indexed search
-            filteredProducts = await offlineDatabase.searchProducts(outletId, options.search);
+            if (options.activeOnly === false) {
+              const query = options.search.toLowerCase();
+              const allProducts = await offlineDatabase.getAllProducts(outletId);
+              filteredProducts = allProducts.filter((product) =>
+                product.name.toLowerCase().includes(query) ||
+                product.sku.toLowerCase().includes(query) ||
+                (product.barcode || '').toLowerCase().includes(query)
+              );
+            } else {
+              // Use optimized indexed search
+              filteredProducts = await offlineDatabase.searchProducts(outletId, options.search);
+            }
           } else {
             // Get all products (optimized in Dexie to return all for outlet)
-            filteredProducts = await offlineDatabase.getProducts(outletId);
+            filteredProducts = options.activeOnly === false
+              ? await offlineDatabase.getAllProducts(outletId)
+              : await offlineDatabase.getProducts(outletId);
           }
 
           // Apply remaining filters (Category, Active)
@@ -388,15 +487,15 @@ class POSService {
 
           // Simple pagination for offline results
           const page = options.page || 1;
-          const size = options.size || 20;
+          const size = safeSize;
           const start = (page - 1) * size;
           const paginatedProducts = filteredProducts.slice(start, start + size);
 
           return {
             items: paginatedProducts,
             total: filteredProducts.length,
-            page: page,
-            size: size,
+            page,
+            size,
             offline: true
           };
         } catch (offlineError) {
@@ -406,6 +505,188 @@ class POSService {
 
       throw this.handleError(error);
     }
+  }
+
+  /**
+   * Read products from local cache only (no network).
+   */
+  async getCachedProducts(
+    outletId: string,
+    options: {
+      page?: number;
+      size?: number;
+      search?: string;
+      category?: string;
+      activeOnly?: boolean;
+    } = {}
+  ): Promise<ProductListResult> {
+    if (!this.isInitialized) {
+      return { items: [], total: 0, page: options.page || 1, size: options.size || 20, offline: true };
+    }
+
+    let filteredProducts: POSProduct[] = [];
+
+    if (options.search && options.search.trim()) {
+      if (options.activeOnly === false) {
+        const query = options.search.trim().toLowerCase();
+        const allProducts = await offlineDatabase.getAllProducts(outletId);
+        filteredProducts = allProducts.filter((product) =>
+          product.name.toLowerCase().includes(query) ||
+          product.sku.toLowerCase().includes(query) ||
+          (product.barcode || '').toLowerCase().includes(query)
+        );
+      } else {
+        filteredProducts = await offlineDatabase.searchProducts(outletId, options.search.trim());
+      }
+    } else {
+      filteredProducts = options.activeOnly === false
+        ? await offlineDatabase.getAllProducts(outletId)
+        : await offlineDatabase.getProducts(outletId);
+    }
+
+    if (options.category) {
+      filteredProducts = filteredProducts.filter(p => p.category === options.category);
+    }
+
+    if (options.activeOnly !== false) {
+      filteredProducts = filteredProducts.filter(p => p.is_active);
+    }
+
+    const page = options.page || 1;
+    const size = options.size || 20;
+    const start = (page - 1) * size;
+    const items = filteredProducts.slice(start, start + size);
+
+    return {
+      items,
+      total: filteredProducts.length,
+      page,
+      size,
+      offline: true
+    };
+  }
+
+  /**
+   * Synchronize full product catalog into local cache.
+   * - First sync for an outlet performs a full replace.
+   * - Subsequent syncs pull only rows changed since last cursor.
+   */
+  async syncProductCatalog(
+    outletId: string,
+    options: {
+      forceFull?: boolean;
+      maxPages?: number;
+    } = {}
+  ): Promise<{ mode: 'full' | 'delta'; updated: number }> {
+    if (!this.isInitialized) {
+      return { mode: options.forceFull ? 'full' : 'delta', updated: 0 };
+    }
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return { mode: options.forceFull ? 'full' : 'delta', updated: 0 };
+    }
+
+    const maxPages = options.maxPages || 300;
+    const cursorKey = this.getProductCursorSettingKey(outletId);
+    const existingCursor = await offlineDatabase.getSetting(cursorKey);
+    const mode: 'full' | 'delta' = options.forceFull || !existingCursor ? 'full' : 'delta';
+
+    let page = 1;
+    let updated = 0;
+    let latestCursor = typeof existingCursor === 'string' ? existingCursor : '';
+
+    if (mode === 'full') {
+      const allItems: POSProduct[] = [];
+
+      while (page <= maxPages) {
+        const response = await this.fetchProductsPageFromApi(outletId, {
+          page,
+          size: this.productSyncPageSize,
+          activeOnly: false
+        });
+
+        const items = response.items || [];
+        if (items.length === 0) break;
+
+        allItems.push(...items);
+        const latestInBatch = this.getLatestUpdatedAt(items);
+        if (latestInBatch && this.toTimestamp(latestInBatch) > this.toTimestamp(latestCursor)) {
+          latestCursor = latestInBatch;
+        }
+
+        if (items.length < this.productSyncPageSize) break;
+        page += 1;
+      }
+
+      await offlineDatabase.replaceOutletProducts(outletId, allItems);
+      updated = allItems.length;
+    } else {
+      while (page <= maxPages) {
+        const response = await this.fetchProductsPageFromApi(outletId, {
+          page,
+          size: this.productSyncPageSize,
+          activeOnly: false,
+          updatedAfter: existingCursor
+        });
+
+        const items = response.items || [];
+        if (items.length === 0) break;
+
+        await offlineDatabase.storeProducts(items);
+        updated += items.length;
+
+        const latestInBatch = this.getLatestUpdatedAt(items);
+        if (latestInBatch && this.toTimestamp(latestInBatch) > this.toTimestamp(latestCursor)) {
+          latestCursor = latestInBatch;
+        }
+
+        if (items.length < this.productSyncPageSize) break;
+        page += 1;
+      }
+    }
+
+    if (latestCursor) {
+      await offlineDatabase.storeSetting(cursorKey, latestCursor);
+    }
+
+    return { mode, updated };
+  }
+
+  /**
+   * Fetch all products for an outlet using paginated API calls.
+   */
+  async getAllProducts(
+    outletId: string,
+    options: {
+      activeOnly?: boolean;
+      search?: string;
+      category?: string;
+    } = {}
+  ): Promise<POSProduct[]> {
+    const pageSize = 100;
+    let page = 1;
+    let items: POSProduct[] = [];
+
+    while (page <= 200) {
+      const response = await this.getProducts(outletId, {
+        page,
+        size: pageSize,
+        activeOnly: options.activeOnly,
+        search: options.search,
+        category: options.category
+      });
+
+      const pageItems = response?.items || [];
+      items = items.concat(pageItems);
+
+      const total = response?.total || 0;
+      if (pageItems.length < pageSize || (total > 0 && items.length >= total)) {
+        break;
+      }
+      page += 1;
+    }
+
+    return items;
   }
 
   /**
@@ -943,9 +1224,11 @@ class POSService {
     } = {}
   ): Promise<{ items: InventoryTransfer[]; total: number; page: number; size: number }> {
     try {
+      const page = options.page || 1;
+      const size = options.size || 50;
       const params = new URLSearchParams({
-        skip: ((options.page || 1) - 1 * (options.size || 50)).toString(),
-        limit: (options.size || 50).toString(),
+        page: page.toString(),
+        size: size.toString(),
         ...options.outletId && { outlet_id: options.outletId },
         ...options.status && { status: options.status },
         ...options.dateFrom && { date_from: options.dateFrom },
@@ -985,13 +1268,115 @@ class POSService {
   ): Promise<InventoryTransfer> {
     try {
       const response = await apiClient.post<InventoryTransfer>(
-        `${this.baseUrl}/inventory-transfers/${transferId}/approve`,
+        `${this.baseUrl}/inventory/transfers/${transferId}/approve`,
         { approved, notes }
       );
       if (!response.data) throw new Error(response.error || 'Failed to update transfer');
       return response.data;
     } catch (error) {
       logger.error('Error approving inventory transfer:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Create a single stock adjustment movement.
+   */
+  async createStockAdjustment(adjustment: {
+    product_id: string;
+    outlet_id: string;
+    quantity_change: number;
+    performed_by: string;
+    notes?: string;
+    reference_id?: string;
+    reference_type?: string;
+    unit_cost?: number;
+  }): Promise<StockMovement> {
+    try {
+      const response = await apiClient.post<StockMovement>(
+        `${this.baseUrl}/inventory/adjustment`,
+        {
+          product_id: adjustment.product_id,
+          outlet_id: adjustment.outlet_id,
+          movement_type: 'adjustment',
+          quantity_change: adjustment.quantity_change,
+          reference_id: adjustment.reference_id,
+          reference_type: adjustment.reference_type || 'stocktake',
+          unit_cost: adjustment.unit_cost,
+          notes: adjustment.notes,
+          performed_by: adjustment.performed_by
+        }
+      );
+      if (!response.data) throw new Error(response.error || 'Failed to create stock adjustment');
+      return response.data;
+    } catch (error) {
+      logger.error('Error creating stock adjustment:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Apply a full stocktake by posting adjustments only where counted differs from system quantity.
+   */
+  async applyStocktake(params: {
+    outlet_id: string;
+    performed_by: string;
+    items: StocktakeItem[];
+  }): Promise<{ adjusted_count: number; unchanged_count: number; movements: StockMovement[] }> {
+    const movements: StockMovement[] = [];
+    let adjusted_count = 0;
+    let unchanged_count = 0;
+
+    for (const item of params.items) {
+      const quantity_change = item.counted_quantity - item.current_quantity;
+      if (quantity_change === 0) {
+        unchanged_count += 1;
+        continue;
+      }
+
+      const reasonPrefix = item.reason ? `[${item.reason}] ` : '';
+      const movement = await this.createStockAdjustment({
+        product_id: item.product_id,
+        outlet_id: params.outlet_id,
+        quantity_change,
+        performed_by: params.performed_by,
+        notes: `${reasonPrefix}${item.notes || 'Stocktake reconciliation adjustment'}`,
+        reference_type: 'stocktake',
+        unit_cost: item.unit_cost
+      });
+      adjusted_count += 1;
+      movements.push(movement);
+    }
+
+    return { adjusted_count, unchanged_count, movements };
+  }
+
+  /**
+   * Get stock movement history for an outlet.
+   */
+  async getStockMovements(options: {
+    outlet_id: string;
+    product_id?: string;
+    movement_type?: StockMovement['movement_type'];
+    date_from?: string;
+    date_to?: string;
+    limit?: number;
+  }): Promise<StockMovement[]> {
+    try {
+      const params = new URLSearchParams({
+        outlet_id: options.outlet_id,
+        ...options.product_id && { product_id: options.product_id },
+        ...options.movement_type && { movement_type: options.movement_type },
+        ...options.date_from && { date_from: options.date_from },
+        ...options.date_to && { date_to: options.date_to },
+        limit: String(options.limit || 100)
+      });
+
+      const response = await apiClient.get<StockMovement[]>(`${this.baseUrl}/inventory/movements?${params}`);
+      if (!response.data) throw new Error(response.error || 'Failed to fetch stock movements');
+      return response.data;
+    } catch (error) {
+      logger.error('Error fetching stock movements:', error);
       throw this.handleError(error);
     }
   }
