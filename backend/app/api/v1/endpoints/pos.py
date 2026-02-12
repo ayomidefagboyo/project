@@ -560,39 +560,59 @@ async def create_transaction(
 async def get_transactions(
     outlet_id: str,
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(50, ge=1, le=200, description="Page size"),
+    size: int = Query(50, ge=1, description="Page size"),
     date_from: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
     date_to: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
     cashier_id: Optional[str] = Query(None, description="Filter by cashier"),
     payment_method: Optional[PaymentMethod] = Query(None, description="Filter by payment method"),
+    status: Optional[TransactionStatus] = Query(None, description="Filter by transaction status"),
+    search: Optional[str] = Query(None, description="Search receipt number, customer, payment method, cashier"),
     current_user=Depends(CurrentUser())
 ):
     """Get transactions with filtering and pagination"""
     try:
         supabase = get_supabase_admin()
 
-        # Build query (alias pos_transaction_items -> items to match schema)
-        query = supabase.table('pos_transactions').select('*, items:pos_transaction_items(*)').eq('outlet_id', outlet_id)
+        def apply_filters(query_builder):
+            query_builder = query_builder.eq('outlet_id', outlet_id)
 
-        # Date filters should include the full calendar day.
-        if date_from:
-            # Start of day (inclusive)
-            query = query.gte('transaction_date', f"{date_from.isoformat()}T00:00:00")
-        if date_to:
-            # End of day (exclusive): start of the next day
-            end_exclusive = date_to + timedelta(days=1)
-            query = query.lt('transaction_date', f"{end_exclusive.isoformat()}T00:00:00")
-        if cashier_id:
-            query = query.eq('cashier_id', cashier_id)
-        if payment_method:
-            query = query.eq('payment_method', payment_method.value)
+            # Date filters should include the full calendar day.
+            if date_from:
+                query_builder = query_builder.gte('transaction_date', f"{date_from.isoformat()}T00:00:00")
+            if date_to:
+                end_exclusive = date_to + timedelta(days=1)
+                query_builder = query_builder.lt('transaction_date', f"{end_exclusive.isoformat()}T00:00:00")
+            if cashier_id:
+                query_builder = query_builder.eq('cashier_id', cashier_id)
+            if payment_method:
+                query_builder = query_builder.eq('payment_method', payment_method.value)
+            if status:
+                query_builder = query_builder.eq('status', status.value)
 
-        # Get total count
-        count_result = query.execute()
+            if search and search.strip():
+                term = search.strip().replace(',', ' ')
+                pattern = f"*{term}*"
+                query_builder = query_builder.or_(
+                    f"transaction_number.ilike.{pattern},"
+                    f"customer_name.ilike.{pattern},"
+                    f"payment_method.ilike.{pattern},"
+                    f"cashier_name.ilike.{pattern}"
+                )
+
+            return query_builder
+
+        # Count query kept lightweight for pagination metadata.
+        count_query = apply_filters(
+            supabase.table('pos_transactions').select('id')
+        )
+        count_result = count_query.execute()
         total = len(count_result.data) if count_result.data else 0
 
         # Apply pagination and ordering
         offset = (page - 1) * size
+        query = apply_filters(
+            supabase.table('pos_transactions').select('*, items:pos_transaction_items(*)')
+        )
         query = query.range(offset, offset + size - 1).order('transaction_date', desc=True)
 
         result = query.execute()

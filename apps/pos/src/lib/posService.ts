@@ -521,8 +521,10 @@ class POSService {
       date_to?: string;
       cashier_id?: string;
       payment_method?: PaymentMethod;
+      status?: string;
+      search?: string;
     } = {}
-  ) {
+  ): Promise<{ items: POSTransaction[]; total: number; page: number; size: number }> {
     try {
       const params = new URLSearchParams({
         outlet_id: outletId,
@@ -531,17 +533,27 @@ class POSService {
         ...options.date_from && { date_from: options.date_from },
         ...options.date_to && { date_to: options.date_to },
         ...options.cashier_id && { cashier_id: options.cashier_id },
-        ...options.payment_method && { payment_method: options.payment_method }
+        ...options.payment_method && { payment_method: options.payment_method },
+        ...options.status && { status: options.status },
+        ...options.search && { search: options.search.trim() }
       });
 
       const response = await apiClient.get<any>(`${this.baseUrl}/transactions?${params}`);
+      if (response.error || !response.data) {
+        throw new Error(response.error || 'Failed to fetch transactions');
+      }
 
       // Always cache all fetched transactions for multiple terminal access
       if (this.isInitialized && response.data?.items && response.data.items.length > 0) {
         await offlineDatabase.storeTransactions(response.data.items);
       }
 
-      return response.data;
+      return {
+        items: response.data.items || [],
+        total: response.data.total || 0,
+        page: response.data.page || options.page || 1,
+        size: response.data.size || options.size || 50,
+      };
     } catch (error) {
       logger.error('Error fetching transactions:', error);
       throw this.handleError(error);
