@@ -20,6 +20,14 @@ import ReceiptEditor from '../components/settings/ReceiptEditor';
 import HardwareSetupTab from '../components/settings/HardwareSetupTab';
 import { useOutlet } from '../contexts/OutletContext';
 import { useTerminalId } from '../hooks/useTerminalId';
+import { dataService } from '../lib/dataService';
+import {
+  DEFAULT_BRAND_COLOR,
+  applyBrandColorToDocument,
+  mergeBrandColorIntoTerminalSettings,
+  normalizeBrandColor,
+  resolveBrandColorFromSettings,
+} from '../lib/brandTheme';
 
 interface SettingsTab {
   id: string;
@@ -83,11 +91,15 @@ const colorMap: Record<string, { bg: string; text: string; icon: string; border:
   teal: { bg: 'bg-teal-50', text: 'text-teal-900', icon: 'bg-teal-600', border: 'border-teal-200', hover: 'hover:bg-teal-100' }
 };
 
+const brandColorPresets = ['#0f172a', '#1d4ed8', '#15803d', '#b45309', '#be123c', '#0f766e'];
+
 const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('receipts');
   const [darkMode, setDarkMode] = useState(false);
   const [systemPreference, setSystemPreference] = useState<'light' | 'dark' | 'system'>('system');
-  const { currentOutlet, currentUser } = useOutlet();
+  const [brandColor, setBrandColor] = useState(DEFAULT_BRAND_COLOR);
+  const [brandColorStatus, setBrandColorStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const { currentOutlet, currentUser, businessSettings, setBusinessSettings } = useOutlet();
   const { terminalId } = useTerminalId();
 
   // Initialize theme on component mount
@@ -101,6 +113,12 @@ const SettingsPage: React.FC = () => {
     const isDark = document.documentElement.classList.contains('dark');
     setDarkMode(isDark);
   }, []);
+
+  useEffect(() => {
+    const resolved = resolveBrandColorFromSettings(businessSettings);
+    setBrandColor(resolved);
+    applyBrandColorToDocument(resolved);
+  }, [businessSettings]);
 
   // Apply theme changes
   const applyTheme = (preference: 'light' | 'dark' | 'system') => {
@@ -124,6 +142,62 @@ const SettingsPage: React.FC = () => {
     }
   };
 
+  const handleBrandColorChange = (color: string) => {
+    const normalized = normalizeBrandColor(color);
+    setBrandColor(normalized);
+    setBrandColorStatus('idle');
+    applyBrandColorToDocument(normalized);
+  };
+
+  const saveBrandColor = async () => {
+    if (!currentOutlet?.id) return;
+
+    setBrandColorStatus('saving');
+
+    const mergedTerminalSettings = mergeBrandColorIntoTerminalSettings(
+      businessSettings?.pos_terminal_settings,
+      brandColor
+    );
+
+    const withDefaults = (payload: Record<string, unknown>): Record<string, unknown> => {
+      if (businessSettings) return payload;
+
+      return {
+        ...payload,
+        business_name: currentOutlet.name,
+        business_type: currentOutlet.businessType || 'retail',
+        theme: 'auto',
+        language: 'en',
+        date_format: 'MM/DD/YYYY',
+        time_format: '12h',
+        currency: currentOutlet.currency || 'NGN',
+        timezone: currentOutlet.timezone || 'Africa/Lagos',
+      };
+    };
+
+    let response = await dataService.updateBusinessSettings(
+      currentOutlet.id,
+      withDefaults({ brand_color: brandColor }) as any
+    );
+
+    // Backward-compatible fallback for databases using JSON settings only.
+    if (response.error && response.error.toLowerCase().includes('brand_color')) {
+      response = await dataService.updateBusinessSettings(
+        currentOutlet.id,
+        withDefaults({ pos_terminal_settings: mergedTerminalSettings }) as any
+      );
+    }
+
+    if (response.error || !response.data) {
+      setBrandColorStatus('error');
+      return;
+    }
+
+    setBusinessSettings(response.data);
+    setBrandColorStatus('saved');
+    setTimeout(() => setBrandColorStatus('idle'), 1500);
+  };
+
   const renderTabContent = () => {
     switch (activeTab) {
       case 'receipts':
@@ -134,6 +208,11 @@ const SettingsPage: React.FC = () => {
             darkMode={darkMode}
             systemPreference={systemPreference}
             onThemeChange={applyTheme}
+            brandColor={brandColor}
+            onBrandColorChange={handleBrandColorChange}
+            onSaveBrandColor={saveBrandColor}
+            brandColorStatus={brandColorStatus}
+            canEditBrandColor={!!currentOutlet?.id}
           />
         );
       case 'hardware':
@@ -223,9 +302,23 @@ interface AppearanceTabProps {
   darkMode: boolean;
   systemPreference: 'light' | 'dark' | 'system';
   onThemeChange: (preference: 'light' | 'dark' | 'system') => void;
+  brandColor: string;
+  onBrandColorChange: (color: string) => void;
+  onSaveBrandColor: () => void;
+  brandColorStatus: 'idle' | 'saving' | 'saved' | 'error';
+  canEditBrandColor: boolean;
 }
 
-const AppearanceTab: React.FC<AppearanceTabProps> = ({ darkMode, systemPreference, onThemeChange }) => (
+const AppearanceTab: React.FC<AppearanceTabProps> = ({
+  darkMode,
+  systemPreference,
+  onThemeChange,
+  brandColor,
+  onBrandColorChange,
+  onSaveBrandColor,
+  brandColorStatus,
+  canEditBrandColor,
+}) => (
   <div className="p-6">
     <div className="max-w-4xl">
       <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Appearance</h2>
@@ -298,6 +391,56 @@ const AppearanceTab: React.FC<AppearanceTabProps> = ({ darkMode, systemPreferenc
             </span>
           </div>
         </div>
+      </div>
+
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Outlet Brand Color</h3>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+          Sets the primary action color for this outlet across all POS terminals.
+        </p>
+
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <input
+            type="color"
+            value={brandColor}
+            onChange={(e) => onBrandColorChange(e.target.value)}
+            disabled={!canEditBrandColor || brandColorStatus === 'saving'}
+            className="h-11 w-16 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 p-1 cursor-pointer disabled:cursor-not-allowed"
+          />
+
+          <div className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm font-mono text-gray-700 dark:text-gray-200 min-w-[110px]">
+            {brandColor}
+          </div>
+
+          <button
+            onClick={onSaveBrandColor}
+            disabled={!canEditBrandColor || brandColorStatus === 'saving'}
+            className="px-4 py-2.5 rounded-lg text-sm font-semibold btn-brand disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {brandColorStatus === 'saving' ? 'Saving...' : 'Save Color'}
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          {brandColorPresets.map((preset) => (
+            <button
+              key={preset}
+              onClick={() => onBrandColorChange(preset)}
+              className={`h-8 w-8 rounded-full border-2 transition-all ${
+                brandColor === preset ? 'border-gray-900 dark:border-white scale-105' : 'border-gray-300 dark:border-gray-600'
+              }`}
+              style={{ backgroundColor: preset }}
+              title={`Use ${preset}`}
+            />
+          ))}
+        </div>
+
+        {brandColorStatus === 'saved' && (
+          <p className="text-sm text-green-600 dark:text-green-400">Brand color saved for this outlet.</p>
+        )}
+        {brandColorStatus === 'error' && (
+          <p className="text-sm text-red-600 dark:text-red-400">Could not save brand color. Please retry.</p>
+        )}
       </div>
     </div>
   </div>

@@ -334,6 +334,13 @@ export interface BusinessSettings {
   timeFormat: '12h' | '24h';
   currency: string;
   timezone: string;
+  brand_color?: string;
+  pos_terminal_settings?: {
+    brandColor?: string;
+    brand_color?: string;
+    [key: string]: unknown;
+  };
+  pos_security_prefs?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }

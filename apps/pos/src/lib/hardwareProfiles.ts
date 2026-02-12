@@ -1,3 +1,12 @@
+import {
+  type HardwareBrand,
+  type HardwareCapabilityOverrides,
+  type HardwareConnection,
+  inferHardwareAdapterId,
+  inferHardwareBrand,
+  inferHardwareConnection,
+} from './hardwareAdapters';
+
 export type HardwareConnectionStatus = 'connected' | 'disconnected';
 export type AutoOpenDrawerMode = 'on-sale' | 'cash-only' | 'manual';
 export type AutoPrintMode = 'always' | 'ask' | 'never';
@@ -12,29 +21,29 @@ export interface HardwarePolicyProfile {
   duplicateReceiptsEnabled: boolean;
 }
 
-export interface PrinterConfig {
+interface BaseHardwareDeviceConfig {
   id: string;
   name: string;
+  status: HardwareConnectionStatus;
+  profileId: string;
+  brand: HardwareBrand | string;
+  model: string;
+  connection: HardwareConnection | string;
+  adapterId: string;
+  capabilities?: HardwareCapabilityOverrides;
+}
+
+export interface PrinterConfig extends BaseHardwareDeviceConfig {
   type: 'thermal' | 'label' | string;
-  status: HardwareConnectionStatus;
   defaultPrint: 'receipts' | 'labels' | string;
-  profileId: string;
 }
 
-export interface ScannerConfig {
-  id: string;
-  name: string;
-  type: 'usb' | 'bluetooth' | string;
-  status: HardwareConnectionStatus;
-  profileId: string;
+export interface ScannerConfig extends BaseHardwareDeviceConfig {
+  type: 'usb' | 'bluetooth' | 'integrated' | string;
 }
 
-export interface CashDrawerConfig {
-  id: string;
-  name: string;
-  type: 'rj11' | string;
-  status: HardwareConnectionStatus;
-  profileId: string;
+export interface CashDrawerConfig extends BaseHardwareDeviceConfig {
+  type: 'rj11' | 'serial' | 'usb' | 'network' | string;
 }
 
 export interface HardwareState {
@@ -73,6 +82,10 @@ const defaultPrinters: PrinterConfig[] = [
     status: 'connected',
     defaultPrint: 'receipts',
     profileId: DEFAULT_HARDWARE_PROFILE_ID,
+    brand: 'generic',
+    model: 'Generic 80mm Thermal',
+    connection: 'usb',
+    adapterId: 'printer-generic-escpos',
   },
   {
     id: 'label-1',
@@ -81,6 +94,10 @@ const defaultPrinters: PrinterConfig[] = [
     status: 'disconnected',
     defaultPrint: 'labels',
     profileId: DEFAULT_HARDWARE_PROFILE_ID,
+    brand: 'zebra',
+    model: 'ZD220',
+    connection: 'usb',
+    adapterId: 'printer-zebra-label',
   },
 ];
 
@@ -91,6 +108,10 @@ const defaultScanners: ScannerConfig[] = [
     type: 'usb',
     status: 'connected',
     profileId: DEFAULT_HARDWARE_PROFILE_ID,
+    brand: 'generic',
+    model: '1D/2D USB Scanner',
+    connection: 'usb',
+    adapterId: 'scanner-generic',
   },
 ];
 
@@ -101,6 +122,10 @@ const defaultCashDrawers: CashDrawerConfig[] = [
     type: 'rj11',
     status: 'connected',
     profileId: DEFAULT_HARDWARE_PROFILE_ID,
+    brand: 'generic',
+    model: 'RJ11 Cash Drawer',
+    connection: 'rj11',
+    adapterId: 'drawer-rj11',
   },
 ];
 
@@ -119,6 +144,32 @@ const asAutoPrintMode = (value: unknown): AutoPrintMode =>
   value === 'always' || value === 'ask' || value === 'never'
     ? value
     : defaultHardwareProfile.autoPrintMode;
+
+const asNonEmptyString = (value: unknown, fallback: string): string =>
+  typeof value === 'string' && value.trim().length > 0 ? value.trim() : fallback;
+
+const sanitizeCapabilities = (value: unknown): HardwareCapabilityOverrides | undefined => {
+  if (!isObject(value)) return undefined;
+
+  const next: HardwareCapabilityOverrides = {};
+  const keys: Array<keyof HardwareCapabilityOverrides> = [
+    'receiptPrint',
+    'labelPrint',
+    'openDrawer',
+    'cutPaper',
+    'barcodeScan',
+    'scannerBeep',
+  ];
+
+  for (const key of keys) {
+    const raw = value[key];
+    if (typeof raw === 'boolean') {
+      next[key] = raw;
+    }
+  }
+
+  return Object.keys(next).length > 0 ? next : undefined;
+};
 
 export const createHardwareProfileId = (): string =>
   `policy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -156,7 +207,10 @@ const buildProfileFromLegacyPrefs = (prefs?: LegacyHardwarePrefs): HardwarePolic
     prefs?.duplicateReceiptsEnabled ?? defaultHardwareProfile.duplicateReceiptsEnabled,
 });
 
-const sanitizeProfiles = (rawProfiles: unknown, legacyPrefs?: LegacyHardwarePrefs): HardwarePolicyProfile[] => {
+const sanitizeProfiles = (
+  rawProfiles: unknown,
+  legacyPrefs?: LegacyHardwarePrefs
+): HardwarePolicyProfile[] => {
   if (!Array.isArray(rawProfiles) || rawProfiles.length === 0) {
     return [buildProfileFromLegacyPrefs(legacyPrefs)];
   }
@@ -196,7 +250,10 @@ const getValidProfileId = (
   profiles: HardwarePolicyProfile[],
   fallbackProfileId: string
 ): string => {
-  if (typeof requestedProfileId === 'string' && profiles.some((profile) => profile.id === requestedProfileId)) {
+  if (
+    typeof requestedProfileId === 'string' &&
+    profiles.some((profile) => profile.id === requestedProfileId)
+  ) {
     return requestedProfileId;
   }
   return fallbackProfileId;
@@ -208,85 +265,125 @@ export const normalizeHardwareState = (raw: unknown): HardwareState => {
 
   const legacyPrefs = isObject(raw.prefs) ? (raw.prefs as LegacyHardwarePrefs) : undefined;
   const profiles = sanitizeProfiles(raw.profiles, legacyPrefs);
-  const terminalDefaultProfileId = getValidProfileId(raw.terminalDefaultProfileId, profiles, profiles[0].id);
+  const terminalDefaultProfileId = getValidProfileId(
+    raw.terminalDefaultProfileId,
+    profiles,
+    profiles[0].id
+  );
 
   const normalizedPrinters = Array.isArray(raw.printers)
     ? raw.printers
         .filter((printer): printer is Record<string, unknown> => isObject(printer))
-        .map((printer, index) => ({
-          id:
-            typeof printer.id === 'string' && printer.id.trim().length > 0
-              ? printer.id
-              : `printer-${index + 1}`,
-          name:
-            typeof printer.name === 'string' && printer.name.trim().length > 0
-              ? printer.name
-              : `Printer ${index + 1}`,
-          type:
-            typeof printer.type === 'string' && printer.type.trim().length > 0
-              ? printer.type
-              : 'thermal',
-          status: asConnectionStatus(printer.status),
-          defaultPrint:
-            typeof printer.defaultPrint === 'string' && printer.defaultPrint.trim().length > 0
-              ? printer.defaultPrint
-              : 'receipts',
-          profileId: getValidProfileId(
-            (printer as Record<string, unknown>).profileId,
-            profiles,
-            terminalDefaultProfileId
-          ),
-        }))
+        .map((printer, index) => {
+          const type = asNonEmptyString(printer.type, 'thermal');
+          const brand = inferHardwareBrand(printer.brand, 'printer');
+          const connection = inferHardwareConnection(printer.connection, 'printer');
+          const adapterId = inferHardwareAdapterId({
+            kind: 'printer',
+            brand,
+            type,
+            connection,
+            requestedAdapterId:
+              typeof printer.adapterId === 'string' && printer.adapterId.trim().length > 0
+                ? printer.adapterId
+                : undefined,
+          });
+
+          return {
+            id: asNonEmptyString(printer.id, `printer-${index + 1}`),
+            name: asNonEmptyString(printer.name, `Printer ${index + 1}`),
+            type,
+            status: asConnectionStatus(printer.status),
+            defaultPrint: asNonEmptyString(printer.defaultPrint, 'receipts'),
+            profileId: getValidProfileId(
+              (printer as Record<string, unknown>).profileId,
+              profiles,
+              terminalDefaultProfileId
+            ),
+            brand,
+            model: asNonEmptyString(
+              printer.model,
+              type === 'label' ? `${brand.toUpperCase()} Label Printer` : `${brand.toUpperCase()} Receipt Printer`
+            ),
+            connection,
+            adapterId,
+            capabilities: sanitizeCapabilities(printer.capabilities),
+          } as PrinterConfig;
+        })
     : defaults.printers;
 
   const normalizedScanners = Array.isArray(raw.scanners)
     ? raw.scanners
         .filter((scanner): scanner is Record<string, unknown> => isObject(scanner))
-        .map((scanner, index) => ({
-          id:
-            typeof scanner.id === 'string' && scanner.id.trim().length > 0
-              ? scanner.id
-              : `scanner-${index + 1}`,
-          name:
-            typeof scanner.name === 'string' && scanner.name.trim().length > 0
-              ? scanner.name
-              : `Scanner ${index + 1}`,
-          type:
-            typeof scanner.type === 'string' && scanner.type.trim().length > 0
-              ? scanner.type
-              : 'usb',
-          status: asConnectionStatus(scanner.status),
-          profileId: getValidProfileId(
-            (scanner as Record<string, unknown>).profileId,
-            profiles,
-            terminalDefaultProfileId
-          ),
-        }))
+        .map((scanner, index) => {
+          const type = asNonEmptyString(scanner.type, 'usb');
+          const brand = inferHardwareBrand(scanner.brand, 'scanner');
+          const connection = inferHardwareConnection(scanner.connection ?? type, 'scanner');
+          const adapterId = inferHardwareAdapterId({
+            kind: 'scanner',
+            brand,
+            type,
+            connection,
+            requestedAdapterId:
+              typeof scanner.adapterId === 'string' && scanner.adapterId.trim().length > 0
+                ? scanner.adapterId
+                : undefined,
+          });
+
+          return {
+            id: asNonEmptyString(scanner.id, `scanner-${index + 1}`),
+            name: asNonEmptyString(scanner.name, `Scanner ${index + 1}`),
+            type,
+            status: asConnectionStatus(scanner.status),
+            profileId: getValidProfileId(
+              (scanner as Record<string, unknown>).profileId,
+              profiles,
+              terminalDefaultProfileId
+            ),
+            brand,
+            model: asNonEmptyString(scanner.model, `${brand.toUpperCase()} Barcode Scanner`),
+            connection,
+            adapterId,
+            capabilities: sanitizeCapabilities(scanner.capabilities),
+          } as ScannerConfig;
+        })
     : defaults.scanners;
 
   const normalizedCashDrawers = Array.isArray(raw.cashDrawers)
     ? raw.cashDrawers
         .filter((drawer): drawer is Record<string, unknown> => isObject(drawer))
-        .map((drawer, index) => ({
-          id:
-            typeof drawer.id === 'string' && drawer.id.trim().length > 0
-              ? drawer.id
-              : `drawer-${index + 1}`,
-          name:
-            typeof drawer.name === 'string' && drawer.name.trim().length > 0
-              ? drawer.name
-              : `Drawer ${index + 1}`,
-          type:
-            typeof drawer.type === 'string' && drawer.type.trim().length > 0
-              ? drawer.type
-              : 'rj11',
-          status: asConnectionStatus(drawer.status),
-          profileId: getValidProfileId(
-            (drawer as Record<string, unknown>).profileId,
-            profiles,
-            terminalDefaultProfileId
-          ),
-        }))
+        .map((drawer, index) => {
+          const type = asNonEmptyString(drawer.type, 'rj11');
+          const brand = inferHardwareBrand(drawer.brand, 'drawer');
+          const connection = inferHardwareConnection(drawer.connection ?? type, 'drawer');
+          const adapterId = inferHardwareAdapterId({
+            kind: 'drawer',
+            brand,
+            type,
+            connection,
+            requestedAdapterId:
+              typeof drawer.adapterId === 'string' && drawer.adapterId.trim().length > 0
+                ? drawer.adapterId
+                : undefined,
+          });
+
+          return {
+            id: asNonEmptyString(drawer.id, `drawer-${index + 1}`),
+            name: asNonEmptyString(drawer.name, `Drawer ${index + 1}`),
+            type,
+            status: asConnectionStatus(drawer.status),
+            profileId: getValidProfileId(
+              (drawer as Record<string, unknown>).profileId,
+              profiles,
+              terminalDefaultProfileId
+            ),
+            brand,
+            model: asNonEmptyString(drawer.model, `${brand.toUpperCase()} Cash Drawer`),
+            connection,
+            adapterId,
+            capabilities: sanitizeCapabilities(drawer.capabilities),
+          } as CashDrawerConfig;
+        })
     : defaults.cashDrawers;
 
   return {
@@ -341,13 +438,31 @@ export const resolveHardwarePolicy = (
   );
 };
 
-export const resolveReceiptPolicy = (state: HardwareState): HardwarePolicyProfile => {
-  const preferredPrinter =
-    state.printers.find((printer) => printer.defaultPrint === 'receipts' && printer.status === 'connected') ||
-    state.printers.find((printer) => printer.defaultPrint === 'receipts') ||
-    state.printers.find((printer) => printer.status === 'connected') ||
-    state.printers[0];
+export const resolveReceiptPrinter = (state: HardwareState): PrinterConfig | undefined =>
+  state.printers.find(
+    (printer) => printer.defaultPrint === 'receipts' && printer.status === 'connected'
+  ) ||
+  state.printers.find((printer) => printer.defaultPrint === 'receipts') ||
+  state.printers.find((printer) => printer.status === 'connected') ||
+  state.printers[0];
 
-  return resolveHardwarePolicy(state, preferredPrinter?.profileId || state.terminalDefaultProfileId);
+export const resolvePrimaryCashDrawer = (
+  state: HardwareState,
+  preferredProfileId?: string
+): CashDrawerConfig | undefined => {
+  if (state.cashDrawers.length === 0) return undefined;
+
+  return (
+    state.cashDrawers.find(
+      (drawer) => drawer.status === 'connected' && drawer.profileId === preferredProfileId
+    ) ||
+    state.cashDrawers.find((drawer) => drawer.status === 'connected') ||
+    state.cashDrawers.find((drawer) => drawer.profileId === preferredProfileId) ||
+    state.cashDrawers[0]
+  );
 };
 
+export const resolveReceiptPolicy = (state: HardwareState): HardwarePolicyProfile => {
+  const preferredPrinter = resolveReceiptPrinter(state);
+  return resolveHardwarePolicy(state, preferredPrinter?.profileId || state.terminalDefaultProfileId);
+};

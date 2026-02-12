@@ -37,6 +37,10 @@
     --input: 0 0% 90%;
     --ring: 215 28% 17%;
 
+    /* Outlet brand color (customizable in Settings) */
+    --brand-color: #0f172a;
+    --brand-color-rgb: 15, 23, 42;
+
     /* Fixed POS Layout Dimensions */
     --pos-header-height: 80px;
     --pos-search-height: 72px;
@@ -202,6 +206,31 @@
     height: var(--touch-target-md);
     font-size: var(--text-label);
     touch-action: manipulation;
+  }
+
+  .btn-brand {
+    background-color: var(--brand-color);
+    color: #fff;
+  }
+
+  .btn-brand:hover {
+    filter: brightness(0.92);
+  }
+
+  .btn-brand:disabled {
+    filter: none;
+  }
+
+  .text-brand {
+    color: var(--brand-color);
+  }
+
+  .bg-brand-soft {
+    background-color: rgba(var(--brand-color-rgb), 0.12);
+  }
+
+  .border-brand-soft {
+    border-color: rgba(var(--brand-color-rgb), 0.28);
   }
 
   /* Product Cards */

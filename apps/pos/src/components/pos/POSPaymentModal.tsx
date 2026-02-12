@@ -273,7 +273,7 @@ const POSPaymentModal: React.FC<POSPaymentModalProps> = ({
                   </div>
                   <div className="border-t-2 border-slate-300 pt-3 flex justify-between text-2xl font-bold">
                     <span>Total:</span>
-                    <span className="text-indigo-600">{formatCurrency(totals.total)}</span>
+                    <span className="text-brand">{formatCurrency(totals.total)}</span>
                   </div>
                 </div>
 
@@ -306,10 +306,10 @@ const POSPaymentModal: React.FC<POSPaymentModalProps> = ({
                   key={index}
                   onClick={() => handlePaymentMethodSelect(payment.method)}
                   className={`
-                    h-16 text-white font-bold text-lg rounded-lg transition-all touch-action-manipulation
+                    h-16 font-bold text-lg rounded-lg transition-all touch-action-manipulation
                     ${payment.active
-                      ? 'bg-orange-700 border-4 border-orange-800 shadow-lg'
-                      : 'bg-orange-600 hover:bg-orange-700 border-2 border-orange-400'
+                      ? 'btn-brand border-2 border-transparent shadow-lg text-white'
+                      : 'bg-brand-soft border-2 border-brand-soft text-brand hover:opacity-90'
                     }
                   `}
                 >
@@ -325,13 +325,13 @@ const POSPaymentModal: React.FC<POSPaymentModalProps> = ({
             <div className="flex gap-3">
               <button
                 onClick={onCancel}
-                className="h-16 px-6 bg-orange-600 hover:bg-orange-700 text-white font-bold text-lg rounded-lg transition-colors"
+                className="h-16 px-6 btn-brand text-white font-bold text-lg rounded-lg transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={() => {/* Email functionality */}}
-                className="h-16 px-6 bg-orange-600 hover:bg-orange-700 text-white font-bold text-lg rounded-lg transition-colors"
+                className="h-16 px-6 btn-brand text-white font-bold text-lg rounded-lg transition-colors"
               >
                 Save &amp; Email
               </button>
@@ -341,20 +341,20 @@ const POSPaymentModal: React.FC<POSPaymentModalProps> = ({
             <div className="flex gap-3">
               <button
                 onClick={() => {/* Hold functionality */}}
-                className="h-16 px-6 bg-orange-600 hover:bg-orange-700 text-white font-bold text-lg rounded-lg transition-colors"
+                className="h-16 px-6 btn-brand text-white font-bold text-lg rounded-lg transition-colors"
               >
                 Put on Hold
               </button>
               <button
                 onClick={() => {/* Save functionality */}}
-                className="h-16 px-6 bg-orange-600 hover:bg-orange-700 text-white font-bold text-lg rounded-lg transition-colors"
+                className="h-16 px-6 btn-brand text-white font-bold text-lg rounded-lg transition-colors"
               >
                 Save Only
               </button>
               <button
                 onClick={handleProcessPayment}
                 disabled={!isValidCashPayment || isProcessing}
-                className="h-16 px-6 bg-orange-700 hover:bg-orange-800 disabled:bg-slate-400 disabled:cursor-not-allowed text-white font-bold text-lg rounded-lg transition-colors flex items-center justify-center space-x-2"
+                className="h-16 px-6 btn-brand disabled:bg-slate-400 disabled:cursor-not-allowed text-white font-bold text-lg rounded-lg transition-colors flex items-center justify-center space-x-2"
               >
                 {isProcessing ? (
                   <>
