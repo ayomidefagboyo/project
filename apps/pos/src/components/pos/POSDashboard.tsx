@@ -3,7 +3,7 @@
  * Nigerian Supermarket Focus
  */
 
-import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import {
   AlertCircle,
   Plus,
@@ -43,6 +43,7 @@ import NoStaffMessage from './NoStaffMessage';
 import ClockOutConfirmModal from '../modals/ClockOutConfirmModal';
 import LoginForm from '../auth/LoginForm';
 import TransactionHistory from './TransactionHistory';
+import { loadHardwareState, resolveReceiptPolicy } from '../../lib/hardwareProfiles';
 
 export interface CartItem {
   product: POSProduct;
@@ -74,7 +75,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   // Context and state
   const { currentUser, currentOutlet } = useOutlet();
   const { terminalId } = useTerminalId();
-  const { toasts, success, error, removeToast } = useToast();
+  const { toasts, success, error, warning, removeToast } = useToast();
 
   // POS State
   const [products, setProducts] = useState<POSProduct[]>([]);
@@ -87,6 +88,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
 
   // UI State
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showClearCartConfirm, setShowClearCartConfirm] = useState(false);
+  const [showPrintDecisionModal, setShowPrintDecisionModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [posError, setPosError] = useState<string | null>(null);
   const [tenderModal, setTenderModal] = useState<{
@@ -94,6 +97,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     amount: string;
     error?: string;
   } | null>(null);
+  const printDecisionResolverRef = useRef<((value: boolean) => void) | null>(null);
 
   // Split Payment State
   const [activePayments, setActivePayments] = useState<{
@@ -155,6 +159,11 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     }).format(amount);
   };
 
+  const getHardwarePolicyForTerminal = (outletId?: string, activeTerminalId?: string) => {
+    const hardwareState = loadHardwareState(outletId, activeTerminalId);
+    return resolveReceiptPolicy(hardwareState);
+  };
+
   // Determine what screen to show based on authentication state
   const getScreenToShow = (): 'manager_login' | 'no_staff' | 'pos_dashboard' => {
     // If no user is authenticated, show manager login
@@ -198,15 +207,28 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
 
       // Escape to clear cart
       if (e.key === 'Escape' && cart.length > 0) {
-        if (confirm('Clear cart?')) {
-          clearCart();
-        }
+        e.preventDefault();
+        setShowClearCartConfirm(true);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [cart]);
+
+  const requestPrintDecision = (): Promise<boolean> =>
+    new Promise((resolve) => {
+      printDecisionResolverRef.current = resolve;
+      setShowPrintDecisionModal(true);
+    });
+
+  const resolvePrintDecision = (decision: boolean) => {
+    if (printDecisionResolverRef.current) {
+      printDecisionResolverRef.current(decision);
+      printDecisionResolverRef.current = null;
+    }
+    setShowPrintDecisionModal(false);
+  };
 
   // Initialize cash drawer session on mount
   useEffect(() => {
@@ -592,7 +614,13 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
             cart: r.items.map((item: any) => ({
               product: {
                 id: item.product_id,
-                name: item.product_name || (item.product && item.product.name) || 'Product',
+                // Older held receipts may store placeholder "Product". Resolve using loaded catalog if possible.
+                name: (() => {
+                  const raw = (item.product_name || (item.product && item.product.name) || '').trim();
+                  if (raw && raw.toLowerCase() !== 'product') return raw;
+                  const matched = products.find((p) => p.id === item.product_id);
+                  return matched?.name || item.sku || 'Product';
+                })(),
                 unit_price: item.unit_price,
                 tax_rate: item.tax_rate || 0.075,
                 quantity_on_hand: 0, // Will be fetched when needed
@@ -658,7 +686,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     };
 
     loadHeldReceipts();
-  }, [currentOutlet?.id, isOnline, heldStorageKey]);
+  }, [currentOutlet?.id, isOnline, heldStorageKey, products]);
 
   const persistHeldSales = async (sales: HeldSale[]) => {
     if (!currentOutlet?.id) return;
@@ -729,22 +757,43 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
             total: totals.total,
           });
 
-          // Update the locally stored held sale with the real backend ID and mark as synced
-          const syncedList: HeldSale[] = updatedLocal.map(held =>
-            held.id === localId
-              ? {
-                  ...held,
-                  id: receipt.id,
-                  saved_at: receipt.saved_at,
-                  total: receipt.total,
-                  cashier_id: receipt.cashier_id,
-                  cashier_name: receipt.cashier_name,
-                  synced: true,
-                }
-              : held
-          );
+          // Update the held sale only if it still exists in state.
+          // If cashier already loaded/removed it, delete backend copy to avoid re-appearing rows.
+          let removedBeforeSync = false;
+          setHeldSales((prev) => {
+            const exists = prev.some((held) => held.id === localId);
+            if (!exists) {
+              removedBeforeSync = true;
+              return prev;
+            }
 
-          await persistHeldSales(syncedList);
+            const next: HeldSale[] = prev.map((held) =>
+              held.id === localId
+                ? {
+                    ...held,
+                    id: receipt.id,
+                    saved_at: receipt.saved_at,
+                    total: receipt.total,
+                    cashier_id: receipt.cashier_id,
+                    cashier_name: receipt.cashier_name,
+                    synced: true,
+                  }
+                : held
+            );
+
+            if (heldStorageKey) {
+              localStorage.setItem(heldStorageKey, JSON.stringify(next));
+            }
+            return next;
+          });
+
+          if (removedBeforeSync) {
+            try {
+              await posService.deleteHeldReceipt(receipt.id);
+            } catch (cleanupErr) {
+              logger.error('Failed to cleanup synced held receipt after local restore/remove:', cleanupErr);
+            }
+          }
         } catch (err) {
           logger.error('Failed to sync held receipt to backend (kept locally):', err);
           // Keep the local held sale; it will remain visible on this terminal
@@ -759,7 +808,11 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
 
     // If cart items don't have full product data, fetch it
     let restoredCart = sale.cart;
-    if (restoredCart.length > 0 && (!restoredCart[0].product.id || !restoredCart[0].product.name)) {
+    const hasPlaceholderProducts = restoredCart.some((item) => {
+      const name = (item.product.name || '').trim().toLowerCase();
+      return !item.product.id || !item.product.name || name === 'product';
+    });
+    if (restoredCart.length > 0 && hasPlaceholderProducts) {
       // Fetch full product details for each item
       try {
         const productIds = restoredCart.map(item => {
@@ -777,8 +830,12 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
               
               // If not found locally and online, fetch from API
               if (isOnline && currentOutlet?.id) {
-                const result = await posService.getProducts(currentOutlet.id, 1, 100, undefined, undefined, false);
-                return result.products.find((p: POSProduct) => p.id === productId);
+                const result = await posService.getProducts(currentOutlet.id, {
+                  page: 1,
+                  size: 100,
+                  activeOnly: false,
+                });
+                return result?.items?.find((p: POSProduct) => p.id === productId);
               }
               
               return null;
@@ -806,13 +863,25 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       }
     }
 
-    // Restore cart and track which held receipt was restored
+    // Restore cart
     setCart(restoredCart);
-    setRestoredHeldReceiptId(id);
     
     // Remove from list (so it doesn't show up again)
     const remaining = heldSales.filter((s) => s.id !== id);
     await persistHeldSales(remaining);
+
+    // Try deleting backend copy immediately so it won't reappear after refresh/reload.
+    // If it fails, keep ID for one retry after successful checkout.
+    let retryDeleteAfterSale: string | null = null;
+    if (isOnline && sale.synced) {
+      try {
+        await posService.deleteHeldReceipt(id);
+      } catch (deleteErr) {
+        logger.error('Failed to delete held receipt on load; will retry after sale:', deleteErr);
+        retryDeleteAfterSale = id;
+      }
+    }
+    setRestoredHeldReceiptId(retryDeleteAfterSale);
     
     setShowHeldModal(false);
   };
@@ -1001,6 +1070,11 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   const handleSplitPayment = async (mode: 'save' | 'save_and_print' = 'save') => {
     if (!currentUser?.id || !currentOutlet?.id) return;
 
+    const outletId = currentOutlet.id;
+    const cashierId = currentUser.id;
+    const activeTerminalId = terminalId || undefined;
+    const hardwarePolicy = getHardwarePolicyForTerminal(outletId, activeTerminalId);
+
     const totals = calculateCartTotals();
     const totalPaid = (activePayments.cash || 0) + (activePayments.card || 0) + (activePayments.transfer || 0);
 
@@ -1033,10 +1107,15 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       const notes = splitPayments.length > 1 
         ? JSON.stringify({ split_payments: splitPayments.map(sp => ({ method: sp.method, amount: sp.amount })) })
         : undefined;
+
+    const hasCashComponent = (activePayments.cash || 0) > 0;
+    const shouldAutoOpenDrawer =
+      hardwarePolicy.autoOpenDrawerMode === 'on-sale' ||
+      (hardwarePolicy.autoOpenDrawerMode === 'cash-only' && hasCashComponent);
       
     const transactionRequest: any = {
-      outlet_id: currentOutlet.id,
-      cashier_id: currentUser.id,
+      outlet_id: outletId,
+      cashier_id: cashierId,
       items,
       payment_method: splitPayments.length === 1 ? splitPayments[0].method : PaymentMethod.CASH, // Primary method
       tendered_amount: totalPaid,
@@ -1074,10 +1153,37 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
               logger.warn('Failed to remove offline transaction after sync:', removeErr);
             }
 
-            // Handle receipt printing after backend confirms the transaction
-            if (mode === 'save_and_print' && transaction?.id) {
+            if (shouldAutoOpenDrawer && activeTerminalId) {
               try {
-                const printResult = await posService.printReceipt(transaction.id);
+                const activeSession = await posService.getActiveCashDrawerSession(outletId, activeTerminalId);
+                if (!activeSession) {
+                  await posService.openCashDrawerSession({
+                    outlet_id: outletId,
+                    terminal_id: activeTerminalId,
+                    cashier_id: cashierId,
+                    opening_balance: 0,
+                    opening_notes: 'Auto-opened from sale based on hardware preferences'
+                  });
+                }
+              } catch (drawerError) {
+                logger.warn('Automatic cash drawer session open failed:', drawerError);
+              }
+            }
+
+            // Handle receipt printing after backend confirms the transaction
+            let shouldPrintReceipt = mode === 'save_and_print';
+            if (!shouldPrintReceipt && mode === 'save') {
+              if (hardwarePolicy.autoPrintMode === 'always') {
+                shouldPrintReceipt = true;
+              } else if (hardwarePolicy.autoPrintMode === 'ask') {
+                shouldPrintReceipt = await requestPrintDecision();
+              }
+            }
+
+            if (shouldPrintReceipt && transaction?.id) {
+              try {
+                const copies = hardwarePolicy.duplicateReceiptsEnabled ? 2 : 1;
+                const printResult = await posService.printReceipt(transaction.id, copies);
                 if (printResult?.receipt_content) {
                   const printWindow = window.open('', '_blank');
                   if (printWindow) {
@@ -1108,6 +1214,9 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       } else {
         // Pure offline mode – increment counter so cashier sees pending syncs
         setOfflineTransactionCount(prev => prev + 1);
+        if (mode === 'save_and_print' || (mode === 'save' && hardwarePolicy.autoPrintMode === 'always')) {
+          warning('Sale saved offline. Receipt printing will run after sync when online.', 5000);
+        }
       }
 
       // Delete held receipt if this sale was restored from one
@@ -1556,7 +1665,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
         {/* Held Receipts Modal */}
         {showHeldModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[92vh] flex flex-col">
               {/* Header */}
               <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
                 <h2 className="text-xl font-bold text-slate-900">Held Receipts</h2>
@@ -1579,26 +1688,32 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                     className="border border-slate-200 rounded-lg p-3 bg-slate-50"
                   >
                       {/* Summary row */}
-                      <div className="flex items-center justify-between mb-2">
-                        <div>
-                          <div className="text-sm font-semibold text-slate-900">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium text-slate-500">
+                            {new Date(sale.saved_at).toLocaleDateString([], {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                            })}{' '}
+                            ·{' '}
                             {new Date(sale.saved_at).toLocaleTimeString([], {
                               hour: '2-digit',
                               minute: '2-digit',
                             })}
                           </div>
-                          <div className="text-xs text-slate-500">
+                          <div className="text-sm text-slate-700 truncate">
                             {sale.cart.length} item{sale.cart.length !== 1 ? 's' : ''} ·{' '}
                             Held by {sale.cashier_name}
                           </div>
                         </div>
-                        <div className="flex items-center space-x-3">
+                        <div className="flex items-center gap-2 flex-shrink-0">
                           <span className="text-sm font-bold text-slate-900">
                             {formatCurrency(sale.total)}
                           </span>
                           <button
                             onClick={() => handleRestoreHeldSale(sale.id)}
-                            className="px-3 py-1.5 text-base font-bold bg-orange-600 hover:bg-orange-700 text-white rounded-lg"
+                            className="px-3 py-1.5 text-sm font-bold bg-orange-600 hover:bg-orange-700 text-white rounded-lg"
                           >
                             Load
                           </button>
@@ -1621,16 +1736,21 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                       </div>
 
                       {expandedHeldIds.includes(sale.id) && (
-                        <div className="mt-2 border-t border-slate-200 pt-2 space-y-1">
-                          {sale.cart.map((item) => (
+                        <div className="mt-1.5 border-t border-slate-200 pt-1.5 space-y-0.5">
+                          {sale.cart.map((item, index) => (
                             <div
-                              key={item.product.id}
-                              className="flex text-xs text-slate-700 justify-between"
+                              key={`${sale.id}-${item.product.id}-${index}`}
+                              className="flex text-[11px] text-slate-700 justify-between"
                             >
-                              <div className="truncate max-w-xs">
-                                {item.product.name}
+                              <div className="truncate max-w-[70%]">
+                                {(() => {
+                                  const rawName = (item.product.name || '').trim();
+                                  if (rawName && rawName.toLowerCase() !== 'product') return rawName;
+                                  const matched = products.find((p) => p.id === item.product.id);
+                                  return matched?.name || item.product.sku || 'Product';
+                                })()}
                               </div>
-                              <div className="flex items-center space-x-3">
+                              <div className="flex items-center gap-2">
                                 <span>x{item.quantity}</span>
                                 <span>{formatCurrency(item.unitPrice * item.quantity)}</span>
                               </div>
@@ -1731,6 +1851,59 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                   window.location.href = '/signup';
                 }}
               />
+            </div>
+          </div>
+        )}
+
+        {showClearCartConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
+              <h3 className="text-lg font-bold text-gray-900">Clear cart?</h3>
+              <p className="mt-2 text-sm text-gray-600">
+                This will remove all items from the current sale.
+              </p>
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  onClick={() => setShowClearCartConfirm(false)}
+                  className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    clearCart();
+                    setShowClearCartConfirm(false);
+                  }}
+                  className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700"
+                >
+                  Clear Cart
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showPrintDecisionModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
+              <h3 className="text-lg font-bold text-gray-900">Print receipt?</h3>
+              <p className="mt-2 text-sm text-gray-600">
+                Choose whether to print a receipt for this completed sale.
+              </p>
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  onClick={() => resolvePrintDecision(false)}
+                  className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200"
+                >
+                  Skip
+                </button>
+                <button
+                  onClick={() => resolvePrintDecision(true)}
+                  className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                >
+                  Print
+                </button>
+              </div>
             </div>
           </div>
         )}
