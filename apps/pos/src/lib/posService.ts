@@ -690,6 +690,7 @@ class POSService {
           // Remove successfully synced transaction
           if (this.isInitialized && transaction.offline_id) {
             await offlineDatabase.removeOfflineTransaction(transaction.offline_id);
+            await offlineDatabase.removeTransaction(transaction.offline_id);
           }
         } catch (error) {
           logger.error('Failed to sync offline transaction:', error);
