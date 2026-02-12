@@ -22,6 +22,7 @@ import { useOutlet } from '../../contexts/OutletContext';
 interface AppLayoutProps {
   children: React.ReactNode;
   headerContent?: React.ReactNode;
+  staffRole?: string | null;
 }
 
 // Sidebar navigation items
@@ -58,11 +59,14 @@ const navItems = [
   },
 ];
 
-const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent }) => {
+const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent, staffRole }) => {
   const { currentUser, currentOutlet } = useOutlet();
   const [showSidebar, setShowSidebar] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const normalizedStaffRole = (staffRole || '').toLowerCase();
+  const isCashier = normalizedStaffRole === 'cashier';
+  const canAccessSettings = normalizedStaffRole === 'manager';
 
   // Clock out handler – returns to staff auth (PIN entry), NOT main sign-in
   const handleClockOut = () => {
@@ -79,6 +83,10 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent }) => {
   }, []);
 
   const isActive = (path: string) => location.pathname === path;
+  const visibleNavItems = navItems.filter((item) => {
+    if (isCashier && (item.path === '/receive' || item.path === '/eod')) return false;
+    return true;
+  });
 
   return (
     <div className="w-screen h-screen overflow-hidden bg-stone-50 flex">
@@ -115,7 +123,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent }) => {
                 Operations
               </p>
               <div className="space-y-2">
-              {navItems.map((item) => {
+              {visibleNavItems.map((item) => {
                 const active = isActive(item.path);
                 const Icon = item.icon;
                 return (
@@ -171,23 +179,24 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent }) => {
                 </div>
               </button>
 
-              {/* Settings */}
-              <button
-                type="button"
-                onClick={() => {
-                  setShowSidebar(false);
-                  navigate('/settings');
-                }}
-                className="w-full flex items-center gap-4 px-4 py-4 rounded-2xl border border-transparent hover:bg-white hover:border-stone-300 active:scale-[0.99] transition-all"
-              >
-                <div className="w-12 h-12 bg-stone-200 text-slate-700 rounded-xl flex items-center justify-center flex-shrink-0">
-                  <Settings className="w-6 h-6" />
-                </div>
-                <div className="text-left">
-                  <span className="text-[18px] font-semibold text-slate-900 block leading-tight">Settings</span>
-                  <span className="text-[14px] text-stone-500">Preferences</span>
-                </div>
-              </button>
+              {canAccessSettings && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSidebar(false);
+                    navigate('/settings');
+                  }}
+                  className="w-full flex items-center gap-4 px-4 py-4 rounded-2xl border border-transparent hover:bg-white hover:border-stone-300 active:scale-[0.99] transition-all"
+                >
+                  <div className="w-12 h-12 bg-stone-200 text-slate-700 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <Settings className="w-6 h-6" />
+                  </div>
+                  <div className="text-left">
+                    <span className="text-[18px] font-semibold text-slate-900 block leading-tight">Settings</span>
+                    <span className="text-[14px] text-stone-500">Preferences</span>
+                  </div>
+                </button>
+              )}
               </div>
             </div>
           </div>

@@ -1001,7 +1001,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     if (!tenderModal) return;
 
     const method = tenderModal.method;
-    const remaining = getRemainingForMethod(method);
     const numAmount = parseFloat(tenderModal.amount) || 0;
 
     // Validate
@@ -1016,11 +1015,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       return;
     }
 
-    // Only CASH can exceed remaining (cashback/change). Card/transfer are capped.
-    if (method !== 'cash' && numAmount > remaining) {
-      setTenderModal(prev => prev ? ({ ...prev, error: `Amount cannot exceed ${formatCurrency(remaining)}` }) : prev);
-      return;
-    }
+    // Allow all payment methods to exceed due for cashback use-cases.
 
     setActivePayments(prev => ({ ...prev, [method]: numAmount }));
     setTenderModal(null);
@@ -1126,13 +1121,21 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
         splitPayments.push({ method: PaymentMethod.TRANSFER, amount: activePayments.transfer });
       }
 
+      const cashbackAmount = Math.max(0, totalPaid - totals.total);
+      if (cashbackAmount > 0 && splitPayments.length > 1) {
+        error(
+          `Cashback (${formatCurrency(cashbackAmount)}) is only supported with a single payment method. Use one method or keep split total at ${formatCurrency(totals.total)}.`
+        );
+        return;
+      }
+
       // Use enhanced transaction with split payments
       // Store split payments in notes field as JSON (temporary until schema is updated)
       const notes = splitPayments.length > 1 
         ? JSON.stringify({ split_payments: splitPayments.map(sp => ({ method: sp.method, amount: sp.amount })) })
         : undefined;
 
-    const hasCashComponent = (activePayments.cash || 0) > 0;
+    const hasCashComponent = (activePayments.cash || 0) > 0 || cashbackAmount > 0;
     const drawerCanOpen =
       !!hardwareRuntime.drawerCapabilities &&
       supportsHardwareAction(hardwareRuntime.drawerCapabilities, 'open-drawer');
@@ -1427,7 +1430,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                     className={`min-h-[64px] min-w-[138px] px-6 py-3 text-lg font-extrabold tracking-wide rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                       activePayments.cash
                         ? 'btn-brand border-transparent'
-                        : 'bg-white text-slate-800 border-stone-300 hover:bg-stone-100'
+                        : 'btn-brand-soft hover:brightness-[0.97]'
                     }`}
                   >
                     <span className="inline-flex items-center gap-2">
@@ -1442,7 +1445,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                     className={`min-h-[64px] min-w-[138px] px-6 py-3 text-lg font-extrabold tracking-wide rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                       activePayments.card
                         ? 'btn-brand border-transparent'
-                        : 'bg-white text-slate-800 border-stone-300 hover:bg-stone-100'
+                        : 'btn-brand-soft hover:brightness-[0.97]'
                     }`}
                   >
                     <span className="inline-flex items-center gap-2">
@@ -1457,7 +1460,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                     className={`min-h-[64px] min-w-[138px] px-6 py-3 text-lg font-extrabold tracking-wide rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                       activePayments.transfer
                         ? 'btn-brand border-transparent'
-                        : 'bg-white text-slate-800 border-stone-300 hover:bg-stone-100'
+                        : 'btn-brand-soft hover:brightness-[0.97]'
                     }`}
                   >
                     <span className="inline-flex items-center gap-2">
@@ -1479,7 +1482,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
               {hasActivePayments && (() => {
                 const totalPaid = (activePayments.cash || 0) + (activePayments.card || 0) + (activePayments.transfer || 0);
                 return (
-                  <div className="text-sm font-semibold text-stone-600">
+                  <div className="text-sm font-semibold text-stone-600 lg:text-right">
                     <span className="font-bold">Payments: </span>
                     {activePayments.cash && (
                       <span>Cash {formatCurrency(activePayments.cash)}</span>
@@ -1508,7 +1511,11 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
             {tenderModal && (() => {
               const remaining = getRemainingForMethod(tenderModal.method);
               const entered = parseFloat(tenderModal.amount) || 0;
-              const change = tenderModal.method === 'cash' && entered > remaining ? entered - remaining : 0;
+              const overAmount = entered > remaining ? entered - remaining : 0;
+              const overAmountLabel = tenderModal.method === 'cash' ? 'Change' : 'Cashback';
+              const overAmountContainerClass = tenderModal.method === 'cash' ? 'bg-emerald-50' : 'bg-amber-50';
+              const overAmountLabelClass = tenderModal.method === 'cash' ? 'text-emerald-700' : 'text-amber-700';
+              const overAmountValueClass = tenderModal.method === 'cash' ? 'text-emerald-900' : 'text-amber-900';
               const title = tenderModal.method === 'cash' ? 'Cash Payment' : tenderModal.method === 'card' ? 'Card Payment' : 'Transfer Payment';
 
               return (
@@ -1561,15 +1568,15 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                             <p className="text-xs text-red-600 mt-1">{tenderModal.error}</p>
                           )}
                           {tenderModal.method !== 'cash' && (
-                            <p className="text-[11px] text-stone-500 mt-1">Card/Transfer cannot exceed amount due.</p>
+                            <p className="text-[11px] text-stone-500 mt-1">You can enter above amount due to process cashback.</p>
                           )}
                         </div>
 
-                        {change > 0 && (
-                          <div className="flex-shrink-0 bg-emerald-50 px-3 py-2 rounded-lg mt-6">
-                            <div className="text-xs text-emerald-700 font-medium">Change</div>
-                            <div className="text-base font-bold text-emerald-900">
-                              {formatCurrency(change)}
+                        {overAmount > 0 && (
+                          <div className={`flex-shrink-0 px-3 py-2 rounded-lg mt-6 ${overAmountContainerClass}`}>
+                            <div className={`text-xs font-medium ${overAmountLabelClass}`}>{overAmountLabel}</div>
+                            <div className={`text-base font-bold ${overAmountValueClass}`}>
+                              {formatCurrency(overAmount)}
                             </div>
                           </div>
                         )}

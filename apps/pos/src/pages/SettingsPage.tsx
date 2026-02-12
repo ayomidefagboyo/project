@@ -21,6 +21,7 @@ import HardwareSetupTab from '../components/settings/HardwareSetupTab';
 import { useOutlet } from '../contexts/OutletContext';
 import { useTerminalId } from '../hooks/useTerminalId';
 import { dataService } from '../lib/dataService';
+import type { BusinessSettings } from '@/types';
 import {
   DEFAULT_BRAND_COLOR,
   applyBrandColorToDocument,
@@ -231,7 +232,7 @@ const SettingsPage: React.FC = () => {
           />
         );
       case 'staff':
-        return <StaffSecurityTab outletId={currentOutlet?.id} />;
+        return <StaffSecurityTab />;
       case 'outlet':
         return <OutletSettingsTab outletId={currentOutlet?.id} />;
       default:
@@ -625,78 +626,205 @@ const TerminalSettingsTab: React.FC<TerminalSettingsTabProps> = ({ outletId, ter
   );
 };
 
-interface StaffSecurityTabProps {
-  outletId?: string;
-}
-
 interface StaffSecurityState {
-  requirePinForVoids: boolean;
+  requireManagerPinForVoids: boolean;
   maxDiscountPercent: string;
+  pinMinDigits: '4' | '6' | '8';
+  logTransactionModifications: boolean;
+  requireTwoPersonApprovalForLargeRefunds: boolean;
+  cashierCanIssueRefunds: boolean;
+  cashierCanApplyDiscounts: boolean;
+  cashierCanVoidTransactions: boolean;
 }
 
 const defaultStaffSecurity: StaffSecurityState = {
-  requirePinForVoids: true,
-  maxDiscountPercent: '10'
+  requireManagerPinForVoids: true,
+  maxDiscountPercent: '10',
+  pinMinDigits: '4',
+  logTransactionModifications: true,
+  requireTwoPersonApprovalForLargeRefunds: false,
+  cashierCanIssueRefunds: true,
+  cashierCanApplyDiscounts: false,
+  cashierCanVoidTransactions: false
 };
 
-const StaffSecurityTab: React.FC<StaffSecurityTabProps> = ({ outletId }) => {
+const toRecord = (value: unknown): Record<string, unknown> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+};
+
+const toBoolean = (value: unknown, fallback: boolean): boolean =>
+  typeof value === 'boolean' ? value : fallback;
+
+const toPinMinDigits = (value: unknown, fallback: StaffSecurityState['pinMinDigits']): StaffSecurityState['pinMinDigits'] => {
+  const normalized = String(value ?? fallback);
+  if (normalized === '6' || normalized === '8') return normalized;
+  return '4';
+};
+
+const toMaxDiscountPercent = (value: unknown, fallback: string): string => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(Math.max(0, value));
+  }
+  if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) {
+    return String(Math.max(0, Number(value)));
+  }
+  return fallback;
+};
+
+const parseSecurityPrefs = (settings: BusinessSettings | null): StaffSecurityState => {
+  const root = toRecord(settings?.pos_security_prefs);
+  const cashierPermissions = toRecord(root.cashier_permissions);
+
+  return {
+    requireManagerPinForVoids: toBoolean(root.require_manager_pin_for_voids, defaultStaffSecurity.requireManagerPinForVoids),
+    maxDiscountPercent: toMaxDiscountPercent(root.max_discount_percent, defaultStaffSecurity.maxDiscountPercent),
+    pinMinDigits: toPinMinDigits(root.pin_min_digits, defaultStaffSecurity.pinMinDigits),
+    logTransactionModifications: toBoolean(root.log_transaction_modifications, defaultStaffSecurity.logTransactionModifications),
+    requireTwoPersonApprovalForLargeRefunds: toBoolean(
+      root.require_two_person_approval_for_large_refunds,
+      defaultStaffSecurity.requireTwoPersonApprovalForLargeRefunds
+    ),
+    cashierCanIssueRefunds: toBoolean(cashierPermissions.issue_refunds_same_day, defaultStaffSecurity.cashierCanIssueRefunds),
+    cashierCanApplyDiscounts: toBoolean(cashierPermissions.apply_discounts, defaultStaffSecurity.cashierCanApplyDiscounts),
+    cashierCanVoidTransactions: toBoolean(cashierPermissions.void_transactions, defaultStaffSecurity.cashierCanVoidTransactions)
+  };
+};
+
+const StaffSecurityTab: React.FC = () => {
+  const { currentOutlet, businessSettings, setBusinessSettings } = useOutlet();
   const [state, setState] = useState<StaffSecurityState>(defaultStaffSecurity);
-
-  const storageKey = outletId ? `pos_staff_security_${outletId}` : null;
-
-  useEffect(() => {
-    if (!storageKey) return;
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<StaffSecurityState>;
-      setState(prev => ({
-        requirePinForVoids: parsed.requirePinForVoids ?? prev.requirePinForVoids,
-        maxDiscountPercent: parsed.maxDiscountPercent ?? prev.maxDiscountPercent
-      }));
-    } catch {
-      // ignore
-    }
-  }, [storageKey]);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!storageKey) return;
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(state));
-    } catch {
-      // ignore
+    setState(parseSecurityPrefs(businessSettings));
+  }, [businessSettings]);
+
+  const savePolicies = async () => {
+    if (!currentOutlet?.id) return;
+
+    setSaveStatus('saving');
+    setSaveError(null);
+
+    const policyPayload = {
+      max_discount_percent: Number(state.maxDiscountPercent),
+      pin_min_digits: Number(state.pinMinDigits),
+      require_manager_pin_for_voids: state.requireManagerPinForVoids,
+      log_transaction_modifications: state.logTransactionModifications,
+      require_two_person_approval_for_large_refunds: state.requireTwoPersonApprovalForLargeRefunds,
+      cashier_permissions: {
+        process_sales: true,
+        issue_refunds_same_day: state.cashierCanIssueRefunds,
+        apply_discounts: state.cashierCanApplyDiscounts,
+        void_transactions: state.cashierCanVoidTransactions,
+        access_receive_items: false,
+        access_end_of_day: false,
+        access_settings: false
+      }
+    };
+
+    const withDefaults = (payload: Record<string, unknown>): Record<string, unknown> => {
+      if (businessSettings) return payload;
+
+      return {
+        ...payload,
+        business_name: currentOutlet.name,
+        business_type: currentOutlet.businessType || 'retail',
+        theme: 'auto',
+        language: 'en',
+        date_format: 'MM/DD/YYYY',
+        time_format: '12h',
+        currency: currentOutlet.currency || 'NGN',
+        timezone: currentOutlet.timezone || 'Africa/Lagos',
+      };
+    };
+
+    const response = await dataService.updateBusinessSettings(
+      currentOutlet.id,
+      withDefaults({ pos_security_prefs: policyPayload }) as any
+    );
+
+    if (response.error || !response.data) {
+      setSaveStatus('error');
+      setSaveError(response.error || 'Unable to save policy settings.');
+      return;
     }
-  }, [state, storageKey]);
+
+    setBusinessSettings(response.data);
+    setSaveStatus('saved');
+    setTimeout(() => setSaveStatus('idle'), 1500);
+  };
 
   return (
     <div className="p-6">
       <div className="max-w-4xl">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Staff & Security</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Staff & Security</h2>
+          <button
+            onClick={savePolicies}
+            disabled={!currentOutlet?.id || saveStatus === 'saving'}
+            className="btn-brand text-white px-4 py-2.5 rounded-lg font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {saveStatus === 'saving' ? 'Saving...' : 'Save Policy'}
+          </button>
+        </div>
+        {saveStatus === 'saved' && (
+          <p className="text-sm text-green-600 dark:text-green-400 mb-6">
+            Policies saved. Changes apply outlet-wide across all terminals.
+          </p>
+        )}
+        {saveStatus === 'error' && (
+          <p className="text-sm text-red-600 dark:text-red-400 mb-6">
+            {saveError || 'Could not save policies. Please retry.'}
+          </p>
+        )}
 
         {/* Staff Permissions */}
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Default Staff Permissions</h3>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Default Staff Permissions</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Staff profiles are synced from the admin dashboard. This tab controls outlet-wide POS policy only.
+          </p>
 
           <div className="grid grid-cols-2 gap-6">
             <div>
               <h4 className="font-medium text-gray-900 dark:text-white mb-3">Cashier Permissions</h4>
               <div className="space-y-2">
                 <label className="flex items-center gap-2">
-                  <input type="checkbox" className="rounded border-gray-300" defaultChecked />
+                  <input type="checkbox" className="rounded border-gray-300" checked readOnly />
                   <span className="text-sm text-gray-700 dark:text-gray-300">Process sales</span>
                 </label>
                 <label className="flex items-center gap-2">
-                  <input type="checkbox" className="rounded border-gray-300" defaultChecked />
+                  <input
+                    type="checkbox"
+                    className="rounded border-gray-300"
+                    checked={state.cashierCanIssueRefunds}
+                    onChange={e => setState(prev => ({ ...prev, cashierCanIssueRefunds: e.target.checked }))}
+                  />
                   <span className="text-sm text-gray-700 dark:text-gray-300">Issue refunds (same day)</span>
                 </label>
                 <label className="flex items-center gap-2">
-                  <input type="checkbox" className="rounded border-gray-300" />
+                  <input
+                    type="checkbox"
+                    className="rounded border-gray-300"
+                    checked={state.cashierCanApplyDiscounts}
+                    onChange={e => setState(prev => ({ ...prev, cashierCanApplyDiscounts: e.target.checked }))}
+                  />
                   <span className="text-sm text-gray-700 dark:text-gray-300">Apply discounts</span>
                 </label>
                 <label className="flex items-center gap-2">
-                  <input type="checkbox" className="rounded border-gray-300" />
+                  <input
+                    type="checkbox"
+                    className="rounded border-gray-300"
+                    checked={state.cashierCanVoidTransactions}
+                    onChange={e => setState(prev => ({ ...prev, cashierCanVoidTransactions: e.target.checked }))}
+                  />
                   <span className="text-sm text-gray-700 dark:text-gray-300">Void transactions</span>
                 </label>
+                <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
+                  Receive Items, End of Day, and Settings are manager-only and hidden for cashiers.
+                </p>
               </div>
             </div>
 
@@ -704,19 +832,19 @@ const StaffSecurityTab: React.FC<StaffSecurityTabProps> = ({ outletId }) => {
               <h4 className="font-medium text-gray-900 dark:text-white mb-3">Manager Permissions</h4>
               <div className="space-y-2">
                 <label className="flex items-center gap-2">
-                  <input type="checkbox" className="rounded border-gray-300" defaultChecked />
+                  <input type="checkbox" className="rounded border-gray-300" checked readOnly />
                   <span className="text-sm text-gray-700 dark:text-gray-300">All cashier permissions</span>
                 </label>
                 <label className="flex items-center gap-2">
-                  <input type="checkbox" className="rounded border-gray-300" defaultChecked />
+                  <input type="checkbox" className="rounded border-gray-300" checked readOnly />
                   <span className="text-sm text-gray-700 dark:text-gray-300">View reports</span>
                 </label>
                 <label className="flex items-center gap-2">
-                  <input type="checkbox" className="rounded border-gray-300" defaultChecked />
+                  <input type="checkbox" className="rounded border-gray-300" checked readOnly />
                   <span className="text-sm text-gray-700 dark:text-gray-300">Manage staff</span>
                 </label>
                 <label className="flex items-center gap-2">
-                  <input type="checkbox" className="rounded border-gray-300" defaultChecked />
+                  <input type="checkbox" className="rounded border-gray-300" checked readOnly />
                   <span className="text-sm text-gray-700 dark:text-gray-300">End of day operations</span>
                 </label>
               </div>
@@ -751,7 +879,11 @@ const StaffSecurityTab: React.FC<StaffSecurityTabProps> = ({ outletId }) => {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   PIN Requirements
                 </label>
-                <select className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                <select
+                  value={state.pinMinDigits}
+                  onChange={e => setState(prev => ({ ...prev, pinMinDigits: e.target.value as StaffSecurityState['pinMinDigits'] }))}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                >
                   <option value="4">4 digits minimum</option>
                   <option value="6">6 digits minimum</option>
                   <option value="8">8 digits minimum</option>
@@ -763,39 +895,48 @@ const StaffSecurityTab: React.FC<StaffSecurityTabProps> = ({ outletId }) => {
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
-                  checked={state.requirePinForVoids}
-                  onChange={e => setState(prev => ({ ...prev, requirePinForVoids: e.target.checked }))}
+                  checked={state.requireManagerPinForVoids}
+                  onChange={e => setState(prev => ({ ...prev, requireManagerPinForVoids: e.target.checked }))}
                   className="rounded border-gray-300"
                 />
                 <span className="text-sm text-gray-700 dark:text-gray-300">Require manager PIN for voids</span>
               </label>
               <label className="flex items-center gap-2">
-                <input type="checkbox" className="rounded border-gray-300" defaultChecked />
+                <input
+                  type="checkbox"
+                  className="rounded border-gray-300"
+                  checked={state.logTransactionModifications}
+                  onChange={e => setState(prev => ({ ...prev, logTransactionModifications: e.target.checked }))}
+                />
                 <span className="text-sm text-gray-700 dark:text-gray-300">Log all transaction modifications</span>
               </label>
               <label className="flex items-center gap-2">
-                <input type="checkbox" className="rounded border-gray-300" />
+                <input
+                  type="checkbox"
+                  className="rounded border-gray-300"
+                  checked={state.requireTwoPersonApprovalForLargeRefunds}
+                  onChange={e => setState(prev => ({ ...prev, requireTwoPersonApprovalForLargeRefunds: e.target.checked }))}
+                />
                 <span className="text-sm text-gray-700 dark:text-gray-300">Require two-person approval for large refunds</span>
               </label>
             </div>
           </div>
         </div>
 
-        {/* Quick Staff Actions */}
+        {/* Dashboard sync notice */}
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Quick Actions</h3>
-
-          <div className="flex gap-3">
-            <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
-              Manage Staff
-            </button>
-            <button className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-              Add New Cashier
-            </button>
-            <button className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors">
-              Reset All PINs
-            </button>
-          </div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Staff Directory Sync</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+            Create, edit, and deactivate staff in the admin dashboard. POS pulls those profiles automatically.
+          </p>
+          <a
+            href="https://compazz.app"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-semibold text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            Open Admin Dashboard
+          </a>
         </div>
       </div>
     </div>
