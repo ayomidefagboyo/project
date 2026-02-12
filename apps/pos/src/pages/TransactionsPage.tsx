@@ -3,9 +3,9 @@
  * Modeled after Square POS Transactions view
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Search, RotateCcw, Receipt, X } from 'lucide-react';
-import { posService, type POSTransaction, PaymentMethod } from '../lib/posService';
+import { posService, type POSTransaction, type PendingOfflineTransaction, PaymentMethod } from '../lib/posService';
 import { useOutlet } from '../contexts/OutletContext';
 import { useToast } from '../components/ui/Toast';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
@@ -37,36 +37,144 @@ const TransactionsPage: React.FC = () => {
   const [selectedTransaction, setSelectedTransaction] = useState<ExtendedTransaction | null>(null);
   const [showVoidConfirm, setShowVoidConfirm] = useState(false);
   const [voidReason, setVoidReason] = useState('');
+  const requestIdRef = useRef(0);
+
+  const matchesActiveFilters = useCallback(
+    (tx: {
+      transaction_date?: string;
+      payment_method?: string;
+      status?: string;
+      transaction_number?: string;
+      customer_name?: string;
+    }): boolean => {
+      if (selectedDate) {
+        const txDate = tx.transaction_date ? tx.transaction_date.split('T')[0] : '';
+        if (txDate !== selectedDate) return false;
+      }
+      if (paymentFilter !== 'all' && tx.payment_method !== paymentFilter) return false;
+      if (statusFilter !== 'all' && tx.status !== statusFilter) return false;
+
+      const needle = searchQuery.trim().toLowerCase();
+      if (needle) {
+        const txn = tx.transaction_number?.toLowerCase() || '';
+        const customer = tx.customer_name?.toLowerCase() || '';
+        const payment = tx.payment_method?.toLowerCase() || '';
+        if (!txn.includes(needle) && !customer.includes(needle) && !payment.includes(needle)) {
+          return false;
+        }
+      }
+
+      return true;
+    },
+    [selectedDate, paymentFilter, statusFilter, searchQuery]
+  );
+
+  const buildOfflineReceiptNumber = (offlineId: string, createdAt?: string): string => {
+    const stamp = new Date(createdAt || Date.now()).toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
+    const suffix = (offlineId.split('_').pop() || 'LOCAL').slice(0, 6).toUpperCase();
+    return `OFF-${stamp}-${suffix}`;
+  };
+
+  const toPendingTransactionRow = (tx: PendingOfflineTransaction): ExtendedTransaction => {
+    const createdAt = tx.created_at || new Date().toISOString();
+    const subtotal = (tx.items || []).reduce((sum, item) => {
+      const unit = Number(item.unit_price || 0);
+      const qty = Number(item.quantity || 0);
+      const lineDiscount = Number(item.discount_amount || 0);
+      return sum + (unit * qty) - lineDiscount;
+    }, 0);
+    const transactionDiscount = Number(tx.discount_amount || 0);
+    const total = Math.max(0, subtotal - transactionDiscount);
+    const tendered = typeof tx.tendered_amount === 'number' ? tx.tendered_amount : total;
+
+    return {
+      id: tx.offline_id,
+      outlet_id: tx.outlet_id,
+      transaction_number: buildOfflineReceiptNumber(tx.offline_id, createdAt),
+      cashier_id: tx.cashier_id,
+      customer_id: tx.customer_id,
+      customer_name: tx.customer_name,
+      subtotal,
+      tax_amount: 0,
+      discount_amount: transactionDiscount,
+      total_amount: total,
+      payment_method: tx.payment_method as any,
+      tendered_amount: tendered,
+      change_amount: Math.max(0, tendered - total),
+      payment_reference: tx.payment_reference,
+      status: 'pending' as any,
+      transaction_date: createdAt,
+      items: [],
+      notes: tx.notes,
+      receipt_printed: false,
+      created_at: createdAt,
+      cashier_name: 'Pending Sync',
+    };
+  };
+
+  const mergeWithPendingOffline = useCallback(
+    (base: ExtendedTransaction[], pending: PendingOfflineTransaction[]): ExtendedTransaction[] => {
+      const pendingRows = pending
+        .filter((tx) => tx.outlet_id === currentOutlet?.id)
+        .map(toPendingTransactionRow)
+        .filter((tx) => matchesActiveFilters(tx));
+
+      if (pendingRows.length === 0) return base;
+
+      const seen = new Set(base.map((tx) => tx.id));
+      const merged = [...pendingRows.filter((tx) => !seen.has(tx.id)), ...base];
+      merged.sort(
+        (a, b) =>
+          new Date(b.transaction_date || b.created_at || 0).getTime() -
+          new Date(a.transaction_date || a.created_at || 0).getTime()
+      );
+
+      return merged;
+    },
+    [currentOutlet?.id, matchesActiveFilters]
+  );
 
   const filterLocalTransactions = useCallback(
     (data: POSTransaction[]): ExtendedTransaction[] => {
-      const needle = searchQuery.trim().toLowerCase();
-      return data.filter((tx) => {
-        if (selectedDate) {
-          const txDate = tx.transaction_date ? tx.transaction_date.split('T')[0] : '';
-          if (txDate !== selectedDate) return false;
-        }
-        if (paymentFilter !== 'all' && tx.payment_method !== paymentFilter) return false;
-        if (statusFilter !== 'all' && tx.status !== statusFilter) return false;
-        if (needle) {
-          const txn = tx.transaction_number?.toLowerCase() || '';
-          const customer = tx.customer_name?.toLowerCase() || '';
-          const payment = tx.payment_method?.toLowerCase() || '';
-          if (!txn.includes(needle) && !customer.includes(needle) && !payment.includes(needle)) {
-            return false;
-          }
-        }
-        return true;
-      }) as ExtendedTransaction[];
+      return data.filter((tx) => matchesActiveFilters(tx)) as ExtendedTransaction[];
     },
-    [selectedDate, paymentFilter, statusFilter, searchQuery]
+    [matchesActiveFilters]
   );
 
   const loadTransactions = useCallback(async () => {
     if (!currentOutlet?.id) return;
 
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+
+    // 1) Local-first render (instant)
     try {
       setIsLoading(true);
+      const [localData, pendingOffline] = await Promise.all([
+        posService.getLocalTransactions(currentOutlet.id, 2000),
+        posService.getPendingOfflineTransactions(),
+      ]);
+
+      if (requestId !== requestIdRef.current) return;
+
+      const filteredLocal = filterLocalTransactions(localData);
+      const mergedLocal = mergeWithPendingOffline(filteredLocal as ExtendedTransaction[], pendingOffline);
+      const start = (currentPage - 1) * TRANSACTIONS_PAGE_SIZE;
+      const pageData = mergedLocal.slice(start, start + TRANSACTIONS_PAGE_SIZE);
+      setTransactions(pageData);
+      setTotalCount(mergedLocal.length);
+      setIsLoading(false);
+    } catch (localErr) {
+      console.error('Local transaction cache failed:', localErr);
+      if (requestId === requestIdRef.current) {
+        setTransactions([]);
+        setTotalCount(0);
+      }
+      setIsLoading(false);
+    }
+
+    // 2) Background server refresh
+    try {
       const result = await posService.getTransactions(currentOutlet.id, {
         page: currentPage,
         size: TRANSACTIONS_PAGE_SIZE,
@@ -78,24 +186,23 @@ const TransactionsPage: React.FC = () => {
         search: searchQuery || undefined,
       });
 
-      setTransactions((result.items || []) as ExtendedTransaction[]);
-      setTotalCount(result.total || 0);
+      if (requestId !== requestIdRef.current) return;
+
+      const pendingOffline = await posService.getPendingOfflineTransactions();
+      const mergedPage = mergeWithPendingOffline((result.items || []) as ExtendedTransaction[], pendingOffline);
+      const pendingForOutlet = pendingOffline
+        .filter((tx) => tx.outlet_id === currentOutlet.id)
+        .map(toPendingTransactionRow)
+        .filter((tx) => matchesActiveFilters(tx)).length;
+
+      setTransactions(mergedPage.slice(0, TRANSACTIONS_PAGE_SIZE));
+      setTotalCount((result.total || 0) + pendingForOutlet);
     } catch (err) {
-      console.error('Error loading transactions:', err);
-      try {
-        const localData = await posService.getLocalTransactions(currentOutlet.id, 1000);
-        const filtered = filterLocalTransactions(localData);
-        const start = (currentPage - 1) * TRANSACTIONS_PAGE_SIZE;
-        const pageData = filtered.slice(start, start + TRANSACTIONS_PAGE_SIZE);
-        setTransactions(pageData);
-        setTotalCount(filtered.length);
-      } catch (localErr) {
-        console.error('Local cache also failed:', localErr);
-        setTransactions([]);
-        setTotalCount(0);
-      }
+      console.error('Error refreshing transactions from server:', err);
     } finally {
-      setIsLoading(false);
+      if (requestId === requestIdRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [
     currentOutlet?.id,
@@ -105,6 +212,8 @@ const TransactionsPage: React.FC = () => {
     statusFilter,
     searchQuery,
     filterLocalTransactions,
+    mergeWithPendingOffline,
+    matchesActiveFilters,
   ]);
 
   useEffect(() => {
@@ -163,6 +272,7 @@ const TransactionsPage: React.FC = () => {
   };
 
   const getStatusBadge = (status: string) => {
+    if (status === 'pending') return <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-amber-100 text-amber-800">Pending Sync</span>;
     if (status === 'voided') return <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-red-100 text-red-800">Voided</span>;
     if (status === 'refunded') return <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">Refunded</span>;
     return <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-green-100 text-green-800">Completed</span>;
@@ -176,6 +286,10 @@ const TransactionsPage: React.FC = () => {
   const handleVoid = async () => {
     if (!selectedTransaction || !voidReason.trim()) {
       showError('Please provide a reason for voiding');
+      return;
+    }
+    if (selectedTransaction.status === 'pending') {
+      showError('Pending offline sale cannot be voided until it syncs.');
       return;
     }
     try {
@@ -246,6 +360,7 @@ const TransactionsPage: React.FC = () => {
               className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
             >
               <option value="all">All Status</option>
+              <option value="pending">Pending Sync</option>
               <option value="completed">Completed</option>
               <option value="voided">Voided</option>
               <option value="refunded">Refunded</option>
@@ -474,7 +589,7 @@ const TransactionsPage: React.FC = () => {
             </div>
 
             {/* Drawer footer */}
-            {selectedTransaction.status !== 'voided' && (
+            {selectedTransaction.status !== 'voided' && selectedTransaction.status !== 'pending' && (
               <div className="px-5 py-4 border-t border-gray-100">
                 {!showVoidConfirm ? (
                   <button

@@ -98,6 +98,12 @@ export interface CreateTransactionRequest {
   offline_id?: string;
 }
 
+export interface PendingOfflineTransaction extends CreateTransactionRequest {
+  offline_id: string;
+  created_at: string;
+  status?: 'offline' | 'synced';
+}
+
 export interface ProductCreateRequest {
   outlet_id: string;
   sku: string;
@@ -727,6 +733,23 @@ class POSService {
       }
     } catch {
       return 0;
+    }
+  }
+
+  /**
+   * Get pending offline transactions for optimistic/local-first UIs
+   */
+  async getPendingOfflineTransactions(): Promise<PendingOfflineTransaction[]> {
+    try {
+      if (this.isInitialized) {
+        const transactions = await offlineDatabase.getOfflineTransactions();
+        return transactions as PendingOfflineTransaction[];
+      }
+
+      const offlineTransactions = JSON.parse(localStorage.getItem('offline_transactions') || '[]');
+      return offlineTransactions as PendingOfflineTransaction[];
+    } catch {
+      return [];
     }
   }
 
