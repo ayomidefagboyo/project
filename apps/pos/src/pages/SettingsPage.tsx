@@ -10,17 +10,14 @@ import {
   Palette,
   Monitor,
   Users,
-  Shield,
   Store,
-  Settings as SettingsIcon,
   Moon,
   Sun,
   Laptop,
-  CheckCircle,
-  AlertCircle,
-  Wifi
+  CheckCircle
 } from 'lucide-react';
 import ReceiptEditor from '../components/settings/ReceiptEditor';
+import HardwareSetupTab from '../components/settings/HardwareSetupTab';
 import { useOutlet } from '../contexts/OutletContext';
 import { useTerminalId } from '../hooks/useTerminalId';
 
@@ -90,7 +87,7 @@ const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('receipts');
   const [darkMode, setDarkMode] = useState(false);
   const [systemPreference, setSystemPreference] = useState<'light' | 'dark' | 'system'>('system');
-  const { currentOutlet } = useOutlet();
+  const { currentOutlet, currentUser } = useOutlet();
   const { terminalId } = useTerminalId();
 
   // Initialize theme on component mount
@@ -144,6 +141,7 @@ const SettingsPage: React.FC = () => {
           <HardwareSetupTab
             outletId={currentOutlet?.id}
             terminalId={terminalId || undefined}
+            currentUserId={currentUser?.id}
           />
         );
       case 'terminal':
@@ -305,319 +303,6 @@ const AppearanceTab: React.FC<AppearanceTabProps> = ({ darkMode, systemPreferenc
   </div>
 );
 
-interface HardwareSetupTabProps {
-  outletId?: string;
-  terminalId?: string;
-}
-
-type PrinterStatus = 'connected' | 'disconnected';
-type ScannerStatus = 'connected' | 'disconnected';
-
-interface PrinterConfig {
-  id: string;
-  name: string;
-  type: 'thermal' | 'label' | string;
-  status: PrinterStatus;
-  defaultPrint: 'receipts' | 'labels' | string;
-}
-
-interface ScannerConfig {
-  id: string;
-  name: string;
-  type: 'usb' | 'bluetooth' | string;
-  status: ScannerStatus;
-}
-
-interface CashDrawerConfig {
-  id: string;
-  name: string;
-  type: 'rj11' | string;
-  status: 'connected' | 'disconnected';
-}
-
-interface HardwarePreferences {
-  autoOpenDrawerMode: 'on-sale' | 'cash-only' | 'manual';
-  autoPrintMode: 'always' | 'ask' | 'never';
-  scannerBeepEnabled: boolean;
-  cutPaperEnabled: boolean;
-  duplicateReceiptsEnabled: boolean;
-}
-
-interface HardwareState {
-  printers: PrinterConfig[];
-  scanners: ScannerConfig[];
-  cashDrawers: CashDrawerConfig[];
-  prefs: HardwarePreferences;
-}
-
-const defaultHardwareState: HardwareState = {
-  printers: [
-    { id: 'thermal-1', name: 'Receipt Printer', type: 'thermal', status: 'connected', defaultPrint: 'receipts' },
-    { id: 'label-1', name: 'Label Printer', type: 'label', status: 'disconnected', defaultPrint: 'labels' }
-  ],
-  scanners: [
-    { id: 'scanner-1', name: 'Barcode Scanner', type: 'usb', status: 'connected' }
-  ],
-  cashDrawers: [
-    { id: 'drawer-1', name: 'Cash Drawer', type: 'rj11', status: 'connected' }
-  ],
-  prefs: {
-    autoOpenDrawerMode: 'on-sale',
-    autoPrintMode: 'always',
-    scannerBeepEnabled: true,
-    cutPaperEnabled: true,
-    duplicateReceiptsEnabled: false
-  }
-};
-
-const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalId }) => {
-  const [state, setState] = useState<HardwareState>(defaultHardwareState);
-
-  const storageKey = outletId && terminalId ? `pos_hardware_${outletId}_${terminalId}` : null;
-
-  // Load persisted hardware config for this outlet + terminal
-  useEffect(() => {
-    if (!storageKey) return;
-
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<HardwareState>;
-      setState(prev => ({
-        printers: parsed.printers && parsed.printers.length ? parsed.printers : prev.printers,
-        scanners: parsed.scanners && parsed.scanners.length ? parsed.scanners : prev.scanners,
-        cashDrawers: parsed.cashDrawers && parsed.cashDrawers.length ? parsed.cashDrawers : prev.cashDrawers,
-        prefs: {
-          ...prev.prefs,
-          ...(parsed.prefs || {})
-        }
-      }));
-    } catch {
-      // Ignore malformed data and keep defaults
-    }
-  }, [storageKey]);
-
-  // Persist whenever hardware state changes
-  useEffect(() => {
-    if (!storageKey) return;
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(state));
-    } catch {
-      // Ignore quota/storage errors
-    }
-  }, [state, storageKey]);
-
-  return (
-    <div className="p-6">
-      <div className="max-w-4xl">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Hardware Setup</h2>
-
-        {/* Printers Section */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-              <Printer className="w-5 h-5" />
-              Printers
-            </h3>
-            <button className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm">
-              Add Printer
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            {printers.map((printer) => (
-              <div key={printer.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className={`w-3 h-3 rounded-full ${printer.status === 'connected' ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                  <div>
-                    <div className="font-medium text-gray-900 dark:text-white">{printer.name}</div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                      {printer.type} printer • Default for {printer.defaultPrint}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <button className="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-sm">
-                    Test Print
-                  </button>
-                  <button className="px-3 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-sm">
-                    Configure
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Scanners Section */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-              <Wifi className="w-5 h-5" />
-              Barcode Scanners
-            </h3>
-            <button className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm">
-              Add Scanner
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            {scanners.map((scanner) => (
-              <div key={scanner.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className={`w-3 h-3 rounded-full ${scanner.status === 'connected' ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                  <div>
-                    <div className="font-medium text-gray-900 dark:text-white">{scanner.name}</div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                      {scanner.type.toUpperCase()} connection
-                    </div>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <button className="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-sm">
-                    Test Scan
-                  </button>
-                  <button className="px-3 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-sm">
-                    Configure
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Cash Drawer Section */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-              <Monitor className="w-5 h-5" />
-              Cash Drawer
-            </h3>
-          </div>
-
-          <div className="space-y-3">
-            {cashDrawers.map((drawer) => (
-              <div key={drawer.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-600 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className={`w-3 h-3 rounded-full ${drawer.status === 'connected' ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                  <div>
-                    <div className="font-medium text-gray-900 dark:text-white">{drawer.name}</div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                      {drawer.type.toUpperCase()} connection
-                    </div>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <button className="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-sm">
-                    Open Drawer
-                  </button>
-                  <button className="px-3 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded text-sm">
-                    Configure
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Hardware Settings */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Hardware Preferences</h3>
-
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Auto-open cash drawer
-                </label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  value={state.prefs.autoOpenDrawerMode}
-                  onChange={e =>
-                    setState(prev => ({
-                      ...prev,
-                      prefs: { ...prev.prefs, autoOpenDrawerMode: e.target.value as HardwarePreferences['autoOpenDrawerMode'] }
-                    }))
-                  }
-                >
-                  <option value="on-sale">On every sale</option>
-                  <option value="cash-only">Cash payments only</option>
-                  <option value="manual">Manual only</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Receipt auto-print
-                </label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  value={state.prefs.autoPrintMode}
-                  onChange={e =>
-                    setState(prev => ({
-                      ...prev,
-                      prefs: { ...prev.prefs, autoPrintMode: e.target.value as HardwarePreferences['autoPrintMode'] }
-                    }))
-                  }
-                >
-                  <option value="always">Always print</option>
-                  <option value="ask">Ask customer</option>
-                  <option value="never">Manual only</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  className="rounded border-gray-300"
-                  checked={state.prefs.scannerBeepEnabled}
-                  onChange={e =>
-                    setState(prev => ({
-                      ...prev,
-                      prefs: { ...prev.prefs, scannerBeepEnabled: e.target.checked }
-                    }))
-                  }
-                />
-                <span className="text-sm text-gray-700 dark:text-gray-300">Enable barcode scanner beep</span>
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  className="rounded border-gray-300"
-                  checked={state.prefs.cutPaperEnabled}
-                  onChange={e =>
-                    setState(prev => ({
-                      ...prev,
-                      prefs: { ...prev.prefs, cutPaperEnabled: e.target.checked }
-                    }))
-                  }
-                />
-                <span className="text-sm text-gray-700 dark:text-gray-300">Cut receipt paper after printing</span>
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  className="rounded border-gray-300"
-                  checked={state.prefs.duplicateReceiptsEnabled}
-                  onChange={e =>
-                    setState(prev => ({
-                      ...prev,
-                      prefs: { ...prev.prefs, duplicateReceiptsEnabled: e.target.checked }
-                    }))
-                  }
-                />
-                <span className="text-sm text-gray-700 dark:text-gray-300">Print duplicate receipts</span>
-              </label>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 interface TerminalSettingsTabProps {
   outletId?: string;
   terminalId?: string;
@@ -775,8 +460,8 @@ const TerminalSettingsTab: React.FC<TerminalSettingsTabProps> = ({ outletId, ter
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
-                  checked={soundsEnabled}
-                  onChange={(e) => setSoundsEnabled(e.target.checked)}
+                  checked={settings.soundsEnabled}
+                  onChange={(e) => setSettings(prev => ({ ...prev, soundsEnabled: e.target.checked }))}
                   className="rounded border-gray-300"
                 />
                 <span className="text-sm text-gray-700 dark:text-gray-300">Enable sounds</span>
