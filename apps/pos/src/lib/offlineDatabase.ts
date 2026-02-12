@@ -77,6 +77,7 @@ interface OfflineDatabase {
   getProducts(outletId: string): Promise<POSProduct[]>;
   // Transaction History Methods
   storeTransactions(transactions: POSTransaction[]): Promise<void>;
+  removeTransaction(transactionId: string): Promise<void>;
   getTransactions(outletId: string, limit?: number): Promise<POSTransaction[]>;
   searchTransactions(outletId: string, query: string): Promise<POSTransaction[]>;
 
@@ -185,6 +186,10 @@ class DexieOfflineDatabase implements OfflineDatabase {
       .reverse() // Newest first
       .limit(limit)
       .toArray();
+  }
+
+  async removeTransaction(transactionId: string): Promise<void> {
+    await db.transactions.delete(transactionId);
   }
 
   async searchTransactions(outletId: string, query: string): Promise<POSTransaction[]> {
