@@ -33,6 +33,10 @@ import {
 } from '../lib/invoiceService';
 import { vendorService, type CreateVendorData } from '../lib/vendorService';
 import { posService, type POSProduct } from '../lib/posService';
+import { useTerminalId } from '../hooks/useTerminalId';
+import { printProductLabels, type ProductLabelData } from '../lib/labelPrinter';
+import { loadHardwareState, resolveLabelPrinter } from '../lib/hardwareProfiles';
+import { resolveAdapterCapabilities, supportsHardwareAction } from '../lib/hardwareAdapters';
 
 interface VendorOption {
   id: string;
@@ -91,6 +95,7 @@ const parseQuickToken = (value: string): { identifier: string; quantity: number 
 
 const ReceiveItemsPage: React.FC = () => {
   const { currentOutlet } = useOutlet();
+  const { terminalId } = useTerminalId();
 
   const [step, setStep] = useState<Step>('entry');
 
@@ -126,10 +131,15 @@ const ReceiveItemsPage: React.FC = () => {
 
   const [isCreating, setIsCreating] = useState(false);
   const [receiveResult, setReceiveResult] = useState<ReceiveGoodsResponse | null>(null);
+  const [lastPrintedLabels, setLastPrintedLabels] = useState<ProductLabelData[]>([]);
+  const [labelCopies, setLabelCopies] = useState('1');
+  const [includePriceOnLabels, setIncludePriceOnLabels] = useState(true);
   const [error, setError] = useState('');
 
   const [invoiceHistory, setInvoiceHistory] = useState<Invoice[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [selectedHistoryInvoice, setSelectedHistoryInvoice] = useState<Invoice | null>(null);
+  const [historyLoadingInvoiceId, setHistoryLoadingInvoiceId] = useState<string | null>(null);
 
   const formatCurrency = (amount: number): string =>
     new Intl.NumberFormat('en-NG', {
@@ -203,6 +213,66 @@ const ReceiveItemsPage: React.FC = () => {
     () => items.filter((item) => !!item.product_id).length,
     [items]
   );
+
+  const labelPrinterRuntime = useMemo(() => {
+    const hardwareState = loadHardwareState(currentOutlet?.id, terminalId || undefined);
+    const printer = resolveLabelPrinter(hardwareState);
+
+    if (!printer) {
+      return {
+        printer: null as null,
+        canPrint: false,
+        reason: 'No label printer configured in Settings.',
+      };
+    }
+
+    if (printer.status !== 'connected') {
+      return {
+        printer,
+        canPrint: false,
+        reason: `${printer.name} is disconnected.`,
+      };
+    }
+
+    const printerCapabilities = resolveAdapterCapabilities(
+      'printer',
+      printer.adapterId,
+      printer.capabilities
+    );
+
+    if (!supportsHardwareAction(printerCapabilities, 'print-label')) {
+      return {
+        printer,
+        canPrint: false,
+        reason: `${printer.name} is not configured for label printing.`,
+      };
+    }
+
+    return {
+      printer,
+      canPrint: true,
+      reason: '',
+    };
+  }, [currentOutlet?.id, terminalId]);
+
+  const getInvoiceLabelData = useCallback((invoice: Invoice): ProductLabelData[] => {
+    const itemsForLabels = invoice.invoice_items || [];
+
+    return itemsForLabels
+      .map((item) => {
+        const name = item.description?.trim() || '';
+        const quantity = Math.max(1, Math.floor(Number(item.quantity) || 1));
+        const price = typeof item.unit_price === 'number' ? item.unit_price : undefined;
+        return {
+          name,
+          sku: item.sku,
+          barcode: item.barcode,
+          price,
+          copies: quantity,
+        };
+      })
+      .filter((label) => label.name.length > 0);
+  }, []);
 
   useEffect(() => {
     if (!currentOutlet?.id) return;
@@ -537,6 +607,73 @@ const ReceiveItemsPage: React.FC = () => {
     }
   };
 
+  const handleOpenHistoryInvoice = async (invoiceId: string) => {
+    setHistoryLoadingInvoiceId(invoiceId);
+    setError('');
+
+    try {
+      const invoice = await invoiceService.getInvoice(invoiceId);
+      if (!invoice) {
+        setError('Unable to load invoice details.');
+        return;
+      }
+      setSelectedHistoryInvoice(invoice);
+    } catch {
+      setError('Failed to load invoice details.');
+    } finally {
+      setHistoryLoadingInvoiceId(null);
+    }
+  };
+
+  const handlePrintInvoiceLabels = (invoice: Invoice) => {
+    const labels = getInvoiceLabelData(invoice);
+    if (labels.length === 0) {
+      setError('This invoice has no line items to print labels for.');
+      return;
+    }
+
+    if (!labelPrinterRuntime.canPrint) {
+      setError(labelPrinterRuntime.reason || 'Label printer is unavailable.');
+      return;
+    }
+
+    const copies = Math.max(1, Math.min(50, Math.floor(parseNumber(labelCopies, 1))));
+    const opened = printProductLabels(labels, {
+      title: `Invoice Labels - ${invoice.invoice_number || 'Invoice'}`,
+      copiesPerProduct: copies,
+      showPrice: includePriceOnLabels,
+      footerText: `${currentOutlet?.name || 'Compazz'} • ${labelPrinterRuntime.printer?.name || 'Label Printer'}`,
+    });
+
+    if (!opened) {
+      setError('Allow pop-ups to print product labels.');
+    }
+  };
+
+  const handlePrintReceivedLabels = () => {
+    if (lastPrintedLabels.length === 0) {
+      setError('No labels available for the last receive operation.');
+      return;
+    }
+
+    if (!labelPrinterRuntime.canPrint) {
+      setError(labelPrinterRuntime.reason || 'Label printer is unavailable.');
+      return;
+    }
+
+    const copies = Math.max(1, Math.min(50, Math.floor(parseNumber(labelCopies, 1))));
+    const opened = printProductLabels(lastPrintedLabels, {
+      title: `Receive Labels - ${receiveResult?.invoice_number || 'Invoice'}`,
+      copiesPerProduct: copies,
+      showPrice: includePriceOnLabels,
+      footerText: `${currentOutlet?.name || 'Compazz'} • ${labelPrinterRuntime.printer?.name || 'Label Printer'}`,
+    });
+
+    if (!opened) {
+      setError('Allow pop-ups to print product labels.');
+    }
+  };
+
   const handleReceive = async () => {
     if (!currentOutlet?.id) return;
 
@@ -573,6 +710,41 @@ const ReceiveItemsPage: React.FC = () => {
         updateCostPrices: true,
       });
 
+      const byProductId = new Map(
+        validItems
+          .filter((item) => !!item.product_id)
+          .map((item) => [item.product_id as string, item])
+      );
+      const byName = new Map(
+        validItems.map((item) => [item.description.trim().toLowerCase(), item])
+      );
+
+      const printedLabels: ProductLabelData[] = [
+        ...result.products_created.map((product) => {
+          const source =
+            byProductId.get(product.product_id) ||
+            byName.get(product.name.trim().toLowerCase());
+          return {
+            name: product.name,
+            sku: source?.sku,
+            barcode: source?.barcode,
+            price: source?.unit_price,
+          };
+        }),
+        ...result.products_updated.map((product) => {
+          const source =
+            byProductId.get(product.product_id) ||
+            byName.get(product.name.trim().toLowerCase());
+          return {
+            name: product.name,
+            sku: source?.sku,
+            barcode: source?.barcode,
+            price: source?.unit_price,
+          };
+        }),
+      ].filter((label) => label.name.trim().length > 0);
+
+      setLastPrintedLabels(printedLabels);
       setReceiveResult(result);
       setStep('done');
       loadHistory();
@@ -593,12 +765,17 @@ const ReceiveItemsPage: React.FC = () => {
     setNotes('');
     setItems([]);
     setReceiveResult(null);
+    setLastPrintedLabels([]);
     setError('');
     setQuickEntry('');
     setQuickQuantity('1');
     setQuickCost('');
+    setLabelCopies('1');
+    setIncludePriceOnLabels(true);
     setLineSearchTargetId(null);
     setLineProductSearch('');
+    setSelectedHistoryInvoice(null);
+    setHistoryLoadingInvoiceId(null);
   };
 
   return (
@@ -859,7 +1036,7 @@ const ReceiveItemsPage: React.FC = () => {
                           <th className="px-3 py-2 text-right w-24">Qty</th>
                           <th className="px-3 py-2 text-right w-36">Cost Price</th>
                           <th className="px-3 py-2 text-right w-36">Line Total</th>
-                          <th className="px-3 py-2 text-center w-14">Action</th>
+                          <th className="px-3 py-2 text-center w-16">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-stone-100">
@@ -1077,6 +1254,55 @@ const ReceiveItemsPage: React.FC = () => {
                 </div>
               </div>
 
+              <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 mb-5">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Print Product Labels</p>
+                    <p className="text-xs text-stone-500 mt-1">
+                      {lastPrintedLabels.length} product label
+                      {lastPrintedLabels.length === 1 ? '' : 's'} prepared from this receive batch.
+                    </p>
+                    <p className="text-xs mt-1 text-stone-500">
+                      {labelPrinterRuntime.canPrint
+                        ? `Label printer ready: ${labelPrinterRuntime.printer?.name}`
+                        : labelPrinterRuntime.reason}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div>
+                      <label className="block text-[11px] font-medium text-stone-500 mb-1">Copies / product</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="50"
+                        value={labelCopies}
+                        onChange={(event) => setLabelCopies(event.target.value)}
+                        className="w-24 px-2.5 py-2 rounded-lg border border-stone-300 bg-white text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                      />
+                    </div>
+
+                    <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-stone-300 bg-white text-xs font-medium text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={includePriceOnLabels}
+                        onChange={(event) => setIncludePriceOnLabels(event.target.checked)}
+                        className="rounded border-stone-300"
+                      />
+                      Include price
+                    </label>
+
+                    <button
+                      onClick={handlePrintReceivedLabels}
+                      disabled={!labelPrinterRuntime.canPrint || lastPrintedLabels.length === 0}
+                      className="px-4 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-stone-100 text-sm font-semibold disabled:opacity-60"
+                    >
+                      Print Labels
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div className="flex justify-center">
                 <button
                   onClick={resetForm}
@@ -1118,6 +1344,13 @@ const ReceiveItemsPage: React.FC = () => {
                       <div className="flex items-center gap-3">
                         <span className="text-xs text-stone-500">{invoice.status}</span>
                         <span className="font-semibold text-slate-800">{formatCurrency(invoice.total)}</span>
+                        <button
+                          onClick={() => handleOpenHistoryInvoice(invoice.id)}
+                          disabled={historyLoadingInvoiceId === invoice.id}
+                          className="px-3 py-1.5 rounded-lg border border-stone-300 bg-white hover:bg-stone-100 text-xs font-semibold text-slate-700 disabled:opacity-60"
+                        >
+                          {historyLoadingInvoiceId === invoice.id ? 'Opening...' : 'View Invoice'}
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -1127,6 +1360,109 @@ const ReceiveItemsPage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {selectedHistoryInvoice && (
+        <div className="fixed inset-0 z-50 bg-black/45 flex items-center justify-center p-4">
+          <div className="w-full max-w-5xl max-h-[90vh] rounded-2xl border border-stone-200 bg-white shadow-2xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-stone-200 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">
+                  Invoice {selectedHistoryInvoice.invoice_number}
+                </h3>
+                <p className="text-sm text-stone-500 mt-0.5">
+                  {selectedHistoryInvoice.issue_date} • {selectedHistoryInvoice.status} •{' '}
+                  {formatCurrency(selectedHistoryInvoice.total)}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedHistoryInvoice(null)}
+                className="text-stone-500 hover:text-slate-900"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto max-h-[58vh]">
+              {(selectedHistoryInvoice.invoice_items || []).length === 0 ? (
+                <p className="text-sm text-stone-500">No line items found on this invoice.</p>
+              ) : (
+                <div className="rounded-xl border border-stone-200 overflow-hidden">
+                  <table className="w-full min-w-[760px] text-sm">
+                    <thead className="bg-stone-100 text-stone-600 text-[11px] uppercase tracking-wide">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Description</th>
+                        <th className="px-3 py-2 text-right w-28">Qty</th>
+                        <th className="px-3 py-2 text-right w-40">Cost Price</th>
+                        <th className="px-3 py-2 text-right w-40">Line Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {(selectedHistoryInvoice.invoice_items || []).map((item, index) => (
+                        <tr key={item.id || `${item.description}-${index}`} className="hover:bg-stone-50/80">
+                          <td className="px-3 py-2 text-slate-800">{item.description}</td>
+                          <td className="px-3 py-2 text-right text-slate-700">{item.quantity}</td>
+                          <td className="px-3 py-2 text-right text-slate-700">
+                            {formatCurrency(item.unit_price)}
+                          </td>
+                          <td className="px-3 py-2 text-right font-semibold text-slate-800">
+                            {formatCurrency(item.quantity * item.unit_price)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="px-5 py-4 border-t border-stone-200 bg-stone-50 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-xs text-stone-500">
+                  {(selectedHistoryInvoice.invoice_items || []).length} line
+                  {(selectedHistoryInvoice.invoice_items || []).length === 1 ? '' : 's'} on invoice.
+                </p>
+                <p className="text-xs mt-1 text-stone-500">
+                  {labelPrinterRuntime.canPrint
+                    ? `Label printer ready: ${labelPrinterRuntime.printer?.name}`
+                    : labelPrinterRuntime.reason}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div>
+                  <label className="block text-[11px] font-medium text-stone-500 mb-1">Copies / product</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={labelCopies}
+                    onChange={(event) => setLabelCopies(event.target.value)}
+                    className="w-24 px-2.5 py-2 rounded-lg border border-stone-300 bg-white text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                  />
+                </div>
+
+                <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-stone-300 bg-white text-xs font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={includePriceOnLabels}
+                    onChange={(event) => setIncludePriceOnLabels(event.target.checked)}
+                    className="rounded border-stone-300"
+                  />
+                  Include price
+                </label>
+
+                <button
+                  onClick={() => handlePrintInvoiceLabels(selectedHistoryInvoice)}
+                  disabled={!labelPrinterRuntime.canPrint}
+                  className="px-4 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-stone-100 text-sm font-semibold disabled:opacity-60"
+                >
+                  Print Invoice Labels
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showBulkModal && (
         <div className="fixed inset-0 z-50 bg-black/45 flex items-center justify-center p-4">
