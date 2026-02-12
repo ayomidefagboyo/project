@@ -12,104 +12,11 @@ import type {
 
   VendorInvoice
 } from '@/types';
+import { DataServiceBase } from '../../../../shared/services/dataServiceBase';
 
-export class DataService {
-  // Generic CRUD operations
-  private async create<T>(table: string, data: Partial<T>): Promise<{ data: T | null; error: string | null }> {
-    try {
-      const { data: result, error } = await supabase
-        .from(table)
-        .insert(data)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return { data: result as T, error: null };
-    } catch (error) {
-      console.error(`Create ${table} error:`, error);
-      return {
-        data: null,
-        error: error instanceof Error ? error.message : `Failed to create ${table}`
-      };
-    }
-  }
-
-  private async read<T>(table: string, id: string): Promise<{ data: T | null; error: string | null }> {
-    try {
-      const { data, error } = await supabase
-        .from(table)
-        .select('*')
-        .eq('id', id)
-        .single();
-
-      if (error) throw error;
-      return { data: data as T, error: null };
-    } catch (error) {
-      console.error(`Read ${table} error:`, error);
-      return {
-        data: null,
-        error: error instanceof Error ? error.message : `Failed to read ${table}`
-      };
-    }
-  }
-
-  private async update<T>(table: string, id: string, data: Partial<T>): Promise<{ data: T | null; error: string | null }> {
-    try {
-      const { data: result, error } = await supabase
-        .from(table)
-        .update(data)
-        .eq('id', id)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return { data: result as T, error: null };
-    } catch (error) {
-      console.error(`Update ${table} error:`, error);
-      return {
-        data: null,
-        error: error instanceof Error ? error.message : `Failed to update ${table}`
-      };
-    }
-  }
-
-  private async delete(table: string, id: string): Promise<{ error: string | null }> {
-    try {
-      const { error } = await supabase
-        .from(table)
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
-      return { error: null };
-    } catch (error) {
-      console.error(`Delete ${table} error:`, error);
-      return {
-        error: error instanceof Error ? error.message : `Failed to delete ${table}`
-      };
-    }
-  }
-
-  private async list<T>(table: string, filters?: Record<string, any>): Promise<{ data: T[] | null; error: string | null }> {
-    try {
-      let query = supabase.from(table).select('*');
-
-      if (filters) {
-        Object.entries(filters).forEach(([key, value]) => {
-          query = query.eq(key, value);
-        });
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-      return { data: data as T[], error: null };
-    } catch (error) {
-      console.error(`List ${table} error:`, error);
-      return {
-        data: null,
-        error: error instanceof Error ? error.message : `Failed to list ${table}`
-      };
-    }
+export class DataService extends DataServiceBase {
+  constructor() {
+    super(supabase);
   }
 
   // Outlet operations with subscription gating
@@ -118,9 +25,6 @@ export class DataService {
       // Logic for user-associated outlet creation can be added here if needed
       // ensuring standard limits are respected without gatedApiCalls dependency
     }
-
-    return this.create<Outlet>(TABLES.OUTLETS, outlet);
-
     return this.create<Outlet>(TABLES.OUTLETS, outlet);
   }
 
@@ -635,4 +539,3 @@ export class DataService {
 }
 
 export const dataService = new DataService();
-
