@@ -46,6 +46,11 @@ const ImportProductsModal: React.FC<ImportProductsModalProps> = ({
   const [selectedProducts, setSelectedProducts] = useState<Set<number>>(new Set());
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState({ done: 0, total: 0, errors: 0 });
+  const [importSummary, setImportSummary] = useState<{
+    created: number;
+    updated: number;
+    skipped: number;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const reset = () => {
@@ -54,6 +59,7 @@ const ImportProductsModal: React.FC<ImportProductsModalProps> = ({
     setSelectedProducts(new Set());
     setImporting(false);
     setImportProgress({ done: 0, total: 0, errors: 0 });
+    setImportSummary(null);
     setError(null);
     setSource('auto');
   };
@@ -110,35 +116,58 @@ const ImportProductsModal: React.FC<ImportProductsModalProps> = ({
     setStep('importing');
     setImporting(true);
     setImportProgress({ done: 0, total: toImport.length, errors: 0 });
+    setImportSummary(null);
 
-    let errors = 0;
+    try {
+      const payloadProducts = toImport.map((p) => ({
+        outlet_id: currentOutlet.id,
+        name: p.name,
+        sku: p.sku,
+        barcode: p.barcode,
+        description: p.description,
+        category: p.category || 'Other',
+        unit_price: p.unit_price,
+        cost_price: p.cost_price,
+        quantity_on_hand: p.quantity_on_hand,
+        reorder_level: p.reorder_level,
+        reorder_quantity: p.reorder_quantity,
+        tax_rate: p.tax_rate,
+        is_active: p.is_active,
+        vendor_id: p.vendor_id,
+      }));
 
-    for (let i = 0; i < toImport.length; i++) {
-      const p = toImport[i];
-      try {
-        await posService.createProduct({
-          outlet_id: currentOutlet.id,
-          name: p.name,
-          sku: p.sku,
-          barcode: p.barcode,
-          description: p.description,
-          category: p.category || 'Other',
-          unit_price: p.unit_price,
-          cost_price: p.cost_price,
-          quantity_on_hand: p.quantity_on_hand,
-          reorder_level: p.reorder_level,
-          reorder_quantity: p.reorder_quantity,
-          tax_rate: p.tax_rate,
-        });
-      } catch (err) {
-        errors++;
-        console.error(`Failed to import "${p.name}":`, err);
+      const importResult = await posService.bulkImportProducts({
+        outlet_id: currentOutlet.id,
+        products: payloadProducts,
+        dedupe_by: 'sku_or_barcode',
+        update_existing: true,
+      });
+
+      setImportProgress({
+        done: toImport.length,
+        total: toImport.length,
+        errors: importResult.error_count || 0,
+      });
+      setImportSummary({
+        created: importResult.created_count || 0,
+        updated: importResult.updated_count || 0,
+        skipped: importResult.skipped_count || 0,
+      });
+
+      if (importResult.error_count > 0) {
+        const firstError = importResult.errors?.[0]?.message || 'Some products failed to import.';
+        setError(firstError);
+      } else {
+        setError(null);
       }
-      setImportProgress({ done: i + 1, total: toImport.length, errors });
+      setStep('done');
+    } catch (err: any) {
+      setError(err?.message || 'Import failed. Please try again.');
+      setImportProgress({ done: toImport.length, total: toImport.length, errors: toImport.length });
+      setStep('done');
+    } finally {
+      setImporting(false);
     }
-
-    setImporting(false);
-    setStep('done');
   };
 
   const handleDone = () => {
@@ -435,6 +464,11 @@ const ImportProductsModal: React.FC<ImportProductsModalProps> = ({
             <p className="text-sm text-gray-600 mt-1">
               {importProgress.done - importProgress.errors} of {importProgress.total} products imported successfully
             </p>
+            {importSummary && (
+              <p className="text-xs text-gray-500 mt-2">
+                Created {importSummary.created} · Updated {importSummary.updated} · Skipped {importSummary.skipped}
+              </p>
+            )}
             {importProgress.errors > 0 && (
               <p className="text-sm text-red-600 mt-1">{importProgress.errors} products failed to import</p>
             )}

@@ -124,6 +124,32 @@ export interface ProductCreateRequest {
   expiry_date?: string;
 }
 
+export interface BulkImportProductsRequest {
+  outlet_id: string;
+  products: Array<ProductCreateRequest & {
+    is_active?: boolean;
+    display_order?: number;
+  }>;
+  dedupe_by?: 'sku_or_barcode' | 'sku' | 'barcode' | 'none';
+  update_existing?: boolean;
+  dry_run?: boolean;
+}
+
+export interface BulkImportProductsResult {
+  total_received: number;
+  created_count: number;
+  updated_count: number;
+  skipped_count: number;
+  error_count: number;
+  errors: Array<{
+    row: number;
+    sku?: string;
+    barcode?: string;
+    name?: string;
+    message: string;
+  }>;
+}
+
 export interface ProductListResult {
   items: POSProduct[];
   total: number;
@@ -729,6 +755,26 @@ class POSService {
   }
 
   /**
+   * Bulk import products with dedupe/upsert behavior.
+   */
+  async bulkImportProducts(request: BulkImportProductsRequest): Promise<BulkImportProductsResult> {
+    try {
+      const response = await apiClient.post<BulkImportProductsResult>(`${this.baseUrl}/products/import`, {
+        outlet_id: request.outlet_id,
+        products: request.products,
+        dedupe_by: request.dedupe_by || 'sku_or_barcode',
+        update_existing: request.update_existing !== false,
+        dry_run: request.dry_run === true,
+      });
+      if (!response.data) throw new Error(response.error || 'Failed to import products');
+      return response.data;
+    } catch (error) {
+      logger.error('Error bulk importing products:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
    * Update an existing product
    */
   async updateProduct(productId: string, updates: Partial<ProductCreateRequest>): Promise<POSProduct> {
@@ -792,6 +838,33 @@ class POSService {
       if (response.error) throw new Error(response.error);
     } catch (error) {
       logger.error('Error voiding transaction:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Process a refund/return for a transaction.
+   */
+  async refundTransaction(
+    transactionId: string,
+    data: {
+      return_reason?: string;
+      amount?: number;
+      items?: Array<{ product_id: string; quantity: number }>;
+    } = {}
+  ): Promise<{
+    message: string;
+    original_transaction_id: string;
+    return_transaction_id: string;
+    return_transaction_number: string;
+    return_amount: number;
+  }> {
+    try {
+      const response = await apiClient.put<any>(`${this.baseUrl}/transactions/${transactionId}/return`, data);
+      if (!response.data) throw new Error(response.error || 'Failed to process refund');
+      return response.data;
+    } catch (error) {
+      logger.error('Error processing refund:', error);
       throw this.handleError(error);
     }
   }
@@ -1126,10 +1199,12 @@ class POSService {
     } = {}
   ): Promise<{ items: Customer[]; total: number; page: number; size: number }> {
     try {
+      const page = options.page || 1;
+      const size = options.size || 50;
       const params = new URLSearchParams({
         outlet_id: outletId,
-        skip: ((options.page || 1) - 1 * (options.size || 50)).toString(),
-        limit: (options.size || 50).toString(),
+        skip: ((page - 1) * size).toString(),
+        limit: size.toString(),
         active_only: (options.activeOnly !== false).toString(),
         ...options.search && { search: options.search }
       });
@@ -1174,10 +1249,12 @@ class POSService {
   /**
    * Search customers by phone number
    */
-  async searchCustomerByPhone(phone: string): Promise<Customer | null> {
+  async searchCustomerByPhone(outletId: string, phone: string): Promise<Customer | null> {
     try {
-      const customers = await this.getCustomers('', { search: phone, size: 1 });
-      return customers.items.length > 0 ? customers.items[0] : null;
+      const matches = await this.searchCustomers(outletId, phone, 1);
+      if (!matches.length) return null;
+      const byPhone = matches.find((item) => `${item.phone || ''}`.replace(/\D/g, '') === phone.replace(/\D/g, ''));
+      return (byPhone || matches[0]) as Customer;
     } catch (error) {
       logger.error('Error searching customer by phone:', error);
       return null;

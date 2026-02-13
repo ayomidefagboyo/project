@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Monitor, Plus, Printer, Trash2, Wifi } from 'lucide-react';
 import { posService } from '../../lib/posService';
 import { printProductLabels } from '../../lib/labelPrinter';
+import { printReceiptContent } from '../../lib/receiptPrinter';
 import { ToastContainer, useToast } from '../ui/Toast';
 import {
   type AutoOpenDrawerMode,
@@ -94,14 +95,6 @@ const formatHardwareTime = (isoTime?: string): string => {
   if (Number.isNaN(parsed.getTime())) return 'N/A';
   return parsed.toLocaleString();
 };
-
-const escapeHtml = (value: string): string =>
-  value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 
 const formatHardwareToken = (value: string): string =>
   value.replace(/[_-]/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase());
@@ -576,7 +569,7 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
     }
   };
 
-  const handleTestPrint = (printer: PrinterConfig) => {
+  const handleTestPrint = async (printer: PrinterConfig) => {
     if (printer.status !== 'connected') {
       warning(`"${printer.name}" is disconnected.`);
       return;
@@ -628,12 +621,6 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
       info(`${printer.name} does not support paper cut. Receipt will still print.`, 3500);
     }
 
-    const printWindow = window.open('', '_blank', 'width=420,height=700');
-    if (!printWindow) {
-      error('Allow pop-ups to run test print.');
-      return;
-    }
-
     const now = new Date();
     const nowIso = now.toISOString();
     const receiptLines = [
@@ -656,33 +643,18 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
       '------------------------------------------',
     ].join('\n');
 
-    printWindow.document.write(`
-      <!doctype html>
-      <html>
-        <head>
-          <title>Printer Test</title>
-          <style>
-            body { font-family: monospace; padding: 16px; }
-            pre { white-space: pre-wrap; font-size: 13px; line-height: 1.5; }
-          </style>
-        </head>
-        <body>
-          <pre>${escapeHtml(receiptLines)}</pre>
-          <script>
-            window.onload = () => {
-              window.print();
-            };
-            window.onafterprint = () => {
-              window.close();
-            };
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
+    const printResult = await printReceiptContent(receiptLines, {
+      title: 'Printer Test',
+      copies: 1,
+      printerName: printer.name,
+    });
+    if (!printResult.success) {
+      error('Allow pop-ups or configure native print bridge to run test print.');
+      return;
+    }
 
     setLastPrintTestAt((prev) => ({ ...prev, [printer.id]: nowIso }));
-    success(`Test print opened for "${printer.name}".`);
+    success(`Test print sent to "${printer.name}".`);
   };
 
   const openScanModal = (scanner: ScannerConfig) => {

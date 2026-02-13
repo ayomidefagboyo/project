@@ -115,17 +115,6 @@ const PinEntryModal: React.FC<PinEntryModalProps> = ({
     } catch (error: any) {
       console.error('PIN authentication failed:', error);
 
-      // Fallback: If API fails and this is the hardcoded admin profile with PIN 123456
-      if (selectedStaffProfile.staff_code === 'ADM001' && pin === '123456') {
-        const fallbackAuthResponse = {
-          staff_profile: selectedStaffProfile,
-          session_token: 'fallback_session_token',
-          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-        };
-        onSuccess(fallbackAuthResponse);
-        return;
-      }
-
       if (error.message?.includes('locked') || error.message?.includes('attempts')) {
         setError('Account locked due to too many failed attempts');
         setAttemptsRemaining(0);
@@ -214,89 +203,17 @@ const PinEntryModal: React.FC<PinEntryModalProps> = ({
                   <p className="text-gray-500">No active staff profiles found</p>
                   <p className="text-sm text-gray-400">Contact your manager to set up staff access</p>
 
-                  <div className="mt-6 space-y-3">
+                  <div className="mt-6">
                     <button
                       onClick={() => {
-                        // Force clear first setup flag and call onManagerLogin to trigger re-initialization
-                        Object.keys(localStorage).forEach(key => {
-                          if (key.startsWith('pos_first_setup_')) {
-                            localStorage.removeItem(key);
-                          }
-                        });
-                        // Use onForceReload callback to trigger loadStaffProfiles
                         if (onForceReload) {
                           onForceReload();
                         }
-                        onClose();
                       }}
                       className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
                     >
-                      🔄 Reset & Create Admin Profile
+                      Refresh Profiles
                     </button>
-
-                    <button
-                      onClick={() => {
-                        // Create hardcoded admin profile and store it properly
-                        const hardcodedAdmin = {
-                          id: `admin_${Date.now()}`,
-                          parent_account_id: 'hardcoded',
-                          staff_code: 'ADM001',
-                          display_name: 'Admin',
-                          role: 'manager' as const,
-                          permissions: ['manage_staff', 'view_dashboard', 'manage_inventory', 'process_sales'],
-                          outlet_id: currentOutlet?.id || 'default',
-                          is_active: true,
-                          failed_login_attempts: 0,
-                          pin_hash: '$2b$12$hardcoded123456hash',
-                          created_at: new Date().toISOString(),
-                          updated_at: new Date().toISOString()
-                        };
-
-                        // Clear any existing sessions first
-                        localStorage.removeItem('staff_session');
-                        localStorage.removeItem('terminal_activated');
-
-                        // Mark terminal as activated
-                        localStorage.setItem('terminal_activated', 'true');
-
-                        // Create proper staff session
-                        const sessionData = {
-                          staff_profile: hardcodedAdmin,
-                          session_token: 'hardcoded_session',
-                          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-                          outlet_id: currentOutlet?.id || 'default'
-                        };
-                        localStorage.setItem('staff_session', JSON.stringify(sessionData));
-
-                        // Create auth response
-                        const authResponse = {
-                          staff_profile: hardcodedAdmin,
-                          session_token: 'hardcoded_session',
-                          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-                        };
-
-                        onSuccess(authResponse);
-                      }}
-                      className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
-                    >
-                      ⚡ Create Admin Profile (PIN: 123456)
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        // Nuclear option: Clear everything and reload
-                        localStorage.clear();
-                        sessionStorage.clear();
-                        window.location.reload();
-                      }}
-                      className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium text-sm"
-                    >
-                      🔥 Reset Everything & Reload
-                    </button>
-
-                    <div className="text-xs text-gray-400 max-w-sm mx-auto">
-                      Green button = instant access • Red button = fresh start
-                    </div>
                   </div>
                 </div>
               )}

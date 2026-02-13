@@ -90,66 +90,8 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
       });
       setProducts(refreshed.items || []);
     } catch (err) {
-      // Fallback to mock data when API is not available
-      console.warn('API not available, using mock data:', err);
-      const mockProducts = [
-        {
-          id: '1', outlet_id: currentOutlet.id, sku: 'COCA-001', barcode: '123456789012',
-          name: 'Coca Cola 350ml', description: 'Classic Coca Cola soft drink', category: 'Beverages',
-          unit_price: 250.00, cost_price: 180.00, tax_rate: 0.075, quantity_on_hand: 48,
-          reorder_level: 10, reorder_quantity: 50, is_active: true, vendor_id: 'vendor-1',
-          image_url: '', display_order: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString()
-        },
-        {
-          id: '2', outlet_id: currentOutlet.id, sku: 'RICE-001', barcode: '234567890123',
-          name: 'Uncle Bens Rice 5kg', description: 'Premium long grain rice', category: 'Food & Groceries',
-          unit_price: 4500.00, cost_price: 3200.00, tax_rate: 0.075, quantity_on_hand: 25,
-          reorder_level: 5, reorder_quantity: 20, is_active: true, vendor_id: 'vendor-2',
-          image_url: '', display_order: 2, created_at: new Date().toISOString(), updated_at: new Date().toISOString()
-        },
-        {
-          id: '3', outlet_id: currentOutlet.id, sku: 'BREAD-001', barcode: '345678901234',
-          name: 'Fresh Bread Loaf', description: 'Daily fresh white bread', category: 'Food & Groceries',
-          unit_price: 450.00, cost_price: 280.00, tax_rate: 0.075, quantity_on_hand: 35,
-          reorder_level: 10, reorder_quantity: 40, is_active: true, vendor_id: 'vendor-3',
-          image_url: '', display_order: 3, created_at: new Date().toISOString(), updated_at: new Date().toISOString()
-        },
-        {
-          id: '4', outlet_id: currentOutlet.id, sku: 'MILK-001', barcode: '456789012345',
-          name: 'Peak Milk 400g', description: 'Peak full cream milk powder', category: 'Food & Groceries',
-          unit_price: 1200.00, cost_price: 950.00, tax_rate: 0.075, quantity_on_hand: 22,
-          reorder_level: 8, reorder_quantity: 30, is_active: true, vendor_id: 'vendor-4',
-          image_url: '', display_order: 4, created_at: new Date().toISOString(), updated_at: new Date().toISOString()
-        },
-        {
-          id: '5', outlet_id: currentOutlet.id, sku: 'SOAP-001', barcode: '567890123456',
-          name: 'OMO Detergent 500g', description: 'OMO washing powder', category: 'Household Items',
-          unit_price: 850.00, cost_price: 620.00, tax_rate: 0.075, quantity_on_hand: 18,
-          reorder_level: 6, reorder_quantity: 25, is_active: true, vendor_id: 'vendor-5',
-          image_url: '', display_order: 5, created_at: new Date().toISOString(), updated_at: new Date().toISOString()
-        }
-      ];
-
-      // Add any localStorage products
-      const localStorageProducts = JSON.parse(localStorage.getItem('mockProducts') || '[]');
-      const allProducts = [...mockProducts, ...localStorageProducts];
-
-      // Apply filters
-      let filteredProducts = allProducts;
-      if (searchQuery) {
-        const searchLower = searchQuery.toLowerCase();
-        filteredProducts = filteredProducts.filter(p =>
-          p.name.toLowerCase().includes(searchLower) ||
-          p.sku.toLowerCase().includes(searchLower) ||
-          p.barcode?.toLowerCase().includes(searchLower)
-        );
-      }
-      if (selectedCategory) {
-        filteredProducts = filteredProducts.filter(p => p.category === selectedCategory);
-      }
-
-      setProducts(filteredProducts);
-      setError(null);
+      console.error('Failed to load products:', err);
+      setError('Failed to load products from server/cache. Check connection and try again.');
     } finally {
       setIsLoading(false);
     }
@@ -184,18 +126,10 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
         newSet.delete(productId);
         return newSet;
       });
+      setError(null);
     } catch (error) {
-      console.warn('API not available, saving to localStorage');
-      // Save to localStorage for mock functionality
-      const localProducts = JSON.parse(localStorage.getItem('mockProducts') || '[]');
-      const updatedProducts = localProducts.map((p: any) => p.id === productId ? product : p);
-      localStorage.setItem('mockProducts', JSON.stringify(updatedProducts));
-
-      setEditingRows(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(productId);
-        return newSet;
-      });
+      console.error('Failed to save product:', error);
+      setError('Failed to save product changes. Please try again.');
     }
   };
 
@@ -221,37 +155,11 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
       await posService.createProduct(productToCreate);
       setNewProduct({});
       setShowNewRow(false);
+      setError(null);
       await loadProducts();
     } catch (error) {
-      console.warn('API not available, adding to localStorage');
-      // Add to localStorage for mock functionality
-      const newProd = {
-        id: `mock-${Date.now()}`,
-        outlet_id: currentOutlet.id,
-        ...newProduct,
-        sku: newProduct.sku || `SKU-${Date.now()}`,
-        name: newProduct.name!,
-        category: newProduct.category || 'Other',
-        unit_price: newProduct.unit_price || 0,
-        cost_price: newProduct.cost_price || 0,
-        quantity_on_hand: newProduct.quantity_on_hand || 0,
-        reorder_level: newProduct.reorder_level || 0,
-        reorder_quantity: newProduct.reorder_quantity || 0,
-        tax_rate: 0.075,
-        is_active: true,
-        image_url: '',
-        display_order: Date.now(),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-
-      const localProducts = JSON.parse(localStorage.getItem('mockProducts') || '[]');
-      localProducts.push(newProd);
-      localStorage.setItem('mockProducts', JSON.stringify(localProducts));
-
-      setNewProduct({});
-      setShowNewRow(false);
-      await loadProducts();
+      console.error('Failed to add product:', error);
+      setError('Failed to add product. Please check required fields and try again.');
     }
   };
 
@@ -329,6 +237,11 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
 
       {/* Excel-like Table */}
       <div className="p-8">
+        {error && (
+          <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {error}
+          </div>
+        )}
         <div className="bg-white rounded-xl shadow-medium overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">

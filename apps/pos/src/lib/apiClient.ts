@@ -23,6 +23,20 @@ class ApiClient extends ApiClientBase {
         } = await supabase.auth.getSession();
         return session?.access_token || null;
       },
+      getAdditionalHeaders: async () => {
+        try {
+          const raw = localStorage.getItem('pos_staff_session');
+          if (!raw) return {};
+          const parsed = JSON.parse(raw);
+          const sessionToken = parsed?.session_token;
+          if (!sessionToken || typeof sessionToken !== 'string') return {};
+          return {
+            'X-POS-Staff-Session': sessionToken
+          };
+        } catch {
+          return {};
+        }
+      },
     });
 
     logger.log('=== ApiClient Debug ===');
