@@ -41,11 +41,10 @@ interface BulkProductData {
   category: string;
   unit_price: number;
   cost_price: number;
-  stock_quantity: number;
-  min_stock_level: number;
-  supplier_name: string;
-  has_expiry: boolean;
-  shelf_life_days?: number;
+  quantity_on_hand: number;
+  reorder_level: number;
+  vendor_id?: string;
+  min_shelf_life_days?: number;
   description: string;
 }
 
@@ -84,7 +83,7 @@ const ProductManagement: React.FC = () => {
     setIsLoading(true);
     try {
       const response = await posService.getProducts(currentOutlet.id, {
-        size: 1000,
+        size: 100,
         search: searchQuery || undefined,
         category: selectedCategory || undefined
       });
@@ -140,16 +139,16 @@ const ProductManagement: React.FC = () => {
   const filteredProducts = products.filter(product => {
     const matchesSearch = !searchQuery ||
       product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      product.barcode.toLowerCase().includes(searchQuery.toLowerCase());
+      (product.barcode || '').toLowerCase().includes(searchQuery.toLowerCase());
 
     const matchesCategory = !selectedCategory || product.category === selectedCategory;
-    const matchesSupplier = !selectedSupplier || product.supplier_name === selectedSupplier;
+    const matchesSupplier = !selectedSupplier || product.vendor_id === selectedSupplier;
 
     return matchesSearch && matchesCategory && matchesSupplier;
   });
 
   // Get unique suppliers
-  const suppliers = Array.from(new Set(products.map(p => p.supplier_name).filter(Boolean)));
+  const suppliers = Array.from(new Set(products.map(p => p.vendor_id).filter(Boolean)));
 
   // Add new product row
   const addNewProduct = () => {
@@ -160,11 +159,11 @@ const ProductManagement: React.FC = () => {
       category: '',
       unit_price: 0,
       cost_price: 0,
-      stock_quantity: 0,
-      min_stock_level: 0,
-      supplier_name: '',
-      has_expiry: false,
-      shelf_life_days: 0,
+      quantity_on_hand: 0,
+      reorder_level: 0,
+      reorder_quantity: 0,
+      vendor_id: '',
+      min_shelf_life_days: 0,
       description: '',
       tax_rate: 0.075, // 7.5% Nigerian VAT
       outlet_id: currentOutlet?.id || '',
@@ -201,11 +200,11 @@ const ProductManagement: React.FC = () => {
           category: product.category,
           unit_price: product.unit_price,
           cost_price: product.cost_price,
-          stock_quantity: product.stock_quantity,
-          min_stock_level: product.min_stock_level,
-          supplier_name: product.supplier_name,
-          has_expiry: product.has_expiry,
-          shelf_life_days: product.shelf_life_days,
+          quantity_on_hand: product.quantity_on_hand,
+          reorder_level: product.reorder_level,
+          reorder_quantity: product.reorder_quantity,
+          vendor_id: product.vendor_id,
+          min_shelf_life_days: product.min_shelf_life_days,
           description: product.description,
           outlet_id: currentOutlet.id
         };
@@ -217,8 +216,8 @@ const ProductManagement: React.FC = () => {
           name: product.name,
           unit_price: product.unit_price,
           cost_price: product.cost_price,
-          min_stock_level: product.min_stock_level,
-          supplier_name: product.supplier_name,
+          reorder_level: product.reorder_level,
+          vendor_id: product.vendor_id,
           description: product.description
         });
       }
@@ -252,8 +251,7 @@ const ProductManagement: React.FC = () => {
   const exportToCSV = () => {
     const headers = [
       'Name', 'Barcode', 'Category', 'Unit Price (₦)', 'Cost Price (₦)',
-      'Stock Quantity', 'Min Stock Level', 'Supplier', 'Has Expiry',
-      'Shelf Life (Days)', 'Description'
+      'Stock Quantity', 'Reorder Level', 'Vendor ID', 'Shelf Life (Days)', 'Description'
     ];
 
     const csvContent = [
@@ -264,11 +262,10 @@ const ProductManagement: React.FC = () => {
         product.category,
         product.unit_price,
         product.cost_price,
-        product.stock_quantity,
-        product.min_stock_level,
-        `"${product.supplier_name}"`,
-        product.has_expiry ? 'Yes' : 'No',
-        product.shelf_life_days || '',
+        product.quantity_on_hand,
+        product.reorder_level,
+        `"${product.vendor_id || ''}"`,
+        product.min_shelf_life_days || '',
         `"${product.description}"`
       ].join(','))
     ].join('\n');
@@ -287,10 +284,10 @@ const ProductManagement: React.FC = () => {
   // Calculate totals
   const totals = {
     totalProducts: filteredProducts.length,
-    totalStockValue: filteredProducts.reduce((sum, p) => sum + ((p.stock_quantity || 0) * (p.cost_price || 0)), 0),
-    totalSellingValue: filteredProducts.reduce((sum, p) => sum + ((p.stock_quantity || 0) * (p.unit_price || 0)), 0),
-    lowStockItems: filteredProducts.filter(p => (p.stock_quantity || 0) <= (p.min_stock_level || 0)).length,
-    outOfStockItems: filteredProducts.filter(p => (p.stock_quantity || 0) === 0).length
+    totalStockValue: filteredProducts.reduce((sum, p) => sum + ((p.quantity_on_hand || 0) * (p.cost_price || 0)), 0),
+    totalSellingValue: filteredProducts.reduce((sum, p) => sum + ((p.quantity_on_hand || 0) * (p.unit_price || 0)), 0),
+    lowStockItems: filteredProducts.filter(p => (p.quantity_on_hand || 0) <= (p.reorder_level || 0)).length,
+    outOfStockItems: filteredProducts.filter(p => (p.quantity_on_hand || 0) === 0).length
   };
 
   const potentialProfit = totals.totalSellingValue - totals.totalStockValue;
@@ -389,13 +386,13 @@ const ProductManagement: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Vendor</label>
               <select
                 value={selectedSupplier}
                 onChange={(e) => setSelectedSupplier(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <option value="">All Suppliers</option>
+                <option value="">All Vendors</option>
                 {suppliers.map(supplier => (
                   <option key={supplier} value={supplier}>{supplier}</option>
                 ))}
@@ -451,9 +448,9 @@ const ProductManagement: React.FC = () => {
                 </tr>
               ) : (
                 filteredProducts.map((product, index) => {
-                  const stockValue = (product.stock_quantity || 0) * (product.cost_price || 0);
-                  const isLowStock = (product.stock_quantity || 0) <= (product.min_stock_level || 0);
-                  const isOutOfStock = (product.stock_quantity || 0) === 0;
+                  const stockValue = (product.quantity_on_hand || 0) * (product.cost_price || 0);
+                  const isLowStock = (product.quantity_on_hand || 0) <= (product.reorder_level || 0);
+                  const isOutOfStock = (product.quantity_on_hand || 0) === 0;
 
                   return (
                     <tr
@@ -548,7 +545,7 @@ const ProductManagement: React.FC = () => {
                           <span className={`text-sm font-medium ${
                             isOutOfStock ? 'text-red-600' : isLowStock ? 'text-yellow-600' : 'text-gray-900'
                           }`}>
-                            {product.stock_quantity || 0}
+                            {product.quantity_on_hand || 0}
                           </span>
                           {isOutOfStock && <AlertTriangle className="w-4 h-4 text-red-500 ml-1" />}
                           {isLowStock && !isOutOfStock && <AlertTriangle className="w-4 h-4 text-yellow-500 ml-1" />}
@@ -559,13 +556,13 @@ const ProductManagement: React.FC = () => {
                         {product.isEditing ? (
                           <input
                             type="number"
-                            value={product.min_stock_level || 0}
-                            onChange={(e) => updateProduct(product.id, 'min_stock_level', parseInt(e.target.value) || 0)}
+                            value={product.reorder_level || 0}
+                            onChange={(e) => updateProduct(product.id, 'reorder_level', parseInt(e.target.value) || 0)}
                             className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
                             placeholder="0"
                           />
                         ) : (
-                          product.min_stock_level || 0
+                          product.reorder_level || 0
                         )}
                       </td>
 
@@ -573,13 +570,13 @@ const ProductManagement: React.FC = () => {
                         {product.isEditing ? (
                           <input
                             type="text"
-                            value={product.supplier_name || ''}
-                            onChange={(e) => updateProduct(product.id, 'supplier_name', e.target.value)}
+                            value={product.vendor_id || ''}
+                            onChange={(e) => updateProduct(product.id, 'vendor_id', e.target.value)}
                             className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                            placeholder="Supplier name"
+                            placeholder="Vendor ID"
                           />
                         ) : (
-                          product.supplier_name
+                          product.vendor_id
                         )}
                       </td>
 

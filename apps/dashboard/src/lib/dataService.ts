@@ -63,8 +63,8 @@ export class DataService extends DataServiceBase {
       if (userError) throw userError;
       if (!user) return { data: [], error: null };
 
-      if (user.role === 'super_admin') {
-        // Super admin can see all outlets
+      if (user.role === 'super_admin' || user.role === 'business_owner') {
+        // Super admins and business owners can see all outlets
         return this.listOutlets();
       } else {
         // Regular users can only see their assigned outlet
