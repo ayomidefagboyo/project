@@ -510,8 +510,10 @@ class POSService {
       date_to?: string;
       cashier_id?: string;
       payment_method?: PaymentMethod;
+      status?: string;
+      search?: string;
     } = {}
-  ) {
+  ): Promise<{ items: POSTransaction[]; total: number; page: number; size: number }> {
     try {
       const params = new URLSearchParams({
         outlet_id: outletId,
@@ -520,11 +522,22 @@ class POSService {
         ...options.date_from && { date_from: options.date_from },
         ...options.date_to && { date_to: options.date_to },
         ...options.cashier_id && { cashier_id: options.cashier_id },
-        ...options.payment_method && { payment_method: options.payment_method }
+        ...options.payment_method && { payment_method: options.payment_method },
+        ...options.status && { status: options.status },
+        ...options.search && { search: options.search.trim() }
       });
 
       const response = await apiClient.get<any>(`${this.baseUrl}/transactions?${params}`);
-      return response.data;
+      if (response.error || !response.data) {
+        throw new Error(response.error || 'Failed to fetch transactions');
+      }
+
+      return {
+        items: response.data.items || [],
+        total: response.data.total || 0,
+        page: response.data.page || options.page || 1,
+        size: response.data.size || options.size || 50
+      };
     } catch (error) {
       logger.error('Error fetching transactions:', error);
       throw this.handleError(error);
@@ -541,20 +554,6 @@ class POSService {
       return response.data;
     } catch (error) {
       logger.error('Error fetching transaction:', error);
-      throw this.handleError(error);
-    }
-  }
-
-  /**
-   * Void a transaction
-   */
-  async voidTransaction(transactionId: string, reason: string): Promise<void> {
-    try {
-      await apiClient.put(`${this.baseUrl}/transactions/${transactionId}/void`, {
-        void_reason: reason
-      });
-    } catch (error) {
-      logger.error('Error voiding transaction:', error);
       throw this.handleError(error);
     }
   }
@@ -788,17 +787,33 @@ class POSService {
     } = {}
   ): Promise<{ items: Customer[]; total: number; page: number; size: number }> {
     try {
+      const page = options.page || 1;
+      const size = options.size || 50;
+      const search = options.search?.trim();
+
+      // Current stable backend exposes customer search, but not list-with-pagination.
+      // Keep this method safe by routing list requests through search when available.
+      if (!search) {
+        return { items: [], total: 0, page, size };
+      }
+
       const params = new URLSearchParams({
         outlet_id: outletId,
-        skip: ((options.page || 1) - 1 * (options.size || 50)).toString(),
-        limit: (options.size || 50).toString(),
-        active_only: (options.activeOnly !== false).toString(),
-        ...options.search && { search: options.search }
+        query: search,
+        limit: size.toString()
       });
 
-      const response = await apiClient.get<{ items: Customer[]; total: number; page: number; size: number }>(`${this.baseUrl}/customers?${params}`);
-      if (!response.data) throw new Error(response.error || 'Failed to fetch customers');
-      return response.data;
+      const response = await apiClient.get<Customer[]>(`${this.baseUrl}/customers/search?${params}`);
+      if (response.error || !response.data) {
+        throw new Error(response.error || 'Failed to fetch customers');
+      }
+
+      return {
+        items: response.data,
+        total: response.data.length,
+        page: 1,
+        size
+      };
     } catch (error) {
       logger.error('Error fetching customers:', error);
       throw this.handleError(error);
@@ -810,8 +825,16 @@ class POSService {
    */
   async createCustomer(customer: CustomerCreateRequest): Promise<Customer> {
     try {
-      const response = await apiClient.post<Customer>(`${this.baseUrl}/customers`, customer);
-      if (!response.data) throw new Error(response.error || 'Failed to create customer');
+      const params = new URLSearchParams({
+        outlet_id: customer.outlet_id,
+        name: customer.name,
+        phone: customer.phone,
+        ...(customer.email ? { email: customer.email } : {}),
+        ...(customer.address ? { address: customer.address } : {})
+      });
+
+      const response = await apiClient.post<Customer>(`${this.baseUrl}/customers?${params}`);
+      if (response.error || !response.data) throw new Error(response.error || 'Failed to create customer');
       return response.data;
     } catch (error) {
       logger.error('Error creating customer:', error);
@@ -836,10 +859,10 @@ class POSService {
   /**
    * Search customers by phone number
    */
-  async searchCustomerByPhone(phone: string): Promise<Customer | null> {
+  async searchCustomerByPhone(outletId: string, phone: string): Promise<Customer | null> {
     try {
-      const customers = await this.getCustomers('', { search: phone, size: 1 });
-      return customers.items.length > 0 ? customers.items[0] : null;
+      const customers = await this.searchCustomers(outletId, phone, 1);
+      return customers.length > 0 ? customers[0] as Customer : null;
     } catch (error) {
       logger.error('Error searching customer by phone:', error);
       return null;
@@ -886,9 +909,11 @@ class POSService {
     } = {}
   ): Promise<{ items: InventoryTransfer[]; total: number; page: number; size: number }> {
     try {
+      const page = options.page || 1;
+      const size = options.size || 50;
       const params = new URLSearchParams({
-        skip: ((options.page || 1) - 1 * (options.size || 50)).toString(),
-        limit: (options.size || 50).toString(),
+        page: page.toString(),
+        size: size.toString(),
         ...options.outletId && { outlet_id: options.outletId },
         ...options.status && { status: options.status },
         ...options.dateFrom && { date_from: options.dateFrom },
@@ -927,12 +952,23 @@ class POSService {
     notes?: string
   ): Promise<InventoryTransfer> {
     try {
-      const response = await apiClient.post<InventoryTransfer>(
-        `${this.baseUrl}/inventory-transfers/${transferId}/approve`,
-        { approved, notes }
-      );
-      if (!response.data) throw new Error(response.error || 'Failed to update transfer');
-      return response.data;
+      const payload = { approved, notes };
+      const endpoints = [
+        `${this.baseUrl}/inventory/transfers/${transferId}/approve`,
+        `${this.baseUrl}/inventory-transfers/${transferId}/approve`
+      ];
+
+      let lastError = 'Failed to update transfer';
+      for (const endpoint of endpoints) {
+        const response = await apiClient.post<InventoryTransfer>(endpoint, payload);
+        if (response.data) return response.data;
+        if (response.status && response.status !== 404) {
+          throw new Error(response.error || 'Failed to update transfer');
+        }
+        lastError = response.error || lastError;
+      }
+
+      throw new Error(lastError);
     } catch (error) {
       logger.error('Error approving inventory transfer:', error);
       throw this.handleError(error);
@@ -1080,7 +1116,7 @@ class POSService {
     font_size: string;
   }> {
     try {
-      const response = await apiClient.get<any>(`${this.baseUrl}/outlets/${outletId}/receipt-settings`);
+      const response = await apiClient.get<any>(`${this.baseUrl}/receipt-settings/${outletId}`);
       if (!response.data) throw new Error(response.error || 'Failed to fetch settings');
       return response.data;
     } catch (error) {
@@ -1171,6 +1207,9 @@ class POSService {
   }>> {
     try {
       const response = await apiClient.get<any>(`${this.baseUrl}/permissions`);
+      if (response.error || !response.data || !Array.isArray(response.data.permissions)) {
+        return [];
+      }
       return response.data.permissions;
     } catch (error) {
       logger.error('Error fetching permissions:', error);
@@ -1367,31 +1406,6 @@ class POSService {
     } catch (error) {
       logger.error('Error searching customers:', error);
       return [];
-    }
-  }
-
-  /**
-   * Create a new customer
-   */
-  async createCustomer(data: {
-    outlet_id: string;
-    name: string;
-    phone: string;
-    email?: string;
-    address?: string;
-  }): Promise<any> {
-    try {
-      const response = await apiClient.post<any>(`${this.baseUrl}/customers?outlet_id=${data.outlet_id}`, {
-        name: data.name,
-        phone: data.phone,
-        email: data.email,
-        address: data.address
-      });
-      if (!response.data) throw new Error(response.error || 'Failed to create customer');
-      return response.data;
-    } catch (error) {
-      logger.error('Error creating customer:', error);
-      throw this.handleError(error);
     }
   }
 
