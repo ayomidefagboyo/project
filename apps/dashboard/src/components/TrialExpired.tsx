@@ -5,6 +5,7 @@ import { paymentPlans } from '@/lib/stripe';
 import stripeService from '@/lib/stripeService';
 import { useNavigate } from 'react-router-dom';
 import { trackEvent, trackTrialEvent, trackSubscriptionEvent } from '@/lib/posthog';
+import { resolveApiBaseUrl } from '../../../../shared/services/urlResolver';
 
 interface TrialExpiredProps {
   currentPlan?: string;
@@ -32,9 +33,10 @@ const TrialExpired: React.FC<TrialExpiredProps> = ({
     });
 
     try {
-      const backendUrl = import.meta.env.VITE_API_BASE_URL;
+      const backendUrl = resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
+      const shouldUseLiveBilling = backendUrl.source !== 'local_fallback';
 
-      if (backendUrl && !backendUrl.includes('localhost')) {
+      if (shouldUseLiveBilling) {
         // Production: Use Stripe checkout for immediate billing
         const successUrl = `${window.location.origin}/dashboard?payment=success&upgrade=true`;
         const cancelUrl = `${window.location.origin}/dashboard?payment=cancelled`;

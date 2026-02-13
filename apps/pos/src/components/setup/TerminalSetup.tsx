@@ -3,6 +3,7 @@ import { Monitor, Store, CheckCircle, AlertCircle, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useOutlet } from '@/contexts/OutletContext';
 import AuthWrapper from '../auth/AuthWrapper';
+import { resolveDashboardAppUrl } from '../../../../../shared/services/urlResolver';
 
 interface TerminalConfig {
   outlet_id: string;
@@ -17,6 +18,7 @@ interface TerminalSetupProps {
 
 const TerminalSetup: React.FC<TerminalSetupProps> = ({ onSetupComplete }) => {
   const navigate = useNavigate();
+  const dashboardAppUrl = resolveDashboardAppUrl(import.meta.env.VITE_DASHBOARD_APP_URL);
   const { currentUser, userOutlets, isLoading, setCurrentUser, setUserOutlets } = useOutlet();
   const [selectedOutletId, setSelectedOutletId] = useState<string>('');
   const [isConfirming, setIsConfirming] = useState(false);
@@ -135,7 +137,9 @@ const TerminalSetup: React.FC<TerminalSetupProps> = ({ onSetupComplete }) => {
           </p>
 
           <button
-            onClick={() => window.location.href = 'http://localhost:5173'}
+            onClick={() => {
+              window.location.href = dashboardAppUrl;
+            }}
             className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >
             Open Admin Dashboard
