@@ -547,11 +547,32 @@ class AuthService {
   // Get user's outlets
   async getUserOutlets(userId: string): Promise<{ data: any[] | null; error: string | null }> {
     try {
+      const { data: user, error: userError } = await supabase
+        .from('users')
+        .select('outlet_id, role')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (userError) throw userError;
+      if (!user) return { data: [], error: null };
+
+      if (
+        user.role === 'super_admin' ||
+        user.role === 'business_owner' ||
+        user.role === 'outlet_admin' ||
+        user.role === 'manager'
+      ) {
+        const { data, error } = await supabase
+          .from('outlets')
+          .select('*');
+        if (error) throw error;
+        return { data: data || [], error: null };
+      }
+
       const { data, error } = await supabase
         .from('outlets')
         .select('*')
-        .eq('id', (await supabase.from('users').select('outlet_id').eq('id', userId).single()).data?.outlet_id);
-
+        .eq('id', user.outlet_id);
       if (error) throw error;
       return { data: data || [], error: null };
     } catch (error) {

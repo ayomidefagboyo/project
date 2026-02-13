@@ -56,8 +56,13 @@ export class DataService extends DataServiceBase {
       if (userError) throw userError;
       if (!user) return { data: [], error: null };
 
-      if (user.role === 'super_admin') {
-        // Super admin can see all outlets
+      if (
+        user.role === 'super_admin' ||
+        user.role === 'business_owner' ||
+        user.role === 'outlet_admin' ||
+        user.role === 'manager'
+      ) {
+        // Manager-level roles can see all outlets for terminal setup and outlet switching
         return this.listOutlets();
       } else {
         // Regular users can only see their assigned outlet
