@@ -1,6 +1,84 @@
 import { subscriptionService } from './subscriptionService';
 import { SubscriptionFeatures } from '@/types';
 
+const DEFAULT_OPENING_HOURS = {
+  monday: { open: '09:00', close: '17:00', isOpen: true },
+  tuesday: { open: '09:00', close: '17:00', isOpen: true },
+  wednesday: { open: '09:00', close: '17:00', isOpen: true },
+  thursday: { open: '09:00', close: '17:00', isOpen: true },
+  friday: { open: '09:00', close: '17:00', isOpen: true },
+  saturday: { open: '09:00', close: '17:00', isOpen: true },
+  sunday: { open: '09:00', close: '17:00', isOpen: false },
+};
+
+const normalizeText = (value: unknown, fallback: string): string => {
+  if (typeof value !== 'string') return fallback;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : fallback;
+};
+
+const normalizeAddress = (address: unknown): Record<string, string> => {
+  if (typeof address === 'string') {
+    const city = address.trim();
+    return {
+      street: '',
+      city,
+      state: '',
+      zip: '',
+      country: '',
+    };
+  }
+
+  if (address && typeof address === 'object') {
+    const addressObject = address as Record<string, unknown>;
+    return {
+      street: normalizeText(addressObject.street, ''),
+      city: normalizeText(addressObject.city, ''),
+      state: normalizeText(addressObject.state, ''),
+      zip: normalizeText(addressObject.zip ?? addressObject.zipCode, ''),
+      country: normalizeText(addressObject.country, ''),
+    };
+  }
+
+  return {
+    street: '',
+    city: '',
+    state: '',
+    zip: '',
+    country: '',
+  };
+};
+
+const normalizeOutletPayload = (outletData: Record<string, unknown>): Record<string, unknown> => {
+  const businessType = normalizeText(outletData.business_type ?? outletData.businessType, 'retail');
+  const openingHours = (outletData.opening_hours ?? outletData.openingHours) || DEFAULT_OPENING_HOURS;
+  const timezone =
+    normalizeText(outletData.timezone, '') || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+  const payload: Record<string, unknown> = {
+    name: normalizeText(outletData.name, 'New Outlet'),
+    business_type: businessType,
+    status: normalizeText(outletData.status, 'active'),
+    address: normalizeAddress(outletData.address),
+    phone: normalizeText(outletData.phone, 'Not provided'),
+    email: normalizeText(outletData.email, 'not-provided@compazz.app'),
+    opening_hours: openingHours,
+    timezone,
+  };
+
+  const taxRate = outletData.tax_rate ?? outletData.taxRate;
+  if (typeof taxRate === 'number') {
+    payload.tax_rate = taxRate;
+  }
+
+  const currency = normalizeText(outletData.currency, '');
+  if (currency) {
+    payload.currency = currency;
+  }
+
+  return payload;
+};
+
 export class ApiMiddleware {
   // Middleware to check feature access for API routes
   static async checkFeatureAccess(
@@ -121,11 +199,12 @@ export const gatedApiCalls = {
       async () => {
         // Import here to avoid circular dependency
         const { supabase } = await import('./supabase');
+        const normalizedPayload = normalizeOutletPayload(outletData as Record<string, unknown>);
 
         // Actually create the outlet in the database
         const { data: outlet, error } = await supabase
           .from('outlets')
-          .insert(outletData)
+          .insert(normalizedPayload)
           .select()
           .single();
 

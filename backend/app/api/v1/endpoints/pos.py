@@ -210,6 +210,17 @@ def _require_manager_role(
     )
 
 
+def _resolve_actor_user_id(current_user: Dict[str, Any]) -> str:
+    """Resolve authenticated user id for DB columns referencing users(id)."""
+    actor_user_id = str(current_user.get('id') or '').strip()
+    if not actor_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authenticated user id is required"
+        )
+    return actor_user_id
+
+
 # ===============================================
 # PRODUCT MANAGEMENT ENDPOINTS
 # ===============================================
@@ -708,7 +719,18 @@ async def create_transaction(
             transaction.outlet_id,
             x_pos_staff_session
         )
-        cashier_id = actor_context.get('staff_profile_id') or transaction.cashier_id
+        authenticated_user_id = _resolve_actor_user_id(current_user)
+
+        # Persist user-id in pos_transactions.cashier_id (FK -> users.id).
+        # Staff session is still used for role enforcement and cashier_name display.
+        if transaction.cashier_id and transaction.cashier_id != authenticated_user_id:
+            logger.warning(
+                "Ignoring client cashier_id %s in favor of authenticated user %s",
+                transaction.cashier_id,
+                authenticated_user_id
+            )
+        cashier_id = authenticated_user_id
+        staff_profile_id = actor_context.get('staff_profile_id')
         
         # Extract split_payments from transaction notes if present (temporary solution)
         # In future, we should add split_payments as a proper field in the schema
@@ -814,10 +836,12 @@ async def create_transaction(
         # Get cashier's name for display (prefer staff_profiles, then users).
         cashier_name = 'Unknown'
         try:
-            cashier_result = supabase.table('staff_profiles').select('display_name').eq('id', cashier_id).execute()
-            if cashier_result.data:
-                cashier_name = cashier_result.data[0].get('display_name') or cashier_name
-            else:
+            if staff_profile_id:
+                cashier_result = supabase.table('staff_profiles').select('display_name').eq('id', staff_profile_id).execute()
+                if cashier_result.data:
+                    cashier_name = cashier_result.data[0].get('display_name') or cashier_name
+
+            if cashier_name == 'Unknown':
                 user_result = supabase.table('users').select('name').eq('id', cashier_id).execute()
                 if user_result.data:
                     cashier_name = user_result.data[0].get('name') or cashier_name
@@ -1052,7 +1076,7 @@ async def void_transaction(
             transaction.get('outlet_id'),
             x_pos_staff_session
         )
-        actor_id = actor_context.get('staff_profile_id') or current_user.get('id') or 'system'
+        actor_id = _resolve_actor_user_id(current_user)
         void_reason = void_data.get('void_reason', 'No reason provided') if void_data else 'No reason provided'
 
         # Restore stock quantities for voided transaction
@@ -1148,7 +1172,7 @@ async def create_stock_adjustment(
             movement.outlet_id,
             x_pos_staff_session
         )
-        actor_id = actor_context.get('staff_profile_id') or current_user.get('id') or movement.performed_by
+        actor_id = _resolve_actor_user_id(current_user)
 
         # Get current product stock
         product_result = supabase.table('pos_products').select('quantity_on_hand').eq('id', movement.product_id).execute()
@@ -1281,7 +1305,7 @@ async def create_inventory_transfer(
         now_iso = datetime.utcnow().isoformat()
         transfer_id = str(uuid.uuid4())
         transfer_number = f"TRF-{datetime.utcnow().strftime('%Y%m%d')}-{transfer_id[:8].upper()}"
-        performed_by = actor_context.get('staff_profile_id') or current_user.get('id') or 'system'
+        performed_by = _resolve_actor_user_id(current_user)
 
         outlet_result = supabase.table('outlets').select('id,name').in_(
             'id', [transfer.from_outlet_id, transfer.to_outlet_id]
@@ -1982,7 +2006,7 @@ async def return_transaction(
             original_transaction.get('outlet_id'),
             x_pos_staff_session
         )
-        actor_id = actor_context.get('staff_profile_id') or current_user.get('id') or 'system'
+        actor_id = _resolve_actor_user_id(current_user)
 
         # Validate transaction can be returned
         if original_transaction['status'] not in ['completed']:
@@ -2352,13 +2376,21 @@ async def open_cash_drawer_session(
         # Generate session number
         session_id = str(uuid.uuid4())
         session_number = f"SESSION-{datetime.now().strftime('%Y%m%d')}-{session_id[:8].upper()}"
-        
+        actor_user_id = _resolve_actor_user_id(current_user)
+
+        if session.cashier_id and session.cashier_id != actor_user_id:
+            logger.warning(
+                "Ignoring client cash drawer cashier_id %s in favor of authenticated user %s",
+                session.cashier_id,
+                actor_user_id
+            )
+
         session_data = {
             'id': session_id,
             'outlet_id': session.outlet_id,
             'terminal_id': session.terminal_id,
             'session_number': session_number,
-            'cashier_id': session.cashier_id,
+            'cashier_id': actor_user_id,
             'opening_balance': float(session.opening_balance),
             'opening_notes': session.opening_notes,
             'cash_sales_total': 0.0,

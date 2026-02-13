@@ -20,6 +20,7 @@ import CreateStoreModal, { StoreFormData } from '@/components/modals/CreateStore
 import Toast from '@/components/ui/Toast';
 import { dataService } from '@/lib/services';
 import { subscriptionService } from '@/lib/subscriptionService';
+import { resolvePosAppUrl } from '../../../../../shared/services/urlResolver';
 
 interface HeaderProps {
   isDarkMode: boolean;
@@ -29,6 +30,7 @@ interface HeaderProps {
 
 const Header: React.FC<HeaderProps> = ({ isDarkMode, toggleDarkMode, onToggleSidebar }) => {
   const { currentUser, setCurrentUser, setCurrentOutlet, setUserOutlets, hasPermission, currentOutlet, userOutlets } = useOutlet();
+  const posAppUrl = resolvePosAppUrl(import.meta.env.VITE_POS_APP_URL);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showCreateStoreModal, setShowCreateStoreModal] = useState(false);
@@ -152,7 +154,7 @@ const Header: React.FC<HeaderProps> = ({ isDarkMode, toggleDarkMode, onToggleSid
 
             {/* Launch POS Button */}
             <a
-              href="http://localhost:5174"
+              href={posAppUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="hidden md:flex items-center space-x-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors font-medium text-sm"

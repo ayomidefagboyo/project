@@ -1,6 +1,7 @@
 /**
  * Application configuration
  */
+import { resolveApiBaseUrl } from '../../../../shared/services/urlResolver';
 
 export interface AppConfig {
   api: {
@@ -27,7 +28,7 @@ export interface AppConfig {
 
 const config: AppConfig = {
   api: {
-    baseUrl: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002/api/v1',
+    baseUrl: resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL).url,
     timeout: parseInt(import.meta.env.VITE_API_TIMEOUT || '30000'),
     retryAttempts: parseInt(import.meta.env.VITE_API_RETRY_ATTEMPTS || '3'),
     retryDelay: parseInt(import.meta.env.VITE_API_RETRY_DELAY || '1000')
@@ -49,7 +50,6 @@ const config: AppConfig = {
 };
 
 export default config;
-
 
 
 

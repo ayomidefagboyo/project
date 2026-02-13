@@ -1,7 +1,10 @@
 import React from 'react';
 import { Users, ExternalLink } from 'lucide-react';
+import { resolveDashboardAppUrl } from '../../../../../shared/services/urlResolver';
 
 const NoStaffMessage: React.FC = () => {
+  const dashboardAppUrl = resolveDashboardAppUrl(import.meta.env.VITE_DASHBOARD_APP_URL);
+
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
@@ -19,7 +22,7 @@ const NoStaffMessage: React.FC = () => {
 
         <div className="space-y-3">
           <a
-            href="http://localhost:5173"
+            href={dashboardAppUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="w-full inline-flex items-center justify-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"

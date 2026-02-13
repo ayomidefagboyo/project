@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Settings, AlertCircle, Shield, ChevronRight, Trash2 } from 'lucide-react';
 import { staffService } from '@/lib/staffService';
 import { useToast } from '@/components/ui/Toast';
+import { resolveDashboardAppUrl } from '../../../../../shared/services/urlResolver';
 
 interface TerminalConfig {
   outlet_id: string;
@@ -31,6 +32,7 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
   onStaffAuthenticated,
   onReconfigure,
 }) => {
+  const dashboardAppUrl = resolveDashboardAppUrl(import.meta.env.VITE_DASHBOARD_APP_URL);
   const [staffProfiles, setStaffProfiles] = useState<StaffProfile[]>([]);
   const [selectedStaffCode, setSelectedStaffCode] = useState('');
   const [pin, setPin] = useState('');
@@ -175,7 +177,7 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
 
             <div className="space-y-3">
               <a
-                href="http://localhost:5173"
+                href={dashboardAppUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-full inline-flex items-center justify-center gap-2 px-6 py-4 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-all duration-200 font-medium text-[var(--text-button)]"
