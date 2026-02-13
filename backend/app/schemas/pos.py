@@ -4,7 +4,7 @@ Nigerian Supermarket Focus
 """
 
 from pydantic import BaseModel, Field, validator
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime, date
 from enum import Enum
 from decimal import Decimal
@@ -163,6 +163,45 @@ class POSProductResponse(POSProductBase):
 
     class Config:
         from_attributes = True
+
+
+class ProductImportItem(POSProductBase):
+    """Product payload used by bulk import."""
+    pass
+
+
+class ProductBulkImportRequest(BaseModel):
+    """Bulk import request for POS products."""
+    outlet_id: str = Field(..., description="Outlet ID")
+    products: List[ProductImportItem] = Field(..., min_items=1, max_items=5000, description="Products to import")
+    dedupe_by: Literal['sku_or_barcode', 'sku', 'barcode', 'none'] = Field(
+        'sku_or_barcode',
+        description="How to detect existing products"
+    )
+    update_existing: bool = Field(
+        True,
+        description="Whether to update existing matched products (if false, matched rows are skipped)"
+    )
+    dry_run: bool = Field(False, description="Validate and match rows without writing to database")
+
+
+class ProductBulkImportError(BaseModel):
+    """Single row error for product bulk import."""
+    row: int = Field(..., description="1-based row number in submitted payload")
+    sku: Optional[str] = Field(None, description="Submitted SKU")
+    barcode: Optional[str] = Field(None, description="Submitted barcode")
+    name: Optional[str] = Field(None, description="Submitted product name")
+    message: str = Field(..., description="Error message")
+
+
+class ProductBulkImportResponse(BaseModel):
+    """Summary of product bulk import results."""
+    total_received: int = Field(..., description="Total rows received")
+    created_count: int = Field(..., description="Number of rows created")
+    updated_count: int = Field(..., description="Number of rows updated")
+    skipped_count: int = Field(..., description="Number of rows skipped due to dedupe policy")
+    error_count: int = Field(..., description="Number of rows that failed")
+    errors: List[ProductBulkImportError] = Field(default_factory=list, description="Row-level errors")
 
 
 # ===============================================
@@ -465,6 +504,14 @@ class CustomerResponse(CustomerBase):
 
     class Config:
         from_attributes = True
+
+
+class CustomerListResponse(BaseModel):
+    """Paginated customer list response."""
+    items: List[CustomerResponse] = Field(default_factory=list, description="Customer rows")
+    total: int = Field(..., description="Total matched customers")
+    page: int = Field(..., description="Current page")
+    size: int = Field(..., description="Requested page size")
 
 
 class LoyaltyTransactionCreate(BaseModel):

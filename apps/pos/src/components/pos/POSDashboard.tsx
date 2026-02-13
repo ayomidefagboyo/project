@@ -49,6 +49,7 @@ import {
   resolveReceiptPrinter,
 } from '../../lib/hardwareProfiles';
 import { resolveAdapterCapabilities, supportsHardwareAction } from '../../lib/hardwareAdapters';
+import { printReceiptContent } from '../../lib/receiptPrinter';
 
 export interface CartItem {
   product: POSProduct;
@@ -187,14 +188,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     }).format(amount);
   };
 
-  const escapeHtml = (value: string): string =>
-    value
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-
   const paymentMethodLabel = (method: PaymentMethod): string => {
     if (method === PaymentMethod.CASH) return 'Cash';
     if (method === PaymentMethod.POS) return 'Card';
@@ -268,54 +261,19 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     return lines.join('\n');
   };
 
-  const openReceiptPrintWindow = (
+  const openReceiptPrintWindow = async (
     receiptContent: string,
     options?: {
       title?: string;
       copies?: number;
     }
-  ): boolean => {
-    const title = options?.title || 'Receipt';
-    const copies = Math.max(1, Math.min(5, Math.floor(options?.copies || 1)));
-    const printWindow = window.open('', '_blank', 'width=900,height=700');
-    if (!printWindow) return false;
-
-    const copyBlocks = Array.from({ length: copies })
-      .map((_, index) => {
-        const copyLabel = copies > 1 ? `<div class="copy-label">Copy ${index + 1}</div>` : '';
-        return `
-          <section class="copy">
-            ${copyLabel}
-            <pre>${escapeHtml(receiptContent)}</pre>
-          </section>
-        `;
-      })
-      .join('<hr class="cut" />');
-
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>${escapeHtml(title)}</title>
-          <style>
-            body { font-family: monospace; padding: 16px; color: #111827; }
-            pre { white-space: pre-wrap; font-size: 12px; margin: 0; }
-            .copy { margin-bottom: 12px; }
-            .copy-label { font-weight: 700; margin-bottom: 8px; text-transform: uppercase; }
-            .cut { border: 0; border-top: 1px dashed #9ca3af; margin: 14px 0; }
-            @media print {
-              body { padding: 0; }
-              .copy { break-inside: avoid; page-break-inside: avoid; }
-            }
-          </style>
-        </head>
-        <body>
-          ${copyBlocks}
-          <script>window.onload = () => window.print();</script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    return true;
+  ): Promise<boolean> => {
+    const result = await printReceiptContent(receiptContent, {
+      title: options?.title || 'Receipt',
+      copies: options?.copies || 1,
+      printerName: hardwareRuntime.receiptPrinter?.name,
+    });
+    return result.success;
   };
 
   const buildReceiptNumberFromOfflineId = (offlineId: string): string => {
@@ -362,9 +320,9 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     };
   };
 
-  const printLocalReceiptPayload = (payload: LocalReceiptPayload, copies = 1) => {
+  const printLocalReceiptPayload = async (payload: LocalReceiptPayload, copies = 1) => {
     const receiptContent = buildLocalReceiptContent(payload);
-    const opened = openReceiptPrintWindow(receiptContent, {
+    const opened = await openReceiptPrintWindow(receiptContent, {
       title: `Receipt ${payload.receiptNumber}`,
       copies,
     });
@@ -1604,12 +1562,12 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
               try {
                 const printResult = await posService.printReceipt(transaction.id, copies);
                 if (printResult?.receipt_content) {
-                  openReceiptPrintWindow(printResult.receipt_content, { title: 'Receipt', copies });
+                  await openReceiptPrintWindow(printResult.receipt_content, { title: 'Receipt', copies });
                 }
               } catch (printError: any) {
                 logger.error('Receipt print error:', printError);
                 // Fall back to local print so cashier is never blocked by backend print endpoint failures.
-                printLocalReceiptPayload({ ...localReceiptPayload, pendingSync: false }, copies);
+                await printLocalReceiptPayload({ ...localReceiptPayload, pendingSync: false }, copies);
               }
             }
           } catch (syncErr: any) {
@@ -1617,7 +1575,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
             // Transaction remains in offline queue and will be retried on next online sync
             await refreshOfflineTransactionCount();
             if (shouldPrintReceipt) {
-              printLocalReceiptPayload(localReceiptPayload, copies);
+              await printLocalReceiptPayload(localReceiptPayload, copies);
             }
           }
         })();
@@ -1625,7 +1583,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
         // Pure offline mode – increment counter so cashier sees pending syncs
         await refreshOfflineTransactionCount();
         if (shouldPrintReceipt) {
-          printLocalReceiptPayload(localReceiptPayload, copies);
+          await printLocalReceiptPayload(localReceiptPayload, copies);
         }
       }
 

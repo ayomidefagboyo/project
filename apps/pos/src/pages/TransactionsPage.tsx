@@ -9,6 +9,7 @@ import { posService, type POSTransaction, type PendingOfflineTransaction, Paymen
 import { useOutlet } from '../contexts/OutletContext';
 import { useToast } from '../components/ui/Toast';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
+import { printReceiptContent } from '../lib/receiptPrinter';
 
 // Extend base transaction type with UI-specific fields returned by API
 interface ExtendedTransaction extends POSTransaction {
@@ -37,6 +38,10 @@ const TransactionsPage: React.FC = () => {
   const [selectedTransaction, setSelectedTransaction] = useState<ExtendedTransaction | null>(null);
   const [showVoidConfirm, setShowVoidConfirm] = useState(false);
   const [voidReason, setVoidReason] = useState('');
+  const [showRefundConfirm, setShowRefundConfirm] = useState(false);
+  const [refundReason, setRefundReason] = useState('');
+  const [isRefunding, setIsRefunding] = useState(false);
+  const [isPrintingReceipt, setIsPrintingReceipt] = useState(false);
   const requestIdRef = useRef(0);
 
   const matchesActiveFilters = useCallback(
@@ -303,6 +308,77 @@ const TransactionsPage: React.FC = () => {
       showError(`Failed to void: ${err.message}`);
     }
   };
+
+  const handleReprintReceipt = async () => {
+    if (!selectedTransaction) return;
+    if (selectedTransaction.status === 'pending') {
+      showError('Pending offline sale cannot be reprinted until it syncs.');
+      return;
+    }
+
+    try {
+      setIsPrintingReceipt(true);
+      const printResult = await posService.printReceipt(selectedTransaction.id, 1);
+      if (!printResult?.receipt_content) {
+        showError('Receipt content was empty.');
+        return;
+      }
+
+      const printed = await printReceiptContent(printResult.receipt_content, {
+        title: `Receipt ${selectedTransaction.transaction_number}`,
+        copies: 1,
+      });
+      if (!printed.success) {
+        showError('Unable to open print flow. Allow pop-ups or configure native print bridge.');
+        return;
+      }
+      success('Receipt print started.');
+    } catch (err: any) {
+      showError(err?.message || 'Failed to reprint receipt.');
+    } finally {
+      setIsPrintingReceipt(false);
+    }
+  };
+
+  const handleRefund = async () => {
+    if (!selectedTransaction) return;
+    if (selectedTransaction.status !== 'completed') {
+      showError('Only completed transactions can be refunded.');
+      return;
+    }
+    if ((selectedTransaction.receipt_type || '').toLowerCase() === 'return' || Number(selectedTransaction.total_amount) <= 0) {
+      showError('This transaction cannot be refunded again.');
+      return;
+    }
+    if (selectedTransaction.status === 'pending') {
+      showError('Pending offline sale cannot be refunded until it syncs.');
+      return;
+    }
+
+    try {
+      setIsRefunding(true);
+      await posService.refundTransaction(selectedTransaction.id, {
+        return_reason: refundReason.trim() || 'Customer return',
+        amount: Math.abs(Number(selectedTransaction.total_amount || 0)),
+      });
+      success('Refund processed successfully.');
+      setShowRefundConfirm(false);
+      setRefundReason('');
+      setSelectedTransaction(null);
+      await loadTransactions();
+    } catch (err: any) {
+      showError(err?.message || 'Failed to process refund.');
+    } finally {
+      setIsRefunding(false);
+    }
+  };
+
+  useEffect(() => {
+    setShowVoidConfirm(false);
+    setVoidReason('');
+    setShowRefundConfirm(false);
+    setRefundReason('');
+  }, [selectedTransaction?.id]);
 
   if (!currentOutlet) {
     return <div className="flex items-center justify-center h-full text-gray-500">Select an outlet to view transactions.</div>;
@@ -589,16 +665,43 @@ const TransactionsPage: React.FC = () => {
             </div>
 
             {/* Drawer footer */}
-            {selectedTransaction.status !== 'voided' && selectedTransaction.status !== 'pending' && (
+            {selectedTransaction.status !== 'pending' && (
               <div className="px-5 py-4 border-t border-gray-100">
-                {!showVoidConfirm ? (
-                  <button
-                    onClick={() => setShowVoidConfirm(true)}
-                    className="w-full py-2.5 border-2 border-red-200 text-red-700 font-semibold rounded-xl hover:bg-red-50 transition-colors text-sm"
-                  >
-                    Void Transaction
-                  </button>
-                ) : (
+                {!showVoidConfirm && !showRefundConfirm ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button
+                      onClick={handleReprintReceipt}
+                      disabled={isPrintingReceipt}
+                      className="py-2.5 border border-blue-200 text-blue-700 font-semibold rounded-xl hover:bg-blue-50 transition-colors text-sm disabled:opacity-60"
+                    >
+                      {isPrintingReceipt ? 'Printing...' : 'Reprint Receipt'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowRefundConfirm(true);
+                        setShowVoidConfirm(false);
+                      }}
+                      disabled={
+                        selectedTransaction.status !== 'completed' ||
+                        (selectedTransaction.receipt_type || '').toLowerCase() === 'return' ||
+                        Number(selectedTransaction.total_amount) <= 0
+                      }
+                      className="py-2.5 border border-amber-200 text-amber-700 font-semibold rounded-xl hover:bg-amber-50 transition-colors text-sm disabled:opacity-60"
+                    >
+                      Refund
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowVoidConfirm(true);
+                        setShowRefundConfirm(false);
+                      }}
+                      disabled={selectedTransaction.status === 'voided'}
+                      className="py-2.5 border-2 border-red-200 text-red-700 font-semibold rounded-xl hover:bg-red-50 transition-colors text-sm disabled:opacity-60"
+                    >
+                      Void Transaction
+                    </button>
+                  </div>
+                ) : showVoidConfirm ? (
                   <div className="space-y-3">
                     <p className="text-sm font-semibold text-red-800">Are you sure? This will restore stock.</p>
                     <textarea
@@ -613,6 +716,32 @@ const TransactionsPage: React.FC = () => {
                         Confirm Void
                       </button>
                       <button onClick={() => { setShowVoidConfirm(false); setVoidReason(''); }} className="flex-1 py-2 bg-gray-200 text-gray-700 font-semibold rounded-lg text-sm hover:bg-gray-300">
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-sm font-semibold text-amber-800">Confirm refund for this transaction.</p>
+                    <textarea
+                      value={refundReason}
+                      onChange={e => setRefundReason(e.target.value)}
+                      placeholder="Reason for refund..."
+                      className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm"
+                      rows={2}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleRefund}
+                        disabled={isRefunding}
+                        className="flex-1 py-2 bg-amber-600 text-white font-semibold rounded-lg text-sm hover:bg-amber-700 disabled:opacity-60"
+                      >
+                        {isRefunding ? 'Processing...' : 'Confirm Refund'}
+                      </button>
+                      <button
+                        onClick={() => { setShowRefundConfirm(false); setRefundReason(''); }}
+                        className="flex-1 py-2 bg-gray-200 text-gray-700 font-semibold rounded-lg text-sm hover:bg-gray-300"
+                      >
                         Cancel
                       </button>
                     </div>

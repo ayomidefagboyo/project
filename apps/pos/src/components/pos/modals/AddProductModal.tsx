@@ -54,56 +54,21 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
 
     setIsLoading(true);
     try {
-      try {
-        // Try to use the real API first
-        await posService.createProduct({
-          outlet_id: currentOutlet.id,
-          name: formData.name,
-          description: formData.description || undefined,
-          category: formData.category,
-          unit_price: parseFloat(formData.unit_price) || 0,
-          cost_price: parseFloat(formData.cost_price) || 0,
-          quantity_on_hand: parseInt(formData.stock_quantity) || 0,
-          reorder_level: parseInt(formData.min_stock_level) || 0,
-          reorder_quantity: parseInt(formData.min_stock_level) || 0, // Set reorder quantity same as reorder level
-          tax_rate: 0.075, // 7.5% VAT for Nigeria
-          min_shelf_life_days: formData.has_expiry && formData.shelf_life_days ? parseInt(formData.shelf_life_days) : undefined,
-          sku: formData.barcode || `SKU-${Date.now()}`, // Generate SKU if not provided
-          barcode: formData.barcode || undefined
-        });
-      } catch (apiError) {
-        // If API fails, simulate adding to mock data
-        console.warn('API not available, simulating product creation:', apiError);
-
-        // Create a mock product object that would be added to our mock data
-        const newProduct = {
-          id: `mock-${Date.now()}`,
-          outlet_id: currentOutlet.id,
-          name: formData.name,
-          description: formData.description || undefined,
-          category: formData.category,
-          unit_price: parseFloat(formData.unit_price) || 0,
-          cost_price: parseFloat(formData.cost_price) || 0,
-          quantity_on_hand: parseInt(formData.stock_quantity) || 0,
-          reorder_level: parseInt(formData.min_stock_level) || 0,
-          reorder_quantity: parseInt(formData.min_stock_level) || 0,
-          tax_rate: 0.075,
-          min_shelf_life_days: formData.has_expiry && formData.shelf_life_days ? parseInt(formData.shelf_life_days) : undefined,
-          sku: formData.barcode || `SKU-${Date.now()}`,
-          barcode: formData.barcode || undefined,
-          is_active: true,
-          vendor_id: formData.supplier_name || undefined,
-          image_url: '',
-          display_order: Date.now(),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-
-        // Store in localStorage for persistence during the session
-        const existingProducts = JSON.parse(localStorage.getItem('mockProducts') || '[]');
-        existingProducts.push(newProduct);
-        localStorage.setItem('mockProducts', JSON.stringify(existingProducts));
-      }
+      await posService.createProduct({
+        outlet_id: currentOutlet.id,
+        name: formData.name,
+        description: formData.description || undefined,
+        category: formData.category,
+        unit_price: parseFloat(formData.unit_price) || 0,
+        cost_price: parseFloat(formData.cost_price) || 0,
+        quantity_on_hand: parseInt(formData.stock_quantity) || 0,
+        reorder_level: parseInt(formData.min_stock_level) || 0,
+        reorder_quantity: parseInt(formData.min_stock_level) || 0, // Set reorder quantity same as reorder level
+        tax_rate: 0.075, // 7.5% VAT for Nigeria
+        min_shelf_life_days: formData.has_expiry && formData.shelf_life_days ? parseInt(formData.shelf_life_days) : undefined,
+        sku: formData.barcode || `SKU-${Date.now()}`, // Generate SKU if not provided
+        barcode: formData.barcode || undefined
+      });
 
       success('Product added successfully!');
       onSuccess();

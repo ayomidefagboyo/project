@@ -19,18 +19,21 @@ interface LoggerLike {
 interface ApiClientBaseOptions {
   baseUrl: string;
   getSessionToken: () => Promise<string | null>;
+  getAdditionalHeaders?: () => Promise<Record<string, string>>;
   logger?: LoggerLike;
 }
 
 export class ApiClientBase {
   private readonly baseUrl: string;
   private readonly getSessionToken: () => Promise<string | null>;
+  private readonly getAdditionalHeaders?: () => Promise<Record<string, string>>;
   private readonly logger?: LoggerLike;
   private token: string | null = null;
 
   constructor(options: ApiClientBaseOptions) {
     this.baseUrl = options.baseUrl;
     this.getSessionToken = options.getSessionToken;
+    this.getAdditionalHeaders = options.getAdditionalHeaders;
     this.logger = options.logger;
   }
 
@@ -63,6 +66,15 @@ export class ApiClientBase {
       this.logger?.debug?.('Auth token added to headers');
     } else {
       this.logger?.debug?.('No auth token available');
+    }
+
+    if (this.getAdditionalHeaders) {
+      try {
+        const extraHeaders = await this.getAdditionalHeaders();
+        Object.assign(headers, extraHeaders || {});
+      } catch (error) {
+        this.logger?.warn?.('Failed to resolve additional headers:', error);
+      }
     }
 
     return headers;
@@ -200,6 +212,14 @@ export class ApiClientBase {
       const token = await this.getStoredToken();
       if (token) {
         headers.Authorization = `Bearer ${token}`;
+      }
+      if (this.getAdditionalHeaders) {
+        try {
+          const extraHeaders = await this.getAdditionalHeaders();
+          Object.assign(headers, extraHeaders || {});
+        } catch (error) {
+          this.logger?.warn?.('Failed to resolve additional headers for upload:', error);
+        }
       }
 
       const response = await fetch(`${this.baseUrl}${endpoint}`, {

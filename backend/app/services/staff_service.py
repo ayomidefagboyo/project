@@ -1,11 +1,16 @@
 """
 Staff profile management service
 """
+import base64
 import bcrypt
+import hashlib
+import hmac
+import json
 import secrets
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from app.core.database import get_supabase_admin, Tables
+from app.core.config import settings
 from app.schemas.pos import StaffProfileCreate, StaffProfileUpdate, StaffProfileResponse
 
 
@@ -23,9 +28,81 @@ class StaffService:
         return bcrypt.checkpw(pin.encode('utf-8'), pin_hash.encode('utf-8'))
 
     @staticmethod
-    def generate_session_token() -> str:
-        """Generate a secure session token"""
-        return secrets.token_urlsafe(32)
+    def _encode_base64url(value: bytes) -> str:
+        """Encode bytes using URL-safe base64 without padding."""
+        return base64.urlsafe_b64encode(value).decode('utf-8').rstrip('=')
+
+    @staticmethod
+    def _decode_base64url(value: str) -> bytes:
+        """Decode URL-safe base64 (with/without padding)."""
+        padding = '=' * (-len(value) % 4)
+        return base64.urlsafe_b64decode(f"{value}{padding}")
+
+    @staticmethod
+    def generate_session_token(
+        profile: Optional[Dict[str, Any]] = None,
+        expires_at: Optional[datetime] = None
+    ) -> str:
+        """
+        Generate a POS staff session token.
+        - If profile is provided, issue a signed token that can be verified server-side.
+        - If not provided, fall back to opaque random token for backward compatibility.
+        """
+        if not profile:
+            return secrets.token_urlsafe(32)
+
+        expiry = expires_at or (datetime.utcnow() + timedelta(hours=8))
+        payload = {
+            'staff_profile_id': profile.get('id'),
+            'outlet_id': profile.get('outlet_id'),
+            'role': str(profile.get('role') or '').lower(),
+            'parent_account_id': profile.get('parent_account_id'),
+            'exp': int(expiry.timestamp()),
+            'iat': int(datetime.utcnow().timestamp())
+        }
+        payload_json = json.dumps(payload, separators=(',', ':'), sort_keys=True).encode('utf-8')
+        payload_b64 = StaffService._encode_base64url(payload_json)
+        signature = hmac.new(
+            settings.SECRET_KEY.encode('utf-8'),
+            payload_b64.encode('utf-8'),
+            hashlib.sha256
+        ).digest()
+        signature_b64 = StaffService._encode_base64url(signature)
+        return f"v1.{payload_b64}.{signature_b64}"
+
+    @staticmethod
+    def parse_session_token(session_token: str) -> Optional[Dict[str, Any]]:
+        """Verify and parse a signed POS staff session token."""
+        try:
+            if not session_token:
+                return None
+
+            parts = session_token.split('.')
+            if len(parts) != 3 or parts[0] != 'v1':
+                return None
+
+            payload_b64 = parts[1]
+            provided_signature_b64 = parts[2]
+            expected_signature = hmac.new(
+                settings.SECRET_KEY.encode('utf-8'),
+                payload_b64.encode('utf-8'),
+                hashlib.sha256
+            ).digest()
+            expected_signature_b64 = StaffService._encode_base64url(expected_signature)
+
+            if not hmac.compare_digest(provided_signature_b64, expected_signature_b64):
+                return None
+
+            payload_raw = StaffService._decode_base64url(payload_b64)
+            payload = json.loads(payload_raw.decode('utf-8'))
+
+            exp = int(payload.get('exp', 0))
+            if exp <= int(datetime.utcnow().timestamp()):
+                return None
+
+            return payload
+        except Exception:
+            return None
 
     @staticmethod
     async def generate_staff_code(outlet_id: str) -> str:
@@ -246,9 +323,9 @@ class StaffService:
             .eq('id', profile['id'])\
             .execute()
 
-        # Generate session token
-        session_token = StaffService.generate_session_token()
-        expires_at = datetime.utcnow() + timedelta(hours=8)  # 8-hour session
+        # Generate signed session token (8-hour expiry)
+        expires_at = datetime.utcnow() + timedelta(hours=8)
+        session_token = StaffService.generate_session_token(profile, expires_at)
 
         return {
             'profile': profile,

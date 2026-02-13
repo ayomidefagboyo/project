@@ -3,7 +3,7 @@ POS System API Endpoints
 Nigerian Supermarket Focus
 """
 
-from fastapi import APIRouter, HTTPException, Depends, status, Query
+from fastapi import APIRouter, HTTPException, Depends, status, Query, Header, Body
 from typing import List, Optional, Dict, Any
 from datetime import datetime, date, timedelta
 import uuid
@@ -19,6 +19,7 @@ from app.schemas.pos import (
     # Products
     POSProductCreate, POSProductUpdate, POSProductResponse,
     ProductListResponse, ProductSearchRequest,
+    ProductBulkImportRequest, ProductBulkImportResponse, ProductBulkImportError,
     # Transactions
     POSTransactionCreate, POSTransactionResponse,
     TransactionListResponse, TransactionSearchRequest,
@@ -124,6 +125,91 @@ def _safe_json_loads(value: Any) -> Dict[str, Any]:
     return {}
 
 
+MANAGER_LEVEL_ROLES = {'manager', 'admin', 'business_owner', 'outlet_admin', 'super_admin'}
+
+
+def _normalize_role(role: Any) -> str:
+    return str(role or '').strip().lower()
+
+
+def _resolve_staff_context(
+    supabase,
+    current_user: Dict[str, Any],
+    outlet_id: Optional[str],
+    staff_session_token: Optional[str]
+) -> Dict[str, Any]:
+    """
+    Resolve effective actor role for POS operations.
+    Preference order:
+    1) Verified POS staff session header
+    2) Current authenticated API user role
+    """
+    fallback_context = {
+        'role': _normalize_role(current_user.get('role')),
+        'source': 'api_user',
+        'staff_profile_id': None,
+        'outlet_id': outlet_id
+    }
+
+    if not staff_session_token:
+        return fallback_context
+
+    payload = StaffService.parse_session_token(staff_session_token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired POS staff session"
+        )
+
+    staff_profile_id = payload.get('staff_profile_id')
+    if not staff_profile_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid POS staff session payload"
+        )
+
+    profile_result = supabase.table(Tables.STAFF_PROFILES)\
+        .select('id,outlet_id,role,is_active')\
+        .eq('id', staff_profile_id)\
+        .execute()
+    profile = profile_result.data[0] if profile_result.data else None
+
+    if not profile or not profile.get('is_active'):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Staff session is no longer active"
+        )
+
+    profile_outlet_id = profile.get('outlet_id')
+    if outlet_id and profile_outlet_id and profile_outlet_id != outlet_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Staff session does not match this outlet"
+        )
+
+    return {
+        'role': _normalize_role(profile.get('role')),
+        'source': 'staff_session',
+        'staff_profile_id': profile.get('id'),
+        'outlet_id': profile_outlet_id or outlet_id
+    }
+
+
+def _require_manager_role(
+    supabase,
+    current_user: Dict[str, Any],
+    outlet_id: Optional[str],
+    staff_session_token: Optional[str]
+) -> Dict[str, Any]:
+    context = _resolve_staff_context(supabase, current_user, outlet_id, staff_session_token)
+    if context['role'] in MANAGER_LEVEL_ROLES:
+        return context
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Manager authorization required for this action"
+    )
+
+
 # ===============================================
 # PRODUCT MANAGEMENT ENDPOINTS
 # ===============================================
@@ -191,11 +277,13 @@ async def get_products(
 @router.post("/products", response_model=POSProductResponse)
 async def create_product(
     product: POSProductCreate,
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
     current_user=Depends(CurrentUser())
 ):
     """Create a new product"""
     try:
         supabase = get_supabase_admin()
+        _require_manager_role(supabase, current_user, product.outlet_id, x_pos_staff_session)
 
         # Generate product ID
         product_id = str(uuid.uuid4())
@@ -224,6 +312,229 @@ async def create_product(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create product: {str(e)}"
+        )
+
+
+@router.post("/products/import", response_model=ProductBulkImportResponse)
+async def bulk_import_products(
+    payload: ProductBulkImportRequest,
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
+    current_user=Depends(CurrentUser())
+):
+    """
+    Bulk import products with dedupe/upsert behavior.
+    - dedupe_by controls how existing rows are matched.
+    - update_existing=False skips matched rows.
+    - dry_run validates/matches without writing to DB.
+    """
+    try:
+        supabase = get_supabase_admin()
+        _require_manager_role(supabase, current_user, payload.outlet_id, x_pos_staff_session)
+
+        rows = payload.products or []
+        if len(rows) == 0:
+            return ProductBulkImportResponse(
+                total_received=0,
+                created_count=0,
+                updated_count=0,
+                skipped_count=0,
+                error_count=0,
+                errors=[]
+            )
+
+        dedupe_by = payload.dedupe_by
+        now_iso = datetime.utcnow().isoformat()
+
+        def norm_sku(value: Any) -> str:
+            return str(value or '').strip().upper()
+
+        def norm_barcode(value: Any) -> str:
+            return str(value or '').strip()
+
+        existing_by_sku: Dict[str, Dict[str, Any]] = {}
+        existing_by_barcode: Dict[str, Dict[str, Any]] = {}
+
+        if dedupe_by in ('sku', 'sku_or_barcode'):
+            sku_values = sorted({
+                norm_sku(product.sku)
+                for product in rows
+                if norm_sku(product.sku)
+            })
+            if sku_values:
+                existing_skus = supabase.table(Tables.POS_PRODUCTS)\
+                    .select('*')\
+                    .eq('outlet_id', payload.outlet_id)\
+                    .in_('sku', sku_values)\
+                    .execute()
+                for product in existing_skus.data or []:
+                    key = norm_sku(product.get('sku'))
+                    if key:
+                        existing_by_sku[key] = product
+
+        if dedupe_by in ('barcode', 'sku_or_barcode'):
+            barcode_values = sorted({
+                norm_barcode(product.barcode)
+                for product in rows
+                if norm_barcode(product.barcode)
+            })
+            if barcode_values:
+                existing_barcodes = supabase.table(Tables.POS_PRODUCTS)\
+                    .select('*')\
+                    .eq('outlet_id', payload.outlet_id)\
+                    .in_('barcode', barcode_values)\
+                    .execute()
+                for product in existing_barcodes.data or []:
+                    key = norm_barcode(product.get('barcode'))
+                    if key:
+                        existing_by_barcode[key] = product
+
+        created_count = 0
+        updated_count = 0
+        skipped_count = 0
+        errors: List[ProductBulkImportError] = []
+        pending_upserts: List[Dict[str, Any]] = []
+        pending_meta: List[Dict[str, Any]] = []
+
+        for index, row in enumerate(rows, start=1):
+            try:
+                row_data = row.model_dump(mode='json')
+                row_data['outlet_id'] = payload.outlet_id
+                row_data['sku'] = norm_sku(row_data.get('sku'))
+                if row_data.get('barcode') is not None:
+                    row_data['barcode'] = norm_barcode(row_data.get('barcode')) or None
+
+                sku_key = norm_sku(row_data.get('sku'))
+                barcode_key = norm_barcode(row_data.get('barcode'))
+
+                existing: Optional[Dict[str, Any]] = None
+                if dedupe_by in ('sku', 'sku_or_barcode') and sku_key:
+                    existing = existing_by_sku.get(sku_key)
+                if not existing and dedupe_by in ('barcode', 'sku_or_barcode') and barcode_key:
+                    existing = existing_by_barcode.get(barcode_key)
+
+                if existing:
+                    if not payload.update_existing:
+                        skipped_count += 1
+                        continue
+
+                    update_data = {
+                        'id': existing.get('id') or str(uuid.uuid4()),
+                        **row_data,
+                        'created_at': existing.get('created_at') or now_iso,
+                        'updated_at': now_iso
+                    }
+                    if payload.dry_run:
+                        updated_count += 1
+                    else:
+                        pending_upserts.append(update_data)
+                        pending_meta.append({
+                            'row': index,
+                            'sku': getattr(row, 'sku', None),
+                            'barcode': getattr(row, 'barcode', None),
+                            'name': getattr(row, 'name', None),
+                            'mode': 'update'
+                        })
+
+                    # Keep in-memory map current for duplicates within same import batch.
+                    existing_record = update_data
+                    if sku_key:
+                        existing_by_sku[sku_key] = existing_record
+                    if barcode_key:
+                        existing_by_barcode[barcode_key] = existing_record
+                    continue
+
+                create_data = {
+                    'id': str(uuid.uuid4()),
+                    **row_data,
+                    'created_at': now_iso,
+                    'updated_at': now_iso
+                }
+
+                if payload.dry_run:
+                    created_count += 1
+                    existing_record = create_data
+                else:
+                    pending_upserts.append(create_data)
+                    pending_meta.append({
+                        'row': index,
+                        'sku': getattr(row, 'sku', None),
+                        'barcode': getattr(row, 'barcode', None),
+                        'name': getattr(row, 'name', None),
+                        'mode': 'create'
+                    })
+                    existing_record = create_data
+
+                if sku_key:
+                    existing_by_sku[sku_key] = existing_record
+                if barcode_key:
+                    existing_by_barcode[barcode_key] = existing_record
+            except Exception as row_error:
+                errors.append(ProductBulkImportError(
+                    row=index,
+                    sku=getattr(row, 'sku', None),
+                    barcode=getattr(row, 'barcode', None),
+                    name=getattr(row, 'name', None),
+                    message=str(row_error)
+                ))
+
+        if not payload.dry_run and pending_upserts:
+            chunk_size = 250
+
+            for start in range(0, len(pending_upserts), chunk_size):
+                chunk_rows = pending_upserts[start:start + chunk_size]
+                chunk_meta = pending_meta[start:start + chunk_size]
+
+                try:
+                    chunk_result = supabase.table(Tables.POS_PRODUCTS).upsert(chunk_rows).execute()
+                    if chunk_result.data is None:
+                        raise ValueError("Bulk upsert returned no data")
+
+                    for meta in chunk_meta:
+                        if meta['mode'] == 'create':
+                            created_count += 1
+                        else:
+                            updated_count += 1
+                except Exception as chunk_error:
+                    logger.warning(
+                        "Bulk upsert chunk failed, retrying row-by-row for diagnostics: %s",
+                        chunk_error
+                    )
+
+                    for row_payload, meta in zip(chunk_rows, chunk_meta):
+                        try:
+                            row_result = supabase.table(Tables.POS_PRODUCTS).upsert([row_payload]).execute()
+                            if not row_result.data:
+                                raise ValueError("Failed to write product row")
+
+                            if meta['mode'] == 'create':
+                                created_count += 1
+                            else:
+                                updated_count += 1
+                        except Exception as row_error:
+                            errors.append(ProductBulkImportError(
+                                row=meta['row'],
+                                sku=meta.get('sku'),
+                                barcode=meta.get('barcode'),
+                                name=meta.get('name'),
+                                message=str(row_error)
+                            ))
+
+        return ProductBulkImportResponse(
+            total_received=len(rows),
+            created_count=created_count,
+            updated_count=updated_count,
+            skipped_count=skipped_count,
+            error_count=len(errors),
+            errors=errors
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error bulk importing products: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to import products: {str(e)}"
         )
 
 
@@ -260,11 +571,24 @@ async def get_product(
 async def update_product(
     product_id: str,
     product: POSProductUpdate,
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
     current_user=Depends(CurrentUser())
 ):
     """Update a product"""
     try:
         supabase = get_supabase_admin()
+        existing_product = supabase.table('pos_products').select('id,outlet_id').eq('id', product_id).execute()
+        if not existing_product.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Product not found"
+            )
+        _require_manager_role(
+            supabase,
+            current_user,
+            existing_product.data[0].get('outlet_id'),
+            x_pos_staff_session
+        )
 
         # Prepare update data (exclude None values)
         update_data = {k: v for k, v in product.dict().items() if v is not None}
@@ -293,11 +617,24 @@ async def update_product(
 @router.delete("/products/{product_id}")
 async def delete_product(
     product_id: str,
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
     current_user=Depends(CurrentUser())
 ):
     """Delete a product (soft delete by setting inactive)"""
     try:
         supabase = get_supabase_admin()
+        existing_product = supabase.table('pos_products').select('id,outlet_id').eq('id', product_id).execute()
+        if not existing_product.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Product not found"
+            )
+        _require_manager_role(
+            supabase,
+            current_user,
+            existing_product.data[0].get('outlet_id'),
+            x_pos_staff_session
+        )
 
         result = supabase.table('pos_products').update({
             'is_active': False,
@@ -359,11 +696,19 @@ async def get_product_by_barcode(
 @router.post("/transactions", response_model=POSTransactionResponse)
 async def create_transaction(
     transaction: POSTransactionCreate,
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
     current_user=Depends(CurrentUser())
 ):
     """Process a new POS transaction"""
     try:
         supabase = get_supabase_admin()
+        actor_context = _resolve_staff_context(
+            supabase,
+            current_user,
+            transaction.outlet_id,
+            x_pos_staff_session
+        )
+        cashier_id = actor_context.get('staff_profile_id') or transaction.cashier_id
         
         # Extract split_payments from transaction notes if present (temporary solution)
         # In future, we should add split_payments as a proper field in the schema
@@ -469,22 +814,22 @@ async def create_transaction(
         # Get cashier's name for display (prefer staff_profiles, then users).
         cashier_name = 'Unknown'
         try:
-            cashier_result = supabase.table('staff_profiles').select('display_name').eq('id', transaction.cashier_id).execute()
+            cashier_result = supabase.table('staff_profiles').select('display_name').eq('id', cashier_id).execute()
             if cashier_result.data:
                 cashier_name = cashier_result.data[0].get('display_name') or cashier_name
             else:
-                user_result = supabase.table('users').select('name').eq('id', transaction.cashier_id).execute()
+                user_result = supabase.table('users').select('name').eq('id', cashier_id).execute()
                 if user_result.data:
                     cashier_name = user_result.data[0].get('name') or cashier_name
         except Exception as cashier_lookup_error:
-            logger.warning(f"Cashier name lookup failed for {transaction.cashier_id}: {cashier_lookup_error}")
+            logger.warning(f"Cashier name lookup failed for {cashier_id}: {cashier_lookup_error}")
 
         # Prepare transaction data
         transaction_data = {
             'id': transaction_id,
             'transaction_number': transaction_number,
             'outlet_id': transaction.outlet_id,
-            'cashier_id': transaction.cashier_id,
+            'cashier_id': cashier_id,
             'cashier_name': cashier_name,
             'customer_id': transaction.customer_id,
             'customer_name': transaction.customer_name,
@@ -551,7 +896,7 @@ async def create_transaction(
                         'quantity_after': new_qty,
                         'reference_id': transaction_id,
                         'reference_type': 'pos_transaction',
-                        'performed_by': transaction.cashier_id,
+                        'performed_by': cashier_id,
                         'movement_date': datetime.utcnow().isoformat()
                     }
                     supabase.table('pos_stock_movements').insert(movement_data).execute()
@@ -685,21 +1030,12 @@ async def get_transaction(
 async def void_transaction(
     transaction_id: str,
     void_data: Dict[str, str],
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
     current_user=Depends(CurrentUser())
 ):
     """Void a transaction"""
     try:
         supabase = get_supabase_admin()
-
-        # Check if user has permission to void transactions (cashiers cannot void)
-        user_role = current_user.get('role', '').lower()
-        if user_role == 'cashier':
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Cashiers are not authorized to void transactions. Please contact a manager."
-            )
-
-        void_reason = void_data.get('void_reason', 'No reason provided') if void_data else 'No reason provided'
 
         # Get transaction to restore stock
         tx_result = supabase.table('pos_transactions').select('*, pos_transaction_items(*)').eq('id', transaction_id).execute()
@@ -708,9 +1044,17 @@ async def void_transaction(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Transaction not found"
             )
-        
+
         transaction = tx_result.data[0]
-        
+        actor_context = _require_manager_role(
+            supabase,
+            current_user,
+            transaction.get('outlet_id'),
+            x_pos_staff_session
+        )
+        actor_id = actor_context.get('staff_profile_id') or current_user.get('id') or 'system'
+        void_reason = void_data.get('void_reason', 'No reason provided') if void_data else 'No reason provided'
+
         # Restore stock quantities for voided transaction
         if transaction.get('pos_transaction_items'):
             for item in transaction['pos_transaction_items']:
@@ -738,7 +1082,7 @@ async def void_transaction(
                             'quantity_after': new_qty,
                             'reference_id': transaction_id,
                             'reference_type': 'voided_transaction',
-                            'performed_by': current_user['id'],
+                            'performed_by': actor_id,
                             'movement_date': datetime.utcnow().isoformat(),
                             'notes': f'Stock restored from voided transaction: {void_reason}'
                         }
@@ -748,10 +1092,17 @@ async def void_transaction(
 
         # Get voider's name for display
         voider_name = current_user.get('name', 'Unknown')
+        if actor_context.get('staff_profile_id'):
+            staff_result = supabase.table(Tables.STAFF_PROFILES)\
+                .select('display_name')\
+                .eq('id', actor_context['staff_profile_id'])\
+                .execute()
+            if staff_result.data:
+                voider_name = staff_result.data[0].get('display_name') or voider_name
 
         result = supabase.table('pos_transactions').update({
             'is_voided': True,
-            'voided_by': current_user['id'],
+            'voided_by': actor_id,
             'voided_by_name': voider_name,
             'voided_at': datetime.utcnow().isoformat(),
             'void_reason': void_reason,
@@ -785,11 +1136,19 @@ async def void_transaction(
 @router.post("/inventory/adjustment", response_model=StockMovementResponse)
 async def create_stock_adjustment(
     movement: StockMovementCreate,
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
     current_user=Depends(CurrentUser())
 ):
     """Create manual stock adjustment"""
     try:
         supabase = get_supabase_admin()
+        actor_context = _require_manager_role(
+            supabase,
+            current_user,
+            movement.outlet_id,
+            x_pos_staff_session
+        )
+        actor_id = actor_context.get('staff_profile_id') or current_user.get('id') or movement.performed_by
 
         # Get current product stock
         product_result = supabase.table('pos_products').select('quantity_on_hand').eq('id', movement.product_id).execute()
@@ -834,7 +1193,7 @@ async def create_stock_adjustment(
             'unit_cost': float(movement.unit_cost) if movement.unit_cost else None,
             'total_value': float(movement.unit_cost * abs(movement.quantity_change)) if movement.unit_cost else None,
             'notes': movement.notes,
-            'performed_by': movement.performed_by,
+            'performed_by': actor_id,
             'movement_date': datetime.utcnow().isoformat()
         }
 
@@ -900,11 +1259,18 @@ async def get_stock_movements(
 @router.post("/inventory/transfers", response_model=InventoryTransferResponse)
 async def create_inventory_transfer(
     transfer: InventoryTransferCreate,
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
     current_user=Depends(CurrentUser())
 ):
     """Transfer inventory between outlets and post transfer movements."""
     try:
         supabase = get_supabase_admin()
+        actor_context = _require_manager_role(
+            supabase,
+            current_user,
+            transfer.from_outlet_id,
+            x_pos_staff_session
+        )
 
         if transfer.from_outlet_id == transfer.to_outlet_id:
             raise HTTPException(
@@ -915,7 +1281,7 @@ async def create_inventory_transfer(
         now_iso = datetime.utcnow().isoformat()
         transfer_id = str(uuid.uuid4())
         transfer_number = f"TRF-{datetime.utcnow().strftime('%Y%m%d')}-{transfer_id[:8].upper()}"
-        performed_by = current_user.get('id') or 'system'
+        performed_by = actor_context.get('staff_profile_id') or current_user.get('id') or 'system'
 
         outlet_result = supabase.table('outlets').select('id,name').in_(
             'id', [transfer.from_outlet_id, transfer.to_outlet_id]
@@ -1590,19 +1956,12 @@ async def delete_held_receipt(
 async def return_transaction(
     transaction_id: str,
     return_data: Dict[str, Any],
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
     current_user=Depends(CurrentUser())
 ):
     """Process a transaction return"""
     try:
         supabase = get_supabase_admin()
-
-        # Check if user has permission to process returns
-        user_role = current_user.get('role', '').lower()
-        if user_role == 'cashier':
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Cashiers are not authorized to process returns. Please contact a manager."
-            )
 
         return_reason = return_data.get('return_reason', 'Customer return')
         return_items = return_data.get('items', [])  # Specific items being returned
@@ -1617,6 +1976,13 @@ async def return_transaction(
             )
 
         original_transaction = tx_result.data[0]
+        actor_context = _require_manager_role(
+            supabase,
+            current_user,
+            original_transaction.get('outlet_id'),
+            x_pos_staff_session
+        )
+        actor_id = actor_context.get('staff_profile_id') or current_user.get('id') or 'system'
 
         # Validate transaction can be returned
         if original_transaction['status'] not in ['completed']:
@@ -1627,6 +1993,13 @@ async def return_transaction(
 
         # Get processor's name for display
         processor_name = current_user.get('name', 'Unknown')
+        if actor_context.get('staff_profile_id'):
+            staff_result = supabase.table(Tables.STAFF_PROFILES)\
+                .select('display_name')\
+                .eq('id', actor_context['staff_profile_id'])\
+                .execute()
+            if staff_result.data:
+                processor_name = staff_result.data[0].get('display_name') or processor_name
 
         # Create return transaction as a negative transaction
         return_transaction_id = str(uuid.uuid4())
@@ -1637,7 +2010,7 @@ async def return_transaction(
             'id': return_transaction_id,
             'transaction_number': return_transaction_number,
             'outlet_id': original_transaction['outlet_id'],
-            'cashier_id': current_user['id'],
+            'cashier_id': actor_id,
             'cashier_name': processor_name,
             'customer_id': original_transaction.get('customer_id'),
             'customer_name': original_transaction.get('customer_name'),
@@ -1700,7 +2073,7 @@ async def return_transaction(
                             'quantity_after': new_qty,
                             'reference_id': return_transaction_id,
                             'reference_type': 'return_transaction',
-                            'performed_by': current_user['id'],
+                            'performed_by': actor_id,
                             'movement_date': datetime.utcnow().isoformat(),
                             'notes': f'Stock restored from return: {return_reason}'
                         }
@@ -2353,6 +2726,84 @@ async def get_sales_breakdown(
 # CUSTOMER MANAGEMENT ENDPOINTS
 # ===============================================
 
+
+def _normalize_customer_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize customer row shape for API responses."""
+    normalized = dict(row or {})
+    now_iso = datetime.utcnow().isoformat()
+
+    address_value = normalized.get('address')
+    if isinstance(address_value, str):
+        trimmed = address_value.strip()
+        if trimmed.startswith('{') and trimmed.endswith('}'):
+            try:
+                parsed = json.loads(trimmed)
+                if isinstance(parsed, dict):
+                    normalized['address'] = parsed.get('address') or parsed.get('full_address') or trimmed
+            except Exception:
+                normalized['address'] = address_value
+    elif isinstance(address_value, dict):
+        normalized['address'] = address_value.get('address') or address_value.get('full_address')
+
+    normalized['loyalty_points'] = int(normalized.get('loyalty_points') or 0)
+    normalized['total_spent'] = float(normalized.get('total_spent') or 0)
+    normalized['visit_count'] = int(normalized.get('visit_count') or 0)
+    normalized['is_active'] = True if normalized.get('is_active') is None else bool(normalized.get('is_active'))
+    normalized['created_at'] = normalized.get('created_at') or now_iso
+    normalized['updated_at'] = normalized.get('updated_at') or now_iso
+    return normalized
+
+
+@router.get("/customers")
+async def get_customers(
+    outlet_id: str,
+    skip: int = Query(0, ge=0, description="Rows to skip"),
+    limit: int = Query(50, ge=1, le=500, description="Maximum rows to return"),
+    active_only: bool = Query(True, description="Filter active customers"),
+    search: Optional[str] = Query(None, description="Search by name or phone"),
+    current_user=Depends(CurrentUser())
+):
+    """Get paginated customers for an outlet."""
+    try:
+        supabase = get_supabase_admin()
+
+        def apply_filters(query_builder):
+            query_builder = query_builder.eq('outlet_id', outlet_id)
+            if active_only:
+                query_builder = query_builder.eq('is_active', True)
+            if search and search.strip():
+                term = search.strip().replace(',', ' ')
+                query_builder = query_builder.or_(
+                    f"name.ilike.%{term}%,phone.ilike.%{term}%"
+                )
+            return query_builder
+
+        total_result = apply_filters(supabase.table('customers').select('id')).execute()
+        total = len(total_result.data) if total_result.data else 0
+
+        end_index = skip + limit - 1
+        rows_result = apply_filters(supabase.table('customers').select('*'))\
+            .order('created_at', desc=True)\
+            .range(skip, end_index)\
+            .execute()
+
+        items = [_normalize_customer_row(row) for row in (rows_result.data or [])]
+        page = (skip // limit) + 1
+        return {
+            'items': items,
+            'total': total,
+            'page': page,
+            'size': limit
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching customers: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch customers: {str(e)}"
+        )
+
 @router.get("/customers/search")
 async def search_customers(
     outlet_id: str,
@@ -2382,56 +2833,111 @@ async def search_customers(
         )
 
 
-@router.post("/customers")
-async def create_customer(
-    outlet_id: str,
-    name: str,
-    phone: str,
-    email: Optional[str] = None,
-    address: Optional[str] = None,
+@router.get("/customers/{customer_id}")
+async def get_customer(
+    customer_id: str,
     current_user=Depends(CurrentUser())
 ):
-    """Create a new customer"""
+    """Get a customer by ID."""
     try:
         supabase = get_supabase_admin()
-        
+        result = supabase.table('customers').select('*').eq('id', customer_id).execute()
+
+        if not result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Customer not found"
+            )
+
+        return _normalize_customer_row(result.data[0])
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching customer {customer_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch customer: {str(e)}"
+        )
+
+
+@router.post("/customers")
+async def create_customer(
+    customer: Optional[Dict[str, Any]] = Body(None),
+    outlet_id: Optional[str] = Query(None, description="Outlet ID (legacy mode)"),
+    name: Optional[str] = Query(None, description="Customer name (legacy mode)"),
+    phone: Optional[str] = Query(None, description="Customer phone (legacy mode)"),
+    email: Optional[str] = Query(None, description="Customer email (legacy mode)"),
+    address: Optional[str] = Query(None, description="Customer address (legacy mode)"),
+    current_user=Depends(CurrentUser())
+):
+    """Create a new customer (JSON body preferred; query params kept for backward compatibility)."""
+    try:
+        supabase = get_supabase_admin()
+
+        if customer:
+            payload = dict(customer)
+        else:
+            if not outlet_id or not name or not phone:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Provide customer payload in request body or outlet_id/name/phone query params."
+                )
+            payload = {
+                'outlet_id': outlet_id,
+                'name': name,
+                'phone': phone,
+                'email': email,
+                'address': address
+            }
+
+        payload['outlet_id'] = str(payload.get('outlet_id') or '').strip()
+        payload['name'] = str(payload.get('name') or '').strip()
+        payload['phone'] = str(payload.get('phone') or '').strip()
+        if not payload['outlet_id'] or not payload['name'] or not payload['phone']:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="outlet_id, name and phone are required"
+            )
+
         # Check if customer with phone already exists
         existing = supabase.table('customers')\
             .select('id')\
-            .eq('outlet_id', outlet_id)\
-            .eq('phone', phone)\
+            .eq('outlet_id', payload['outlet_id'])\
+            .eq('phone', payload['phone'])\
             .execute()
-        
+
         if existing.data:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Customer with this phone number already exists"
             )
-        
+
         customer_data = {
             'id': str(uuid.uuid4()),
-            'outlet_id': outlet_id,
-            'name': name,
-            'phone': phone,
-            'email': email,
-            'address': json.dumps({'address': address}) if address else None,
+            'outlet_id': payload['outlet_id'],
+            'name': payload['name'],
+            'phone': payload['phone'],
+            'email': payload.get('email'),
+            'address': payload.get('address'),
             'customer_type': 'regular',
             'loyalty_points': 0,
             'total_spent': 0.0,
+            'visit_count': 0,
+            'is_active': True,
             'created_at': datetime.utcnow().isoformat(),
             'updated_at': datetime.utcnow().isoformat()
         }
-        
+
         result = supabase.table('customers').insert(customer_data).execute()
-        
+
         if not result.data:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Failed to create customer"
             )
-        
-        return result.data[0]
-        
+
+        return _normalize_customer_row(result.data[0])
+
     except HTTPException:
         raise
     except Exception as e:
@@ -2774,11 +3280,13 @@ async def get_receipt_settings(
 async def update_receipt_settings(
     outlet_id: str,
     settings_update: ReceiptSettingsUpdate,
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
     current_user=Depends(CurrentUser())
 ):
     """Update receipt customization settings for outlet"""
     try:
         supabase = get_supabase_admin()
+        _require_manager_role(supabase, current_user, outlet_id, x_pos_staff_session)
         
         # Check if settings exist
         existing = supabase.table(Tables.RECEIPT_SETTINGS)\
@@ -2898,11 +3406,13 @@ async def get_outlet_info(
 async def update_outlet_info(
     outlet_id: str,
     outlet_data: Dict[str, Any],
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
     current_user=Depends(CurrentUser())
 ):
     """Update outlet business information (address, phone, email, website, etc.)"""
     try:
         supabase = get_supabase_admin()
+        _require_manager_role(supabase, current_user, outlet_id, x_pos_staff_session)
         
         # Only allow updating specific fields for business info
         allowed_fields = ['name', 'phone', 'email', 'website', 'address']

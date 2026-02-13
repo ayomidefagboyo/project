@@ -281,7 +281,7 @@ const ReceiveItemsPage: React.FC = () => {
       try {
         const [vendorRes, productRes] = await Promise.all([
           vendorService.getVendors(currentOutlet.id),
-          posService.getProducts(currentOutlet.id, { size: 1000 }),
+          posService.getAllProducts(currentOutlet.id, { activeOnly: false }),
         ]);
 
         if (vendorRes.data) {
@@ -291,9 +291,7 @@ const ReceiveItemsPage: React.FC = () => {
           setVendors(normalized);
         }
 
-        if (productRes?.items) {
-          setProducts(productRes.items);
-        }
+        setProducts(productRes || []);
       } catch (loadError) {
         console.error('Failed to load receiving data:', loadError);
         setError('Unable to load vendors/products. Please refresh.');

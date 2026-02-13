@@ -402,8 +402,8 @@ function AppContent() {
                 <button
                   onClick={() => {
                     if (productManagementRef.current && currentOutlet) {
-                      posService.getProducts(currentOutlet.id, { size: 1000 }).then(res => {
-                        exportProducts(res.items || [], { format: 'xlsx', outletName: currentOutlet.name });
+                      posService.getAllProducts(currentOutlet.id, { activeOnly: false }).then(items => {
+                        exportProducts(items || [], { format: 'xlsx', outletName: currentOutlet.name });
                       });
                     }
                     setShowExportMenu(false);
@@ -415,8 +415,8 @@ function AppContent() {
                 <button
                   onClick={() => {
                     if (productManagementRef.current && currentOutlet) {
-                      posService.getProducts(currentOutlet.id, { size: 1000 }).then(res => {
-                        exportProducts(res.items || [], { format: 'csv', outletName: currentOutlet.name });
+                      posService.getAllProducts(currentOutlet.id, { activeOnly: false }).then(items => {
+                        exportProducts(items || [], { format: 'csv', outletName: currentOutlet.name });
                       });
                     }
                     setShowExportMenu(false);
