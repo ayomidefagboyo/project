@@ -33,7 +33,7 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, className = '' }) => {
   const location = useLocation();
-  const { currentUser, setUserOutlets } = useOutlet();
+  const { currentUser, setUserOutlets, userOutlets } = useOutlet();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [showCreateStoreModal, setShowCreateStoreModal] = useState(false);
   const [toast, setToast] = useState<{
@@ -68,8 +68,14 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
         console.warn('Subscription check failed, allowing outlet creation:', subscriptionError);
       }
 
-      const newOutlet = await dataService.createOutlet(storeData, currentUser.id);
-      setUserOutlets(prev => [...prev, newOutlet]);
+      const { data: newOutlet, error: createError } = await dataService.createOutlet(storeData, currentUser.id);
+      if (createError || !newOutlet) {
+        showToast(createError || 'Failed to create store. Please try again.', 'error');
+        return;
+      }
+
+      const outletExists = userOutlets.some(outlet => outlet.id === newOutlet.id);
+      setUserOutlets(outletExists ? userOutlets : [...userOutlets, newOutlet]);
       setShowCreateStoreModal(false);
       showToast('New store created successfully!', 'success');
     } catch (error) {
