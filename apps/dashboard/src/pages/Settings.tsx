@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Users, Building2, Bell, CreditCard, ChevronRight, ExternalLink, Loader2 } from 'lucide-react';
+import { Settings as SettingsIcon, Users, Building2, Bell, CreditCard, ExternalLink, Loader2, Trash2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useOutlet } from '@/contexts/OutletContext';
 import InviteTeamMember from '@/components/auth/InviteTeamMember';
@@ -23,7 +23,11 @@ const Settings: React.FC = () => {
   const [isUpdating, setIsUpdating] = useState(false);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [loadingSubscription, setLoadingSubscription] = useState(false);
+  const [isDeletingOutlet, setIsDeletingOutlet] = useState(false);
   const [stripeCustomerId, setStripeCustomerId] = useState<string | null>(null);
+  const [showDeleteOutletModal, setShowDeleteOutletModal] = useState(false);
+  const [outletToDelete, setOutletToDelete] = useState<OutletType | null>(null);
+  const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
   const [toast, setToast] = useState<{
     message: string;
     type: 'success' | 'error' | 'warning' | 'info';
@@ -63,6 +67,7 @@ const Settings: React.FC = () => {
   }
 
   const canManageUsers = hasPermission('manage_users');
+  const canManageOutlets = hasPermission('manage_outlets');
   const isOwner = currentUser?.isOwner;
 
   useEffect(() => {
@@ -188,6 +193,69 @@ const Settings: React.FC = () => {
       ...prev,
       isVisible: false
     }));
+  };
+
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
+    setToast({
+      message,
+      type,
+      isVisible: true
+    });
+  };
+
+  const handleOpenDeleteOutletModal = (outlet: OutletType) => {
+    setOutletToDelete(outlet);
+    setDeleteConfirmationText('');
+    setShowDeleteOutletModal(true);
+  };
+
+  const handleCloseDeleteOutletModal = () => {
+    if (isDeletingOutlet) return;
+    setShowDeleteOutletModal(false);
+    setOutletToDelete(null);
+    setDeleteConfirmationText('');
+  };
+
+  const handleDeleteOutlet = async () => {
+    if (!outletToDelete) return;
+
+    if (userOutlets.length <= 1) {
+      showToast('You must keep at least one outlet.', 'warning');
+      return;
+    }
+
+    const expectedName = outletToDelete.name.trim();
+    if (deleteConfirmationText.trim() !== expectedName) {
+      showToast('Type the outlet name exactly to confirm deletion.', 'warning');
+      return;
+    }
+
+    try {
+      setIsDeletingOutlet(true);
+
+      const { error } = await dataService.deleteOutlet(outletToDelete.id);
+      if (error) {
+        showToast(`Failed to delete outlet: ${error}`, 'error');
+        return;
+      }
+
+      const remainingOutlets = userOutlets.filter(outlet => outlet.id !== outletToDelete.id);
+      setUserOutlets(remainingOutlets);
+
+      if (currentOutlet?.id === outletToDelete.id) {
+        setCurrentOutlet(remainingOutlets[0] || null);
+      }
+
+      showToast(`Outlet "${outletToDelete.name}" deleted successfully.`, 'success');
+      setShowDeleteOutletModal(false);
+      setOutletToDelete(null);
+      setDeleteConfirmationText('');
+    } catch (error) {
+      console.error('Failed to delete outlet:', error);
+      showToast('Failed to delete outlet. Please try again.', 'error');
+    } finally {
+      setIsDeletingOutlet(false);
+    }
   };
 
   const handleBusinessInfoSave = async (updatedData: Partial<OutletType>) => {
@@ -349,6 +417,59 @@ const Settings: React.FC = () => {
           </div>
         </div>
 
+        {/* Outlet Management */}
+        {canManageOutlets && (
+          <div className="card p-8 lg:col-span-2">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/20 dark:to-rose-800/20 rounded-lg flex items-center justify-center">
+                  <Building2 className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+                </div>
+                <h2 className="text-xl font-semibold text-foreground">Outlet Management</h2>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {userOutlets.map(outlet => (
+                <div
+                  key={outlet.id}
+                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-lg border border-border bg-muted/20"
+                >
+                  <div>
+                    <p className="text-foreground font-medium">{outlet.name}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {outlet.id === currentOutlet?.id ? 'Current outlet' : 'Additional outlet'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {outlet.id === currentOutlet?.id && (
+                      <span className="inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full bg-primary/10 text-primary">
+                        Current
+                      </span>
+                    )}
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="h-9"
+                      onClick={() => handleOpenDeleteOutletModal(outlet)}
+                      disabled={userOutlets.length <= 1 || isDeletingOutlet}
+                    >
+                      <Trash2 className="w-4 h-4 mr-1.5" />
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {userOutlets.length <= 1 && (
+              <p className="text-xs text-muted-foreground mt-4">
+                At least one outlet is required. Add another outlet before deleting this one.
+              </p>
+            )}
+          </div>
+        )}
+
 
         {/* Notifications */}
         <div className="card p-8">
@@ -507,6 +628,62 @@ const Settings: React.FC = () => {
         </div>
       )}
 
+      {/* Delete Outlet Modal */}
+      {showDeleteOutletModal && outletToDelete && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-background rounded-lg shadow-xl max-w-lg w-full">
+            <div className="p-6 border-b border-border">
+              <h2 className="text-xl font-semibold text-foreground">Delete Outlet</h2>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-destructive mt-0.5 shrink-0" />
+                <p className="text-sm text-foreground">
+                  This permanently deletes <span className="font-semibold">{outletToDelete.name}</span> and cannot be undone.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-muted-foreground">
+                  Type <span className="text-foreground font-semibold">{outletToDelete.name}</span> to confirm
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmationText}
+                  onChange={(event) => setDeleteConfirmationText(event.target.value)}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground focus:ring-2 focus:ring-ring focus:border-ring transition-colors"
+                  placeholder={outletToDelete.name}
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <Button variant="outline" onClick={handleCloseDeleteOutletModal} disabled={isDeletingOutlet}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={handleDeleteOutlet}
+                  disabled={
+                    isDeletingOutlet ||
+                    userOutlets.length <= 1 ||
+                    deleteConfirmationText.trim() !== outletToDelete.name.trim()
+                  }
+                >
+                  {isDeletingOutlet ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Deleting...
+                    </>
+                  ) : (
+                    'Delete Outlet'
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Toast Notification */}
       <Toast
         message={toast.message}
@@ -520,5 +697,4 @@ const Settings: React.FC = () => {
 };
 
 export default Settings;
-
 
