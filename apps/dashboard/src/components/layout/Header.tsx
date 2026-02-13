@@ -28,7 +28,7 @@ interface HeaderProps {
 }
 
 const Header: React.FC<HeaderProps> = ({ isDarkMode, toggleDarkMode, onToggleSidebar }) => {
-  const { currentUser, setCurrentUser, setCurrentOutlet, setUserOutlets, hasPermission, currentOutlet } = useOutlet();
+  const { currentUser, setCurrentUser, setCurrentOutlet, setUserOutlets, hasPermission, currentOutlet, userOutlets } = useOutlet();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showCreateStoreModal, setShowCreateStoreModal] = useState(false);
@@ -83,8 +83,14 @@ const Header: React.FC<HeaderProps> = ({ isDarkMode, toggleDarkMode, onToggleSid
         // Continue with outlet creation if subscription check fails
       }
 
-      const newOutlet = await dataService.createOutlet(storeData, currentUser.id);
-      setUserOutlets(prev => [...prev, newOutlet]);
+      const { data: newOutlet, error: createError } = await dataService.createOutlet(storeData, currentUser.id);
+      if (createError || !newOutlet) {
+        showToast(createError || 'Failed to create store. Please try again.', 'error');
+        return;
+      }
+
+      const outletExists = userOutlets.some(outlet => outlet.id === newOutlet.id);
+      setUserOutlets(outletExists ? userOutlets : [...userOutlets, newOutlet]);
       setShowCreateStoreModal(false);
       showToast('New store created successfully!', 'success');
     } catch (error) {

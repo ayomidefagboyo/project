@@ -21,6 +21,33 @@ const TerminalSetup: React.FC<TerminalSetupProps> = ({ onSetupComplete }) => {
   const [selectedOutletId, setSelectedOutletId] = useState<string>('');
   const [isConfirming, setIsConfirming] = useState(false);
 
+  const formatOutletAddress = (address: unknown): string => {
+    if (!address) return 'Not provided';
+    if (typeof address === 'string') {
+      const trimmed = address.trim();
+      return trimmed.length > 0 ? trimmed : 'Not provided';
+    }
+
+    if (typeof address === 'object') {
+      const addressObj = address as Record<string, unknown>;
+      const parts = [
+        addressObj.street,
+        addressObj.city,
+        addressObj.state,
+        addressObj.zip,
+        addressObj.country,
+      ]
+        .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+        .map((part) => part.trim());
+
+      if (parts.length > 0) {
+        return parts.join(', ');
+      }
+    }
+
+    return 'Not provided';
+  };
+
   const handleLogout = async () => {
     try {
       // Import supabase dynamically to avoid circular dependency
@@ -177,7 +204,7 @@ const TerminalSetup: React.FC<TerminalSetupProps> = ({ onSetupComplete }) => {
                   </div>
                   <div>
                     <h3 className="font-medium text-gray-900">{outlet.name}</h3>
-                    <p className="text-sm text-gray-600">{outlet.address}</p>
+                    <p className="text-sm text-gray-600">{formatOutletAddress(outlet.address)}</p>
                   </div>
                 </div>
 
