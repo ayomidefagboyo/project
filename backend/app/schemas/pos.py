@@ -173,7 +173,7 @@ class ProductImportItem(POSProductBase):
 class ProductBulkImportRequest(BaseModel):
     """Bulk import request for POS products."""
     outlet_id: str = Field(..., description="Outlet ID")
-    products: List[ProductImportItem] = Field(..., min_items=1, max_items=5000, description="Products to import")
+    products: List[ProductImportItem] = Field(..., min_items=1, description="Products to import")
     dedupe_by: Literal['sku_or_barcode', 'sku', 'barcode', 'none'] = Field(
         'sku_or_barcode',
         description="How to detect existing products"

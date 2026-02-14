@@ -31,6 +31,7 @@ interface ImportProductsModalProps {
 }
 
 type Step = 'upload' | 'preview' | 'importing' | 'done';
+const IMPORT_BATCH_SIZE = 1000;
 
 const ImportProductsModal: React.FC<ImportProductsModalProps> = ({
   isOpen,
@@ -136,34 +137,54 @@ const ImportProductsModal: React.FC<ImportProductsModalProps> = ({
         vendor_id: p.vendor_id,
       }));
 
-      const importResult = await posService.bulkImportProducts({
-        outlet_id: currentOutlet.id,
-        products: payloadProducts,
-        dedupe_by: 'sku_or_barcode',
-        update_existing: true,
-      });
+      let done = 0;
+      let created = 0;
+      let updated = 0;
+      let skipped = 0;
+      let errors = 0;
+      let firstError: string | null = null;
 
-      setImportProgress({
-        done: toImport.length,
-        total: toImport.length,
-        errors: importResult.error_count || 0,
-      });
+      for (let start = 0; start < payloadProducts.length; start += IMPORT_BATCH_SIZE) {
+        const chunk = payloadProducts.slice(start, start + IMPORT_BATCH_SIZE);
+        const importResult = await posService.bulkImportProducts({
+          outlet_id: currentOutlet.id,
+          products: chunk,
+          dedupe_by: 'sku_or_barcode',
+          update_existing: true,
+        });
+
+        done += chunk.length;
+        created += importResult.created_count || 0;
+        updated += importResult.updated_count || 0;
+        skipped += importResult.skipped_count || 0;
+        errors += importResult.error_count || 0;
+
+        if (!firstError && importResult.error_count > 0) {
+          firstError = importResult.errors?.[0]?.message || 'Some products failed to import.';
+        }
+
+        setImportProgress({
+          done,
+          total: toImport.length,
+          errors,
+        });
+      }
+
       setImportSummary({
-        created: importResult.created_count || 0,
-        updated: importResult.updated_count || 0,
-        skipped: importResult.skipped_count || 0,
+        created,
+        updated,
+        skipped,
       });
 
-      if (importResult.error_count > 0) {
-        const firstError = importResult.errors?.[0]?.message || 'Some products failed to import.';
-        setError(firstError);
+      if (errors > 0) {
+        setError(firstError || `${errors} products failed to import.`);
       } else {
         setError(null);
       }
       setStep('done');
     } catch (err: any) {
       setError(err?.message || 'Import failed. Please try again.');
-      setImportProgress({ done: toImport.length, total: toImport.length, errors: toImport.length });
+      setImportProgress((prev) => ({ done: prev.done, total: toImport.length, errors: Math.max(prev.errors, 1) }));
       setStep('done');
     } finally {
       setImporting(false);
