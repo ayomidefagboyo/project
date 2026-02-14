@@ -19,7 +19,7 @@ interface TerminalSetupProps {
 const TerminalSetup: React.FC<TerminalSetupProps> = ({ onSetupComplete }) => {
   const navigate = useNavigate();
   const dashboardAppUrl = resolveDashboardAppUrl(import.meta.env.VITE_DASHBOARD_APP_URL);
-  const { currentUser, userOutlets, isLoading, setCurrentUser, setUserOutlets } = useOutlet();
+  const { currentUser, userOutlets, isLoading, setCurrentUser, setUserOutlets, setCurrentOutlet } = useOutlet();
   const [selectedOutletId, setSelectedOutletId] = useState<string>('');
   const [isConfirming, setIsConfirming] = useState(false);
 
@@ -92,6 +92,7 @@ const TerminalSetup: React.FC<TerminalSetupProps> = ({ onSetupComplete }) => {
 
     // Store terminal configuration
     localStorage.setItem('pos_terminal_config', JSON.stringify(config));
+    setCurrentOutlet(selectedOutlet);
 
     onSetupComplete(config);
   };

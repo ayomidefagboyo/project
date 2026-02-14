@@ -1,5 +1,6 @@
 import { subscriptionService } from './subscriptionService';
 import { SubscriptionFeatures } from '@/types';
+import { apiClient } from './apiClient';
 
 const DEFAULT_OPENING_HOURS = {
   monday: { open: '09:00', close: '17:00', isOpen: true },
@@ -197,22 +198,14 @@ export const gatedApiCalls = {
   createOutlet: async (userId: string, outletData: any) => {
     return ApiMiddleware.makeApiCall(
       async () => {
-        // Import here to avoid circular dependency
-        const { supabase } = await import('./supabase');
         const normalizedPayload = normalizeOutletPayload(outletData as Record<string, unknown>);
+        const response = await apiClient.post<any>('/outlets', normalizedPayload);
 
-        // Actually create the outlet in the database
-        const { data: outlet, error } = await supabase
-          .from('outlets')
-          .insert(normalizedPayload)
-          .select()
-          .single();
-
-        if (error) {
-          throw new Error(error.message);
+        if (response.error || !response.data) {
+          throw new Error(response.error || 'Failed to create outlet');
         }
 
-        return { success: true, outlet };
+        return { success: true, outlet: response.data };
       },
       { userId, checkOutletLimit: true }
     );

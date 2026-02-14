@@ -61,6 +61,45 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
   // Bump this to re-trigger initializeAuth (e.g. after login)
   const [authTrigger, setAuthTrigger] = useState(0);
 
+  const getConfiguredTerminalOutletId = (): string | null => {
+    try {
+      const raw = localStorage.getItem('pos_terminal_config');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { outlet_id?: string };
+      const outletId = typeof parsed?.outlet_id === 'string' ? parsed.outlet_id.trim() : '';
+      return outletId.length > 0 ? outletId : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const pickPreferredOutlet = (outlets: Outlet[]): Outlet | null => {
+    if (!outlets.length) return null;
+
+    const terminalOutletId = getConfiguredTerminalOutletId();
+    if (terminalOutletId) {
+      const terminalOutlet = outlets.find((outlet) => outlet.id === terminalOutletId);
+      if (terminalOutlet) return terminalOutlet;
+    }
+
+    const currentOutletMatch = currentOutlet?.id
+      ? outlets.find((outlet) => outlet.id === currentOutlet.id)
+      : null;
+    if (currentOutletMatch) return currentOutletMatch;
+
+    const cachedOutletMatch = cachedState?.outlet?.id
+      ? outlets.find((outlet) => outlet.id === cachedState.outlet.id)
+      : null;
+    if (cachedOutletMatch) return cachedOutletMatch;
+
+    const userOutletMatch = currentUser?.outletId
+      ? outlets.find((outlet) => outlet.id === currentUser.outletId)
+      : null;
+    if (userOutletMatch) return userOutletMatch;
+
+    return outlets[0];
+  };
+
   // Apply cached/local brand color immediately for a consistent first paint.
   useEffect(() => {
     const initialColor = resolveBrandColorFromSettings(cachedState?.settings ?? null) || readBrandColorFromStorage();
@@ -132,8 +171,8 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
               if (outlets && !outletsError) {
                 setUserOutlets(outlets);
 
-                // Set first outlet as current if none selected
-                const targetOutlet = outlets[0];
+                // Prefer terminal-configured outlet, then current/cached, then fallback.
+                const targetOutlet = pickPreferredOutlet(outlets);
                 if (targetOutlet) {
                   setCurrentOutlet(targetOutlet);
 
@@ -275,13 +314,13 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
         if (outlets && !outletsError) {
           setUserOutlets(outlets);
 
-          // Set first outlet as current
-          if (outlets.length > 0) {
-            setCurrentOutlet(outlets[0]);
+          const preferredOutlet = pickPreferredOutlet(outlets);
+          if (preferredOutlet) {
+            setCurrentOutlet(preferredOutlet);
 
             // Load business settings for the outlet
-            if (outlets[0]?.id) {
-              const { data: settings, error: settingsError } = await dataService.getBusinessSettings(outlets[0].id);
+            if (preferredOutlet.id) {
+              const { data: settings, error: settingsError } = await dataService.getBusinessSettings(preferredOutlet.id);
               if (settings && !settingsError) {
                 setBusinessSettings(settings);
               }
@@ -305,7 +344,7 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
 
           // Update current outlet if it still exists
           if (currentOutlet && !outlets.find(o => o.id === currentOutlet.id)) {
-            setCurrentOutlet(outlets[0] || null);
+            setCurrentOutlet(pickPreferredOutlet(outlets));
           }
         }
 

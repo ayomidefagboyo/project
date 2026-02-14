@@ -23,6 +23,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Silence verbose transport/protocol debug noise that can flood logs
+# and inadvertently expose sensitive header values when DEBUG is enabled.
+for noisy_logger in (
+    "hpack",
+    "hpack.hpack",
+    "hpack.table",
+    "httpcore",
+    "httpcore.http2",
+    "httpx",
+    "httpx._client",
+    "httpx._transports",
+):
+    logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
