@@ -10,6 +10,46 @@ import {
   resolveBrandColorFromSettings,
 } from '@/lib/brandTheme';
 
+type CachedAuthState = { user: AuthUser; outlets: Outlet[]; outlet: Outlet | null; settings: BusinessSettings | null };
+
+const getTerminalConfiguredOutletId = (): string | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem('pos_terminal_config');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { outlet_id?: string };
+    const outletId = typeof parsed?.outlet_id === 'string' ? parsed.outlet_id.trim() : '';
+    return outletId.length > 0 ? outletId : null;
+  } catch {
+    return null;
+  }
+};
+
+const readCachedAuthState = (): CachedAuthState | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem('pos_auth_cache');
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as CachedAuthState;
+    if (!parsed || !parsed.user || !Array.isArray(parsed.outlets)) return null;
+
+    const terminalOutletId = getTerminalConfiguredOutletId();
+    if (!terminalOutletId) return parsed;
+
+    const terminalOutlet = parsed.outlets.find((outlet) => outlet.id === terminalOutletId) || null;
+
+    // Guard against showing stale/wrong outlet on first paint.
+    if (terminalOutlet) {
+      return { ...parsed, outlet: terminalOutlet };
+    }
+
+    return { ...parsed, outlet: null };
+  } catch {
+    return null;
+  }
+};
+
 interface OutletContextType {
   currentOutlet: Outlet | null;
   setCurrentOutlet: (outlet: Outlet | null) => void;
@@ -44,39 +84,21 @@ interface OutletProviderProps {
 
 export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
   // --- Instant restore from localStorage cache ---
-  const cachedState = (() => {
-    try {
-      const raw = localStorage.getItem('pos_auth_cache');
-      if (raw) return JSON.parse(raw) as { user: AuthUser; outlets: Outlet[]; outlet: Outlet; settings: BusinessSettings | null };
-    } catch { /* ignore */ }
-    return null;
-  })();
+  const cachedState = readCachedAuthState();
 
   const [currentOutlet, setCurrentOutlet] = useState<Outlet | null>(cachedState?.outlet ?? null);
   const [userOutlets, setUserOutlets] = useState<Outlet[]>(cachedState?.outlets ?? []);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(cachedState?.user ?? null);
   const [businessSettings, setBusinessSettings] = useState<BusinessSettings | null>(cachedState?.settings ?? null);
-  // If we have a cache, skip the loading spinner entirely
-  const [isLoading, setIsLoading] = useState(!cachedState);
+  // Skip spinner only when cache includes a usable outlet snapshot.
+  const [isLoading, setIsLoading] = useState(!(cachedState && cachedState.outlet));
   // Bump this to re-trigger initializeAuth (e.g. after login)
   const [authTrigger, setAuthTrigger] = useState(0);
-
-  const getConfiguredTerminalOutletId = (): string | null => {
-    try {
-      const raw = localStorage.getItem('pos_terminal_config');
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as { outlet_id?: string };
-      const outletId = typeof parsed?.outlet_id === 'string' ? parsed.outlet_id.trim() : '';
-      return outletId.length > 0 ? outletId : null;
-    } catch {
-      return null;
-    }
-  };
 
   const pickPreferredOutlet = (outlets: Outlet[]): Outlet | null => {
     if (!outlets.length) return null;
 
-    const terminalOutletId = getConfiguredTerminalOutletId();
+    const terminalOutletId = getTerminalConfiguredOutletId();
     if (terminalOutletId) {
       const terminalOutlet = outlets.find((outlet) => outlet.id === terminalOutletId);
       if (terminalOutlet) return terminalOutlet;
