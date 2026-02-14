@@ -48,17 +48,16 @@ class AuthService:
     
     def verify_token(self, token: str) -> Dict[str, Any]:
         """Verify and decode a JWT token (Supabase or custom)"""
-        print(f"🔍 Attempting to verify token: {token[:20]}...")
+        logger.debug("Attempting token verification")
 
         try:
             # First try to verify as Supabase token
-            print("📍 Trying Supabase token validation...")
+            logger.debug("Trying Supabase token validation")
             supabase = get_supabase_admin()
             user_response = supabase.auth.get_user(token)
-            print(f"📍 Supabase response: {user_response}")
 
             if user_response.user:
-                print(f"✅ Supabase token valid for user: {user_response.user.id}")
+                logger.debug("Supabase token valid for user %s", user_response.user.id)
                 # Return payload in expected format for Supabase tokens
                 return {
                     "sub": user_response.user.id,
@@ -66,17 +65,16 @@ class AuthService:
                     "aud": user_response.user.aud,
                 }
             else:
-                print("📍 Supabase validation failed, trying custom JWT...")
+                logger.debug("Supabase token validation returned no user, trying custom JWT")
                 # Fallback to custom JWT validation
                 payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
-                print(f"✅ Custom JWT valid: {payload}")
+                logger.debug("Custom JWT valid")
                 return payload
 
         except Exception as e:
-            print(f"❌ Token verification failed: {str(e)}")
-            print(f"❌ Error type: {type(e).__name__}")
-            import traceback
-            print(f"❌ Traceback: {traceback.format_exc()}")
+            logger.warning("Token verification failed: %s", type(e).__name__)
+            if settings.DEBUG:
+                logger.exception("Token verification error detail")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials",
@@ -288,7 +286,7 @@ class AuthService:
         if not user_response.data:
             # For OAuth users who haven't completed onboarding yet,
             # create a minimal user object from the token payload
-            print(f"📍 User not found in users table, creating minimal OAuth user: {user_id}")
+            logger.info("User profile missing in users table; creating minimal OAuth context for %s", user_id)
 
             return {
                 "id": user_id,
@@ -403,4 +401,3 @@ class AuthService:
 
 # Create service instance
 auth_service = AuthService()
-

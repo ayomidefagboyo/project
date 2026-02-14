@@ -125,6 +125,22 @@ def _safe_json_loads(value: Any) -> Dict[str, Any]:
     return {}
 
 
+def _normalize_optional_uuid(value: Optional[str], field_name: str) -> Optional[str]:
+    """Return canonical UUID string or None when value is empty/invalid."""
+    if value is None:
+        return None
+
+    raw = str(value).strip()
+    if not raw:
+        return None
+
+    try:
+        return str(uuid.UUID(raw))
+    except Exception:
+        logger.warning("Ignoring non-UUID %s value during POS transaction create", field_name)
+        return None
+
+
 MANAGER_LEVEL_ROLES = {'manager', 'admin', 'business_owner', 'outlet_admin', 'super_admin'}
 
 
@@ -849,6 +865,7 @@ async def create_transaction(
             logger.warning(f"Cashier name lookup failed for {cashier_id}: {cashier_lookup_error}")
 
         # Prepare transaction data
+        normalized_offline_id = _normalize_optional_uuid(transaction.offline_id, "offline_id")
         transaction_data = {
             'id': transaction_id,
             'transaction_number': transaction_number,
@@ -869,12 +886,14 @@ async def create_transaction(
             'receipt_type': transaction.receipt_type.value if hasattr(transaction, 'receipt_type') else 'sale',
             'transaction_date': datetime.utcnow().isoformat(),
             'sync_status': SyncStatus.SYNCED.value,
-            'offline_id': transaction.offline_id,
             'notes': transaction.notes,  # Split payments are already in notes if provided
             'receipt_printed': False,
             'created_at': datetime.utcnow().isoformat(),
             'updated_at': datetime.utcnow().isoformat()
         }
+
+        if normalized_offline_id:
+            transaction_data['offline_id'] = normalized_offline_id
 
         # Insert transaction
         tx_result = _insert_pos_transaction_compat(supabase, transaction_data)
