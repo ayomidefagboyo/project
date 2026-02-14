@@ -12,6 +12,7 @@ import type {
 
   VendorInvoice
 } from '@/types';
+import { apiClient } from './apiClient';
 import { DataServiceBase } from '../../../../shared/services/dataServiceBase';
 
 export class DataService extends DataServiceBase {
@@ -46,6 +47,12 @@ export class DataService extends DataServiceBase {
 
   async getUserOutlets(userId: string): Promise<{ data: Outlet[] | null; error: string | null }> {
     try {
+      // Prefer backend outlet visibility logic (avoids frontend RLS drift).
+      const backendResponse = await apiClient.get<Outlet[]>('/outlets');
+      if (!backendResponse.error && Array.isArray(backendResponse.data)) {
+        return { data: backendResponse.data, error: null };
+      }
+
       // Get user's outlet access
       const { data: user, error: userError } = await supabase
         .from(TABLES.USERS)

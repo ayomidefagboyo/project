@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     
     # Environment
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
-    DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
+    DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
     
     # Email Settings (optional)
     SMTP_TLS: bool = True
