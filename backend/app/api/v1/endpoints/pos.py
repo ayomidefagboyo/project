@@ -111,6 +111,73 @@ def _insert_pos_transaction_compat(supabase, transaction_data: Dict[str, Any]):
     )
 
 
+def _insert_pos_product_compat(supabase, product_data: Dict[str, Any]):
+    """
+    Insert into pos_products with backward compatibility for older schemas.
+    If a column is missing in prod schema cache, remove it and retry.
+    """
+    payload = dict(product_data)
+    removed_columns = []
+
+    for _ in range(12):
+        try:
+            return supabase.table('pos_products').insert(payload).execute()
+        except Exception as exc:
+            missing_column = _extract_missing_column_name(exc)
+
+            if missing_column and missing_column in payload:
+                payload.pop(missing_column, None)
+                removed_columns.append(missing_column)
+                logger.warning(
+                    "pos_products.%s missing in schema cache; retrying insert without it",
+                    missing_column
+                )
+                continue
+
+            raise
+
+    raise RuntimeError(
+        f"Failed to insert pos_products after compatibility retries; removed columns={removed_columns}"
+    )
+
+
+def _upsert_pos_products_compat(supabase, rows: List[Dict[str, Any]]):
+    """
+    Upsert pos_products rows with backward compatibility for older schemas.
+    If a column is missing in prod schema cache, remove it from all rows and retry.
+    """
+    payload_rows = [dict(row) for row in rows]
+    removed_columns: List[str] = []
+
+    for _ in range(12):
+        try:
+            return supabase.table(Tables.POS_PRODUCTS).upsert(payload_rows).execute()
+        except Exception as exc:
+            missing_column = _extract_missing_column_name(exc)
+            if not missing_column:
+                raise
+
+            removed_any = False
+            for row in payload_rows:
+                if missing_column in row:
+                    row.pop(missing_column, None)
+                    removed_any = True
+
+            if removed_any:
+                removed_columns.append(missing_column)
+                logger.warning(
+                    "pos_products.%s missing in schema cache; retrying upsert chunk without it",
+                    missing_column
+                )
+                continue
+
+            raise
+
+    raise RuntimeError(
+        f"Failed to upsert pos_products after compatibility retries; removed columns={removed_columns}"
+    )
+
+
 def _safe_json_loads(value: Any) -> Dict[str, Any]:
     """Parse JSON notes safely and return an object."""
     if isinstance(value, dict):
@@ -318,13 +385,13 @@ async def create_product(
         # Prepare product data with proper Decimal serialization
         product_data = {
             'id': product_id,
-            **product.model_dump(mode='json'),
+            **product.model_dump(mode='json', exclude_none=True, exclude_unset=True),
             'created_at': datetime.utcnow().isoformat(),
             'updated_at': datetime.utcnow().isoformat()
         }
 
         # Insert product
-        result = supabase.table('pos_products').insert(product_data).execute()
+        result = _insert_pos_product_compat(supabase, product_data)
 
         if not result.data:
             raise HTTPException(
@@ -424,7 +491,7 @@ async def bulk_import_products(
 
         for index, row in enumerate(rows, start=1):
             try:
-                row_data = row.model_dump(mode='json')
+                row_data = row.model_dump(mode='json', exclude_none=True, exclude_unset=True)
                 row_data['outlet_id'] = payload.outlet_id
                 row_data['sku'] = norm_sku(row_data.get('sku'))
                 if row_data.get('barcode') is not None:
@@ -512,7 +579,7 @@ async def bulk_import_products(
                 chunk_meta = pending_meta[start:start + chunk_size]
 
                 try:
-                    chunk_result = supabase.table(Tables.POS_PRODUCTS).upsert(chunk_rows).execute()
+                    chunk_result = _upsert_pos_products_compat(supabase, chunk_rows)
                     if chunk_result.data is None:
                         raise ValueError("Bulk upsert returned no data")
 
@@ -529,7 +596,7 @@ async def bulk_import_products(
 
                     for row_payload, meta in zip(chunk_rows, chunk_meta):
                         try:
-                            row_result = supabase.table(Tables.POS_PRODUCTS).upsert([row_payload]).execute()
+                            row_result = _upsert_pos_products_compat(supabase, [row_payload])
                             if not row_result.data:
                                 raise ValueError("Failed to write product row")
 
