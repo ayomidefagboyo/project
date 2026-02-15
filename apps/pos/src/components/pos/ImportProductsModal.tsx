@@ -31,7 +31,9 @@ interface ImportProductsModalProps {
 }
 
 type Step = 'upload' | 'preview' | 'importing' | 'done';
-const IMPORT_BATCH_SIZE = 1000;
+const IMPORT_BATCH_SIZE = 250;
+const IMPORT_BATCH_RETRY_ATTEMPTS = 3;
+const IMPORT_BATCH_RETRY_DELAY_MS = 1000;
 
 const ImportProductsModal: React.FC<ImportProductsModalProps> = ({
   isOpen,
@@ -53,6 +55,10 @@ const ImportProductsModal: React.FC<ImportProductsModalProps> = ({
     skipped: number;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const wait = (ms: number) => new Promise<void>((resolve) => {
+    window.setTimeout(() => resolve(), ms);
+  });
 
   const reset = () => {
     setStep('upload');
@@ -146,12 +152,41 @@ const ImportProductsModal: React.FC<ImportProductsModalProps> = ({
 
       for (let start = 0; start < payloadProducts.length; start += IMPORT_BATCH_SIZE) {
         const chunk = payloadProducts.slice(start, start + IMPORT_BATCH_SIZE);
-        const importResult = await posService.bulkImportProducts({
-          outlet_id: currentOutlet.id,
-          products: chunk,
-          dedupe_by: 'sku_or_barcode',
-          update_existing: true,
-        });
+        let importResult: Awaited<ReturnType<typeof posService.bulkImportProducts>> | null = null;
+        let chunkError: unknown = null;
+
+        for (let attempt = 1; attempt <= IMPORT_BATCH_RETRY_ATTEMPTS; attempt += 1) {
+          try {
+            importResult = await posService.bulkImportProducts({
+              outlet_id: currentOutlet.id,
+              products: chunk,
+              dedupe_by: 'sku_or_barcode',
+              update_existing: true,
+            });
+            chunkError = null;
+            break;
+          } catch (err) {
+            chunkError = err;
+            if (attempt < IMPORT_BATCH_RETRY_ATTEMPTS) {
+              await wait(IMPORT_BATCH_RETRY_DELAY_MS * attempt);
+            }
+          }
+        }
+
+        if (!importResult) {
+          done += chunk.length;
+          errors += chunk.length;
+          if (!firstError) {
+            const message = chunkError instanceof Error ? chunkError.message : 'Chunk import failed';
+            firstError = message;
+          }
+          setImportProgress({
+            done,
+            total: toImport.length,
+            errors,
+          });
+          continue;
+        }
 
         done += chunk.length;
         created += importResult.created_count || 0;
@@ -483,7 +518,7 @@ const ImportProductsModal: React.FC<ImportProductsModalProps> = ({
             </div>
             <p className="text-lg font-bold text-gray-900">Import Complete!</p>
             <p className="text-sm text-gray-600 mt-1">
-              {importProgress.done - importProgress.errors} of {importProgress.total} products imported successfully
+              {Math.max(0, importProgress.done - importProgress.errors)} of {importProgress.total} products imported successfully
             </p>
             {importSummary && (
               <p className="text-xs text-gray-500 mt-2">
