@@ -292,9 +292,9 @@ function AppContent() {
 
   // Header content for POS terminal page
   const posTerminalHeader = (
-    <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between w-full gap-3">
+    <div className="flex flex-col 2xl:flex-row 2xl:items-center 2xl:justify-between w-full gap-3">
       {/* Search Bar with Dropdown */}
-      <div className="relative flex-1 max-w-3xl">
+      <div className="relative flex-1 min-w-0">
         <input
           type="search"
           id="pos-product-search-input"
@@ -385,7 +385,7 @@ function AppContent() {
       </div>
 
       {/* Status Indicators - single row: + Add Customer | Cashier | Online icon (at far edge) */}
-      <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
+      <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-start 2xl:justify-end">
         {/* Add Customer */}
         <button
           type="button"

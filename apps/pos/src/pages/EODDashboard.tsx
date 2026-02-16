@@ -255,7 +255,7 @@ const POSEODDashboard: React.FC = () => {
   }
 
   return (
-    <div className="h-full bg-gray-50 dark:bg-gray-900 overflow-y-auto">
+    <div className="h-full min-h-0 bg-gray-50 dark:bg-gray-900 overflow-y-auto">
       <div className="max-w-6xl mx-auto px-4 py-2">
         {/* Header */}
         <div className="mb-2">

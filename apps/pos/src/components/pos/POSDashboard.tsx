@@ -121,6 +121,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   const [isLoading, setIsLoading] = useState(true);
   const [posError, setPosError] = useState<string | null>(null);
   const [isFinalizingSale, setIsFinalizingSale] = useState(false);
+  const finalizeSaleLockRef = useRef(false);
   const [tenderModal, setTenderModal] = useState<{
     method: 'cash' | 'card' | 'transfer';
     amount: string;
@@ -1356,7 +1357,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
    * Handle split payment processing
    */
   const handleSplitPayment = async (mode: 'save' | 'save_and_print' = 'save') => {
-    if (!currentUser?.id || !currentOutlet?.id || isFinalizingSale) return;
+    if (!currentUser?.id || !currentOutlet?.id || isFinalizingSale || finalizeSaleLockRef.current) return;
 
     const outletId = currentOutlet.id;
     const cashierId = currentUser.id;
@@ -1452,6 +1453,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       pendingSync: !isOnline,
     });
 
+    finalizeSaleLockRef.current = true;
     setIsFinalizingSale(true);
 
     try {
@@ -1532,6 +1534,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       error(errorMessage, 6000);
     } finally {
       setIsFinalizingSale(false);
+      finalizeSaleLockRef.current = false;
     }
   };
 
@@ -1596,7 +1599,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   // Show Manager Login Screen
   if (screenToShow === 'manager_login') {
     return (
-      <div className="min-h-screen bg-white">
+      <div className="h-full min-h-0 bg-white">
         <LoginForm
           onSuccess={handleManagerLoginSuccess}
           onSwitchToSignup={() => {
@@ -1626,8 +1629,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   // }
 
   return (
-    <div className="h-full bg-stone-50 p-4 lg:p-5">
-      <div className="h-[calc(100vh-8.5rem)] overflow-hidden">
+    <div className="h-full min-h-0 bg-stone-50 p-3 sm:p-4 lg:p-5">
+      <div className="h-full min-h-0 overflow-hidden">
         <div className="w-full h-full flex flex-col gap-4">
           <div className="rounded-2xl border border-stone-200 bg-white shadow-sm flex-1 min-h-0 flex flex-col">
             <div className="flex-1 min-h-0 overflow-y-auto p-3">
@@ -1666,12 +1669,12 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
             )}
 
             <div className="mb-4 pb-4 border-b border-stone-200 space-y-3">
-              <div className="flex flex-wrap lg:flex-nowrap items-center lg:items-end justify-between gap-3">
+              <div className="flex flex-wrap xl:flex-nowrap items-center xl:items-end justify-between gap-3">
                 <div className="flex items-center gap-2 flex-wrap justify-start">
                   <button
                     onClick={() => openTenderModal('cash')}
                     disabled={cart.length === 0 || (isFullyPaid && !activePayments.cash)}
-                    className={`min-h-[64px] min-w-[138px] px-6 py-3 text-lg font-extrabold tracking-wide rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                    className={`min-h-[56px] sm:min-h-[60px] xl:min-h-[64px] min-w-[112px] sm:min-w-[124px] xl:min-w-[138px] px-4 sm:px-5 xl:px-6 py-3 text-base sm:text-lg font-extrabold tracking-wide rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                       activePayments.cash
                         ? 'btn-brand border-transparent'
                         : 'btn-brand-soft hover:brightness-[0.97]'
@@ -1686,7 +1689,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                   <button
                     onClick={() => openTenderModal('card')}
                     disabled={cart.length === 0 || (isFullyPaid && !activePayments.card)}
-                    className={`min-h-[64px] min-w-[138px] px-6 py-3 text-lg font-extrabold tracking-wide rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                    className={`min-h-[56px] sm:min-h-[60px] xl:min-h-[64px] min-w-[112px] sm:min-w-[124px] xl:min-w-[138px] px-4 sm:px-5 xl:px-6 py-3 text-base sm:text-lg font-extrabold tracking-wide rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                       activePayments.card
                         ? 'btn-brand border-transparent'
                         : 'btn-brand-soft hover:brightness-[0.97]'
@@ -1701,7 +1704,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                   <button
                     onClick={() => openTenderModal('transfer')}
                     disabled={cart.length === 0 || (isFullyPaid && !activePayments.transfer)}
-                    className={`min-h-[64px] min-w-[138px] px-6 py-3 text-lg font-extrabold tracking-wide rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                    className={`min-h-[56px] sm:min-h-[60px] xl:min-h-[64px] min-w-[112px] sm:min-w-[124px] xl:min-w-[138px] px-4 sm:px-5 xl:px-6 py-3 text-base sm:text-lg font-extrabold tracking-wide rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                       activePayments.transfer
                         ? 'btn-brand border-transparent'
                         : 'btn-brand-soft hover:brightness-[0.97]'
@@ -1715,9 +1718,9 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                   </button>
                 </div>
 
-                <div className="flex items-baseline gap-2 lg:ml-auto text-right">
-                  <span className="text-base font-bold uppercase tracking-wide text-stone-500">Amount Due</span>
-                  <span className="text-5xl font-black leading-none text-slate-900">
+                <div className="flex items-baseline gap-2 xl:ml-auto text-right">
+                  <span className="text-sm sm:text-base font-bold uppercase tracking-wide text-stone-500">Amount Due</span>
+                  <span className="text-3xl sm:text-4xl xl:text-5xl font-black leading-none text-slate-900">
                     {formatCurrency(cart.length === 0 ? 0 : remainingBalance)}
                   </span>
                 </div>
@@ -1726,7 +1729,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
               {hasActivePayments && (() => {
                 const totalPaid = (activePayments.cash || 0) + (activePayments.card || 0) + (activePayments.transfer || 0);
                 return (
-                  <div className="text-sm font-semibold text-stone-600 lg:text-right">
+                  <div className="text-sm font-semibold text-stone-600 xl:text-right">
                     <span className="font-bold">Payments: </span>
                     {activePayments.cash && (
                       <span>Cash {formatCurrency(activePayments.cash)}</span>
@@ -1869,7 +1872,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                   clearCart();
                 }}
                 disabled={cart.length === 0 && Object.keys(activePayments).length === 0}
-                className="min-h-[64px] px-6 py-3 bg-stone-600 hover:bg-stone-700 text-stone-100 text-lg font-extrabold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="min-h-[56px] sm:min-h-[60px] xl:min-h-[64px] px-4 sm:px-5 xl:px-6 py-3 bg-stone-600 hover:bg-stone-700 text-stone-100 text-base sm:text-lg font-extrabold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancel
               </button>
@@ -1883,21 +1886,31 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                   }
                 }}
                 disabled={!hasHeldSale && cart.length === 0}
-                className="min-h-[64px] px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-800 text-lg font-extrabold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="min-h-[56px] sm:min-h-[60px] xl:min-h-[64px] px-4 sm:px-5 xl:px-6 py-3 bg-slate-200 hover:bg-slate-300 text-slate-800 text-base sm:text-lg font-extrabold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {hasHeldSale && cart.length === 0 ? 'Held Receipts' : 'Put on Hold'}
               </button>
               <button
-                onClick={() => handleSplitPayment('save')}
+                type="button"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void handleSplitPayment('save');
+                }}
                 disabled={!canFinalize || isFinalizingSale}
-                className="min-h-[64px] px-6 py-3 text-stone-100 text-lg font-extrabold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed btn-brand"
+                className="min-h-[56px] sm:min-h-[60px] xl:min-h-[64px] px-4 sm:px-5 xl:px-6 py-3 text-stone-100 text-base sm:text-lg font-extrabold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed btn-brand"
               >
                 {isFinalizingSale ? 'Saving...' : 'Save Only'}
               </button>
               <button
-                onClick={() => handleSplitPayment('save_and_print')}
+                type="button"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void handleSplitPayment('save_and_print');
+                }}
                 disabled={!canFinalize || isFinalizingSale}
-                className="min-h-[64px] px-6 py-3 text-stone-100 text-lg font-extrabold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed btn-brand"
+                className="min-h-[56px] sm:min-h-[60px] xl:min-h-[64px] px-4 sm:px-5 xl:px-6 py-3 text-stone-100 text-base sm:text-lg font-extrabold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed btn-brand"
               >
                 {isFinalizingSale ? 'Printing...' : 'Save & Print'}
               </button>

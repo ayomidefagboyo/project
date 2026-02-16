@@ -258,11 +258,11 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
   }));
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="h-full min-h-0 bg-slate-50 flex flex-col">
       {/* Filters */}
-      <div className="bg-white border-b border-slate-200 px-8 py-6">
-        <div className="flex items-center space-x-4">
-          <div className="flex-1">
+      <div className="bg-white border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-4 lg:py-5">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4">
+          <div className="flex-1 min-w-0">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
               <input
@@ -275,28 +275,30 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
             </div>
           </div>
 
-          <select
-            value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
-            className="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-          >
-            <option value="">All Categories</option>
-            {categories.map(cat => (
-              <option key={cat} value={cat}>{cat}</option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="min-w-[200px] max-w-full px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            >
+              <option value="">All Categories</option>
+              {categories.map(cat => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
 
-          <button
-            onClick={loadProducts}
-            className="touch-target-sm bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-          >
-            <RefreshCw className={`w-5 h-5 text-slate-600 ${isLoading ? 'animate-spin' : ''}`} />
-          </button>
+            <button
+              onClick={loadProducts}
+              className="touch-target-sm bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+            >
+              <RefreshCw className={`w-5 h-5 text-slate-600 ${isLoading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Excel-like Table */}
-      <div className="p-8">
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 lg:p-8">
         {error && (
           <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
             {error}

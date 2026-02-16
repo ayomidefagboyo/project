@@ -367,11 +367,15 @@ const TransactionsPage: React.FC = () => {
     const map: Record<string, { label: string; cls: string }> = {
       cash: { label: 'Cash', cls: 'bg-green-100 text-green-800' },
       transfer: { label: 'Transfer', cls: 'bg-blue-100 text-blue-800' },
-      pos: { label: 'POS', cls: 'bg-purple-100 text-purple-800' },
+      pos: { label: 'Card', cls: 'bg-purple-100 text-purple-800' },
       credit: { label: 'Credit', cls: 'bg-amber-100 text-amber-800' },
       mobile: { label: 'Mobile', cls: 'bg-pink-100 text-pink-800' },
     };
-    const info = map[method] || { label: method, cls: 'bg-gray-100 text-gray-800' };
+    const normalized = String(method || '').toLowerCase();
+    const info = map[normalized] || {
+      label: getPaymentMethodLabel(String(method || '')),
+      cls: 'bg-gray-100 text-gray-800',
+    };
     return <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${info.cls}`}>{info.label}</span>;
   };
 
@@ -555,7 +559,7 @@ const TransactionsPage: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col h-full bg-gray-50">
+    <div className="flex flex-col h-full min-h-0 bg-gray-50 overflow-hidden">
       {/* ─── Toolbar ─── */}
       <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3">
         <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
