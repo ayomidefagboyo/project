@@ -43,6 +43,7 @@ from app.schemas.pos import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+PAYMENT_METHOD_VALUES = {method.value for method in PaymentMethod}
 
 
 def _is_missing_cashier_name_error(exc: Exception) -> bool:
@@ -218,6 +219,139 @@ def _safe_json_loads(value: Any) -> Dict[str, Any]:
         except Exception:
             return {}
     return {}
+
+
+def _normalize_split_payments(raw_split_payments: Any) -> List[Dict[str, Any]]:
+    """Normalize split payment payload into a safe serializable list."""
+    if not isinstance(raw_split_payments, list):
+        return []
+
+    normalized: List[Dict[str, Any]] = []
+    for item in raw_split_payments:
+        candidate = item
+        if hasattr(item, "dict"):
+            try:
+                candidate = item.dict()
+            except Exception:
+                candidate = item
+        if not isinstance(candidate, dict):
+            continue
+
+        method_raw = str(candidate.get("method") or "").strip().lower()
+        if method_raw not in PAYMENT_METHOD_VALUES:
+            continue
+
+        try:
+            amount = Decimal(str(candidate.get("amount") or 0))
+        except Exception:
+            continue
+        if amount <= 0:
+            continue
+
+        row: Dict[str, Any] = {
+            "method": method_raw,
+            "amount": float(amount),
+        }
+        reference = candidate.get("reference")
+        if isinstance(reference, str) and reference.strip():
+            row["reference"] = reference.strip()
+        normalized.append(row)
+
+    return normalized
+
+
+def _build_persisted_transaction_notes(
+    notes: Optional[str],
+    split_payments: List[Dict[str, Any]]
+) -> Optional[str]:
+    """Persist free-form note and split metadata in one notes payload."""
+    note_text = notes.strip() if isinstance(notes, str) else ""
+    if not split_payments:
+        return note_text or None
+
+    payload: Dict[str, Any] = {"split_payments": split_payments}
+    if note_text:
+        payload["note"] = note_text
+    return json.dumps(payload, separators=(",", ":"))
+
+
+def _extract_split_payments_from_record(record: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Read split payments from a first-class column, fallback to legacy notes payload."""
+    direct = _normalize_split_payments(record.get("split_payments"))
+    if direct:
+        return direct
+
+    notes_data = _safe_json_loads(record.get("notes"))
+    return _normalize_split_payments(notes_data.get("split_payments"))
+
+
+def _extract_display_note_from_record(record: Dict[str, Any]) -> Optional[str]:
+    """Return only user-facing note text, never raw structured JSON metadata."""
+    notes_value = record.get("notes")
+    if not isinstance(notes_value, str):
+        return None
+
+    notes_value = notes_value.strip()
+    if not notes_value:
+        return None
+
+    parsed = _safe_json_loads(notes_value)
+    if parsed:
+        candidate = parsed.get("note") or parsed.get("notes") or parsed.get("message")
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+        return None
+
+    return notes_value
+
+
+def _decorate_transaction_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize transaction payload for API response contracts."""
+    row = dict(record)
+    split_payments = _extract_split_payments_from_record(row)
+    row["split_payments"] = split_payments or None
+    row["notes"] = _extract_display_note_from_record(row)
+    return row
+
+
+def _allocate_transaction_amount_by_method(record: Dict[str, Any]) -> Dict[str, Decimal]:
+    """Allocate a transaction amount across payment methods (split-aware)."""
+    total_amount = Decimal(str(record.get("total_amount") or 0))
+    split_payments = _extract_split_payments_from_record(record)
+
+    if len(split_payments) > 1:
+        allocations: Dict[str, Decimal] = {}
+        allocated_total = Decimal(0)
+        for split in split_payments:
+            method = str(split.get("method") or "").strip().lower()
+            if not method:
+                continue
+            try:
+                amount = Decimal(str(split.get("amount") or 0))
+            except Exception:
+                continue
+            if amount <= 0:
+                continue
+            allocations[method] = allocations.get(method, Decimal(0)) + amount
+            allocated_total += amount
+
+        if not allocations:
+            fallback_method = str(record.get("payment_method") or "cash").strip().lower() or "cash"
+            return {fallback_method: total_amount}
+
+        remainder = total_amount - allocated_total
+        if abs(remainder) <= Decimal("0.01") and remainder != 0:
+            fallback_method = (
+                str(split_payments[0].get("method") or "").strip().lower()
+                or str(record.get("payment_method") or "cash").strip().lower()
+                or "cash"
+            )
+            allocations[fallback_method] = allocations.get(fallback_method, Decimal(0)) + remainder
+
+        return allocations
+
+    method = str(record.get("payment_method") or "cash").strip().lower() or "cash"
+    return {method: total_amount}
 
 
 def _normalize_optional_uuid(value: Optional[str], field_name: str) -> Optional[str]:
@@ -859,7 +993,7 @@ async def create_transaction(
                     .execute()
 
                 if existing_transaction.data and len(existing_transaction.data) > 0:
-                    return POSTransactionResponse(**existing_transaction.data[0])
+                    return POSTransactionResponse(**_decorate_transaction_record(existing_transaction.data[0]))
             except Exception as lookup_error:
                 missing_column = _extract_missing_column_name(lookup_error)
                 if missing_column == 'offline_id':
@@ -869,16 +1003,11 @@ async def create_transaction(
                 else:
                     raise
         
-        # Extract split_payments from transaction notes if present (temporary solution)
-        # In future, we should add split_payments as a proper field in the schema
-        split_payments = None
-        if transaction.notes:
-            try:
-                notes_data = json.loads(transaction.notes)
-                if isinstance(notes_data, dict) and 'split_payments' in notes_data:
-                    split_payments = notes_data['split_payments']
-            except (json.JSONDecodeError, TypeError):
-                pass  # Notes is not JSON, treat as regular notes
+        # Split payments are first-class in request; keep legacy notes parsing for backward compatibility.
+        split_payments = _normalize_split_payments(getattr(transaction, "split_payments", None))
+        if not split_payments and transaction.notes:
+            notes_data = _safe_json_loads(transaction.notes)
+            split_payments = _normalize_split_payments(notes_data.get("split_payments"))
 
         # Generate transaction ID and number
         transaction_id = str(uuid.uuid4())
@@ -947,7 +1076,7 @@ async def create_transaction(
         change_amount = Decimal(0)
         tendered_amount = transaction.tendered_amount
         
-        if split_payments and len(split_payments) > 1:
+        if len(split_payments) > 1:
             # Validate split payments sum to total
             total_split = sum(Decimal(str(p.get('amount', 0))) for p in split_payments)
             if abs(total_split - total_amount) > Decimal('0.01'):  # Allow small rounding differences
@@ -955,13 +1084,9 @@ async def create_transaction(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Split payments total ({total_split}) does not match transaction total ({total_amount})"
                 )
-            # For split payments, use total as tendered and calculate change from cash portion
-            tendered_amount = total_amount
-            cash_payment = next((p for p in split_payments if p.get('method') == 'cash'), None)
-            if cash_payment and cash_payment.get('amount'):
-                cash_amount = Decimal(str(cash_payment['amount']))
-                # Change is only relevant if cash amount exceeds its portion
-                change_amount = max(Decimal(0), cash_amount - (total_amount if len(split_payments) == 1 else cash_amount))
+            # For split payments, tendered is the split sum.
+            tendered_amount = total_split
+            change_amount = max(Decimal(0), total_split - total_amount)
         elif transaction.payment_method == PaymentMethod.CASH and transaction.tendered_amount:
             change_amount = transaction.tendered_amount - total_amount
             if change_amount < -Decimal('0.01'):  # Allow small rounding differences
@@ -969,6 +1094,11 @@ async def create_transaction(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Insufficient payment amount"
                 )
+
+        persisted_notes = _build_persisted_transaction_notes(
+            transaction.notes,
+            split_payments if len(split_payments) > 1 else []
+        )
 
         # Get cashier's name for display (prefer staff_profiles, then users).
         cashier_name = 'Unknown'
@@ -999,14 +1129,15 @@ async def create_transaction(
             'discount_amount': float(transaction.discount_amount),
             'total_amount': float(total_amount),
             'payment_method': transaction.payment_method.value,
-            'tendered_amount': float(transaction.tendered_amount) if transaction.tendered_amount else None,
+            'tendered_amount': float(tendered_amount) if tendered_amount is not None else None,
             'change_amount': float(change_amount),
             'payment_reference': transaction.payment_reference,
             'status': TransactionStatus.COMPLETED.value,
             'receipt_type': transaction.receipt_type.value if hasattr(transaction, 'receipt_type') else 'sale',
             'transaction_date': datetime.utcnow().isoformat(),
             'sync_status': SyncStatus.SYNCED.value,
-            'notes': transaction.notes,  # Split payments are already in notes if provided
+            'notes': persisted_notes,
+            'split_payments': split_payments if len(split_payments) > 1 else None,
             'receipt_printed': False,
             'created_at': datetime.utcnow().isoformat(),
             'updated_at': datetime.utcnow().isoformat()
@@ -1068,7 +1199,7 @@ async def create_transaction(
                 # Don't fail transaction if stock update fails, but log it
 
         # Return complete transaction with items
-        response_data = tx_result.data[0]
+        response_data = _decorate_transaction_record(tx_result.data[0])
         response_data['items'] = items_result.data
 
         return POSTransactionResponse(**response_data)
@@ -1092,6 +1223,7 @@ async def get_transactions(
     date_to: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
     cashier_id: Optional[str] = Query(None, description="Filter by cashier"),
     payment_method: Optional[PaymentMethod] = Query(None, description="Filter by payment method"),
+    split_only: bool = Query(False, description="Filter to mixed/split payment transactions"),
     status: Optional[TransactionStatus] = Query(None, description="Filter by transaction status"),
     search: Optional[str] = Query(None, description="Search receipt number, customer, payment method, cashier"),
     current_user=Depends(CurrentUser())
@@ -1100,7 +1232,7 @@ async def get_transactions(
     try:
         supabase = get_supabase_admin()
 
-        def apply_filters(query_builder):
+        def apply_filters(query_builder, include_payment_filter: bool = True):
             query_builder = query_builder.eq('outlet_id', outlet_id)
 
             # Date filters should include the full calendar day.
@@ -1111,7 +1243,7 @@ async def get_transactions(
                 query_builder = query_builder.lt('transaction_date', f"{end_exclusive.isoformat()}T00:00:00")
             if cashier_id:
                 query_builder = query_builder.eq('cashier_id', cashier_id)
-            if payment_method:
+            if include_payment_filter and payment_method:
                 query_builder = query_builder.eq('payment_method', payment_method.value)
             if status:
                 query_builder = query_builder.eq('status', status.value)
@@ -1128,8 +1260,38 @@ async def get_transactions(
 
             return query_builder
 
-        # Apply pagination and ordering
         offset = (page - 1) * size
+        # Payment-specific filters need split-awareness and may require post-filtering.
+        if split_only or payment_method is not None:
+            query = apply_filters(
+                supabase.table('pos_transactions').select('*, items:pos_transaction_items(*)'),
+                include_payment_filter=False
+            )
+            query = query.order('transaction_date', desc=True)
+            result = query.execute()
+
+            decorated = [_decorate_transaction_record(row) for row in (result.data or [])]
+
+            if split_only:
+                filtered = [row for row in decorated if len(row.get('split_payments') or []) > 1]
+            else:
+                target_method = payment_method.value if payment_method else None
+                filtered = [
+                    row
+                    for row in decorated
+                    if len(row.get('split_payments') or []) <= 1 and row.get('payment_method') == target_method
+                ]
+
+            total = len(filtered)
+            items = filtered[offset: offset + size]
+            return TransactionListResponse(
+                items=items,
+                total=total,
+                page=page,
+                size=size
+            )
+
+        # Fast path for non-payment-filtered queries.
         query = apply_filters(
             supabase.table('pos_transactions').select('*, items:pos_transaction_items(*)', count='exact')
         )
@@ -1137,9 +1299,10 @@ async def get_transactions(
 
         result = query.execute()
         total = int(getattr(result, 'count', 0) or len(result.data or []))
+        items = [_decorate_transaction_record(row) for row in (result.data or [])]
 
         return TransactionListResponse(
-            items=result.data or [],
+            items=items,
             total=total,
             page=page,
             size=size
@@ -1171,7 +1334,7 @@ async def get_transaction(
                 detail="Transaction not found"
             )
 
-        return POSTransactionResponse(**result.data[0])
+        return POSTransactionResponse(**_decorate_transaction_record(result.data[0]))
 
     except HTTPException:
         raise
@@ -1895,19 +2058,15 @@ async def get_sales_stats(
         transaction_count = len(transactions)
         avg_transaction_value = total_sales / transaction_count if transaction_count > 0 else Decimal(0)
 
-        # Sales by payment method
-        cash_sales = sum(
-            Decimal(str(tx['total_amount'])) for tx in transactions
-            if tx['payment_method'] == 'cash'
-        )
-        transfer_sales = sum(
-            Decimal(str(tx['total_amount'])) for tx in transactions
-            if tx['payment_method'] == 'transfer'
-        )
-        pos_sales = sum(
-            Decimal(str(tx['total_amount'])) for tx in transactions
-            if tx['payment_method'] == 'pos'
-        )
+        # Sales by payment method (split-aware)
+        cash_sales = Decimal(0)
+        transfer_sales = Decimal(0)
+        pos_sales = Decimal(0)
+        for tx in transactions:
+            allocations = _allocate_transaction_amount_by_method(tx)
+            cash_sales += allocations.get('cash', Decimal(0))
+            transfer_sales += allocations.get('transfer', Decimal(0))
+            pos_sales += allocations.get('pos', Decimal(0))
 
         # Top products (simplified)
         top_products = []
@@ -2726,62 +2885,35 @@ async def get_sales_breakdown(
         # Process each transaction
         for tx in transactions:
             amount = Decimal(str(tx['total_amount']))
-            payment_method = tx['payment_method'].lower()
+            payment_method = str(tx.get('payment_method') or 'cash').lower()
             cashier_name = tx.get('users', {}).get('name', 'Unknown Cashier') if tx.get('users') else 'Unknown Cashier'
             cashier_id = tx['cashier_id']
             tx_date = datetime.fromisoformat(tx['transaction_date'].replace('Z', '+00:00'))
             hour = tx_date.hour
+            split_payments = _extract_split_payments_from_record(tx)
+            payment_allocations = _allocate_transaction_amount_by_method(tx)
 
             # Update summary
             breakdown['summary']['total_amount'] += amount
             breakdown['summary']['total_tax'] += Decimal(str(tx.get('tax_amount', 0)))
             breakdown['summary']['total_discount'] += Decimal(str(tx.get('discount_amount', 0)))
 
-            # Handle split payments stored in notes (if any)
-            split_payments = None
-            if tx.get('notes'):
-                try:
-                    notes_data = json.loads(tx['notes'])
-                    if isinstance(notes_data, dict) and 'split_payments' in notes_data:
-                        split_payments = notes_data['split_payments']
-                except (json.JSONDecodeError, TypeError):
-                    pass
+            # Process payment methods (split-aware)
+            for method, method_amount in payment_allocations.items():
+                if method not in breakdown['by_payment_method']:
+                    continue
 
-            # Process payment methods
-            if split_payments and len(split_payments) > 1:
-                # Handle split payments
-                for split in split_payments:
-                    split_method = split['method'].lower()
-                    split_amount = Decimal(str(split['amount']))
+                breakdown['by_payment_method'][method]['amount'] += method_amount
+                breakdown['by_payment_method'][method]['count'] += 1
 
-                    if split_method in breakdown['by_payment_method']:
-                        breakdown['by_payment_method'][split_method]['amount'] += split_amount
-                        breakdown['by_payment_method'][split_method]['count'] += 1
-
-                        # Update summary totals
-                        if split_method == 'cash':
-                            breakdown['summary']['cash_total'] += split_amount
-                        elif split_method == 'pos':
-                            breakdown['summary']['pos_total'] += split_amount
-                        elif split_method == 'transfer':
-                            breakdown['summary']['transfer_total'] += split_amount
-                        elif split_method == 'mobile':
-                            breakdown['summary']['mobile_total'] += split_amount
-            else:
-                # Single payment method
-                if payment_method in breakdown['by_payment_method']:
-                    breakdown['by_payment_method'][payment_method]['amount'] += amount
-                    breakdown['by_payment_method'][payment_method]['count'] += 1
-
-                    # Update summary totals
-                    if payment_method == 'cash':
-                        breakdown['summary']['cash_total'] += amount
-                    elif payment_method == 'pos':
-                        breakdown['summary']['pos_total'] += amount
-                    elif payment_method == 'transfer':
-                        breakdown['summary']['transfer_total'] += amount
-                    elif payment_method == 'mobile':
-                        breakdown['summary']['mobile_total'] += amount
+                if method == 'cash':
+                    breakdown['summary']['cash_total'] += method_amount
+                elif method == 'pos':
+                    breakdown['summary']['pos_total'] += method_amount
+                elif method == 'transfer':
+                    breakdown['summary']['transfer_total'] += method_amount
+                elif method == 'mobile':
+                    breakdown['summary']['mobile_total'] += method_amount
 
             # Group by cashier
             if cashier_id not in breakdown['by_cashier']:
@@ -2800,28 +2932,16 @@ async def get_sales_breakdown(
             cashier_data['transaction_count'] += 1
             cashier_data['total_amount'] += amount
 
-            # Add to cashier's payment method totals
-            if split_payments and len(split_payments) > 1:
-                for split in split_payments:
-                    split_method = split['method'].lower()
-                    split_amount = Decimal(str(split['amount']))
-                    if split_method == 'cash':
-                        cashier_data['cash_amount'] += split_amount
-                    elif split_method == 'pos':
-                        cashier_data['pos_amount'] += split_amount
-                    elif split_method == 'transfer':
-                        cashier_data['transfer_amount'] += split_amount
-                    elif split_method == 'mobile':
-                        cashier_data['mobile_amount'] += split_amount
-            else:
-                if payment_method == 'cash':
-                    cashier_data['cash_amount'] += amount
-                elif payment_method == 'pos':
-                    cashier_data['pos_amount'] += amount
-                elif payment_method == 'transfer':
-                    cashier_data['transfer_amount'] += amount
-                elif payment_method == 'mobile':
-                    cashier_data['mobile_amount'] += amount
+            # Add to cashier's payment method totals (split-aware)
+            for method, method_amount in payment_allocations.items():
+                if method == 'cash':
+                    cashier_data['cash_amount'] += method_amount
+                elif method == 'pos':
+                    cashier_data['pos_amount'] += method_amount
+                elif method == 'transfer':
+                    cashier_data['transfer_amount'] += method_amount
+                elif method == 'mobile':
+                    cashier_data['mobile_amount'] += method_amount
 
             # Group by hour
             hour_key = f"{hour:02d}:00"
@@ -2839,22 +2959,17 @@ async def get_sales_breakdown(
                 'transaction_number': tx['transaction_number'],
                 'amount': float(amount),
                 'payment_method': payment_method,
-                'split_payments': split_payments,
+                'split_payments': split_payments if len(split_payments) > 1 else None,
                 'cashier_name': cashier_name,
                 'transaction_date': tx['transaction_date'],
                 'items_count': len(tx.get('pos_transaction_items', [])),
                 'customer_name': tx.get('customer_name')
             }
 
-            if split_payments and len(split_payments) > 1:
-                # Add to all relevant payment methods for split payments
-                for split in split_payments:
-                    split_method = split['method'].lower()
-                    if split_method in breakdown['by_payment_method']:
-                        breakdown['by_payment_method'][split_method]['transactions'].append(tx_summary)
-            else:
-                if payment_method in breakdown['by_payment_method']:
-                    breakdown['by_payment_method'][payment_method]['transactions'].append(tx_summary)
+            # Add transaction to every payment bucket it contributed to
+            for method in payment_allocations.keys():
+                if method in breakdown['by_payment_method']:
+                    breakdown['by_payment_method'][method]['transactions'].append(tx_summary)
 
             cashier_data['transactions'].append(tx_summary)
             breakdown['transactions'].append(tx_summary)

@@ -232,6 +232,13 @@ class TransactionItemResponse(BaseModel):
         from_attributes = True
 
 
+class SplitPaymentEntry(BaseModel):
+    """Split payment line item"""
+    method: PaymentMethod = Field(..., description="Payment method for this split line")
+    amount: Decimal = Field(..., gt=0, description="Amount paid with this method")
+    reference: Optional[str] = Field(None, max_length=100, description="Optional payment reference")
+
+
 class POSTransactionCreate(BaseModel):
     """Schema for creating a POS transaction"""
     outlet_id: str = Field(..., description="Outlet ID")
@@ -246,6 +253,10 @@ class POSTransactionCreate(BaseModel):
     receipt_type: ReceiptType = Field(ReceiptType.SALE, description="Type of receipt")
     notes: Optional[str] = Field(None, description="Transaction notes")
     offline_id: Optional[str] = Field(None, description="Offline transaction ID")
+    split_payments: Optional[List[SplitPaymentEntry]] = Field(
+        None,
+        description="Split payment breakdown for mixed payments"
+    )
 
     @validator('tendered_amount')
     def validate_tendered_amount(cls, v, values):
@@ -275,6 +286,10 @@ class POSTransactionResponse(BaseModel):
     sync_status: SyncStatus = Field(SyncStatus.SYNCED, description="Sync status")
     items: List[TransactionItemResponse] = Field(..., description="Transaction items")
     receipt_type: ReceiptType = Field(ReceiptType.SALE, description="Type of receipt")
+    split_payments: Optional[List[SplitPaymentEntry]] = Field(
+        None,
+        description="Split payment breakdown for mixed payments"
+    )
     cashier_name: Optional[str] = Field(None, description="Name of the cashier")
     voided_by: Optional[str] = Field(None, description="ID of staff who voided transaction")
     voided_by_name: Optional[str] = Field(None, description="Name of staff who voided transaction")

@@ -51,6 +51,7 @@ const TransactionsPage: React.FC = () => {
     (tx: {
       transaction_date?: string;
       payment_method?: string;
+      split_payments?: Array<{ method: string; amount: number; reference?: string }>;
       status?: string;
       transaction_number?: string;
       customer_name?: string;
@@ -59,14 +60,20 @@ const TransactionsPage: React.FC = () => {
         const txDate = tx.transaction_date ? tx.transaction_date.split('T')[0] : '';
         if (txDate !== selectedDate) return false;
       }
-      if (paymentFilter !== 'all' && tx.payment_method !== paymentFilter) return false;
+      const splitCount = Array.isArray(tx.split_payments) ? tx.split_payments.length : 0;
+      const isSplit = splitCount > 1;
+      if (paymentFilter === 'split') {
+        if (!isSplit) return false;
+      } else if (paymentFilter !== 'all') {
+        if (isSplit || tx.payment_method !== paymentFilter) return false;
+      }
       if (statusFilter !== 'all' && tx.status !== statusFilter) return false;
 
       const needle = searchQuery.trim().toLowerCase();
       if (needle) {
         const txn = tx.transaction_number?.toLowerCase() || '';
         const customer = tx.customer_name?.toLowerCase() || '';
-        const payment = tx.payment_method?.toLowerCase() || '';
+        const payment = isSplit ? 'split' : (tx.payment_method?.toLowerCase() || '');
         if (!txn.includes(needle) && !customer.includes(needle) && !payment.includes(needle)) {
           return false;
         }
@@ -113,6 +120,7 @@ const TransactionsPage: React.FC = () => {
       payment_reference: tx.payment_reference,
       status: 'pending' as any,
       transaction_date: createdAt,
+      split_payments: tx.split_payments,
       items: (tx.items || []).map((item, index) => {
         const itemLookup = pendingProductLookup[item.product_id] || null;
         const unitPrice = Number(item.unit_price || 0);
@@ -247,7 +255,10 @@ const TransactionsPage: React.FC = () => {
         date_from: selectedDate || undefined,
         date_to: selectedDate || undefined,
         payment_method:
-          paymentFilter !== 'all' ? (paymentFilter as PaymentMethod) : undefined,
+          paymentFilter !== 'all' && paymentFilter !== 'split'
+            ? (paymentFilter as PaymentMethod)
+            : undefined,
+        split_only: paymentFilter === 'split' ? true : undefined,
         status: statusFilter !== 'all' ? statusFilter : undefined,
         search: searchQuery || undefined,
       });
@@ -362,6 +373,77 @@ const TransactionsPage: React.FC = () => {
     };
     const info = map[method] || { label: method, cls: 'bg-gray-100 text-gray-800' };
     return <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${info.cls}`}>{info.label}</span>;
+  };
+
+  const getSplitPayments = (
+    tx: Pick<ExtendedTransaction, 'split_payments'>
+  ): Array<{ method: string; amount: number; reference?: string }> => {
+    if (!Array.isArray(tx.split_payments)) return [];
+    return tx.split_payments
+      .map((entry) => ({
+        method: String(entry.method || '').toLowerCase(),
+        amount: Number(entry.amount || 0),
+        reference: entry.reference,
+      }))
+      .filter((entry) => Number.isFinite(entry.amount) && entry.amount > 0 && !!entry.method);
+  };
+
+  const isSplitTransaction = (tx: Pick<ExtendedTransaction, 'split_payments'>): boolean =>
+    getSplitPayments(tx).length > 1;
+
+  const getPaymentMethodLabel = (method: string): string => {
+    const normalized = method.toLowerCase();
+    if (normalized === 'pos') return 'Card';
+    if (normalized === 'cash') return 'Cash';
+    if (normalized === 'transfer') return 'Transfer';
+    if (normalized === 'credit') return 'Credit';
+    if (normalized === 'mobile') return 'Mobile';
+    return method;
+  };
+
+  const renderPaymentDisplay = (
+    tx: Pick<ExtendedTransaction, 'payment_method' | 'split_payments'>,
+    showBreakdown = false
+  ) => {
+    const splitPayments = getSplitPayments(tx);
+    if (splitPayments.length > 1) {
+      return (
+        <div className="space-y-1">
+          <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-800">Split</span>
+          {showBreakdown && (
+            <div className="space-y-1">
+              {splitPayments.map((entry, index) => (
+                <div key={`${entry.method}-${index}`} className="text-xs text-gray-700">
+                  <span className="font-medium">{getPaymentMethodLabel(entry.method)}</span>
+                  <span>{` ${formatCurrency(entry.amount)}`}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return getPaymentBadge(tx.payment_method);
+  };
+
+  const sanitizeDisplayNote = (notes?: string | null): string | null => {
+    if (!notes || typeof notes !== 'string') return null;
+    const trimmed = notes.trim();
+    if (!trimmed) return null;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object') {
+        const candidate = (parsed as any).note || (parsed as any).notes || (parsed as any).message;
+        if (typeof candidate === 'string' && candidate.trim()) {
+          return candidate.trim();
+        }
+        return null;
+      }
+    } catch {
+      // Keep plain text notes.
+    }
+    return trimmed;
   };
 
   const getStatusBadge = (status: string) => {
@@ -514,6 +596,7 @@ const TransactionsPage: React.FC = () => {
               <option value="cash">Cash</option>
               <option value="pos">Card</option>
               <option value="transfer">Transfer</option>
+              <option value="split">Split</option>
             </select>
             <select
               value={statusFilter}
@@ -564,7 +647,7 @@ const TransactionsPage: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 min-w-0">
                     <span className="text-sm font-mono font-semibold text-gray-800">{tx.transaction_number}</span>
-                    {getPaymentBadge(tx.payment_method)}
+                    {renderPaymentDisplay(tx)}
                     {getStatusBadge(tx.status)}
                   </div>
                   <div className="flex items-center gap-4 flex-shrink-0">
@@ -660,7 +743,7 @@ const TransactionsPage: React.FC = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Payment</p>
-                  <div>{getPaymentBadge(selectedTransaction.payment_method)}</div>
+                  <div>{renderPaymentDisplay(selectedTransaction, true)}</div>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Receipt Type</p>
@@ -789,10 +872,10 @@ const TransactionsPage: React.FC = () => {
                   <p className="text-sm font-mono text-gray-900">{selectedTransaction.payment_reference}</p>
                 </div>
               )}
-              {selectedTransaction.notes && (
+              {sanitizeDisplayNote(selectedTransaction.notes) && (
                 <div>
                   <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Notes</p>
-                  <p className="text-sm text-gray-700">{selectedTransaction.notes}</p>
+                  <p className="text-sm text-gray-700">{sanitizeDisplayNote(selectedTransaction.notes)}</p>
                 </div>
               )}
             </div>
