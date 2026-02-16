@@ -1500,6 +1500,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     try {
       // Always store transaction locally first for instant UX and offline safety
       const offlineId = await posService.storeOfflineTransaction(transactionRequest);
+      const onlineTransactionRequest = { ...transactionRequest, offline_id: offlineId };
       await refreshOfflineTransactionCount();
       const localReceiptPayload = buildLocalReceiptPayloadFromCart({
         offlineId,
@@ -1543,7 +1544,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       if (isOnline) {
         (async () => {
           try {
-            const transaction = await posService.createTransaction(transactionRequest);
+            const transaction = await posService.createTransaction(onlineTransactionRequest);
 
             // On success, reload products to reflect new stock levels
             loadProducts();

@@ -51,6 +51,7 @@ export interface POSTransactionItem {
 
 export interface POSTransaction {
   id: string;
+  offline_id?: string;
   outlet_id: string;
   transaction_number: string;
   cashier_id: string;
@@ -176,6 +177,14 @@ export interface SalesStats {
   top_products: any[];
 }
 
+export interface ProductCatalogSyncProgress {
+  mode: 'full' | 'delta';
+  page: number;
+  updated: number;
+  batch_size: number;
+  stage: 'syncing' | 'completed';
+}
+
 export enum PaymentMethod {
   CASH = 'cash',
   TRANSFER = 'transfer',
@@ -206,6 +215,49 @@ export enum TransferStatus {
   RECEIVED = 'received',
   CANCELLED = 'cancelled'
 }
+
+const createOfflineTransactionId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  const randomPart = Math.random().toString(36).slice(2, 12);
+  return `${Date.now()}-${randomPart}`;
+};
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const toHex = (value: number): string => value.toString(16).padStart(8, '0');
+
+const hashWithSeed = (value: string, seed: number): number => {
+  let hash = seed >>> 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+    hash >>>= 0;
+  }
+  return hash >>> 0;
+};
+
+const normalizeOfflineIdForApi = (rawValue: string): string => {
+  const value = rawValue.trim();
+  if (!value) return createOfflineTransactionId();
+  if (UUID_PATTERN.test(value)) return value.toLowerCase();
+
+  // Deterministic UUID so retries for the same legacy offline_id keep the same idempotency key.
+  const h1 = hashWithSeed(value, 2166136261);
+  const h2 = hashWithSeed(`${value}|1`, 2166136261);
+  const h3 = hashWithSeed(`${value}|2`, 2166136261);
+  const h4 = hashWithSeed(`${value}|3`, 2166136261);
+
+  const part1 = toHex(h1);
+  const part2 = toHex(h2).slice(0, 4);
+  const part3 = `4${toHex(h2).slice(5, 8)}`;
+  const part4 = `${((h3 >>> 28) & 0x3 | 0x8).toString(16)}${toHex(h3).slice(1, 4)}`;
+  const part5 = `${toHex(h3)}${toHex(h4)}`.slice(0, 12);
+
+  return `${part1}-${part2}-${part3}-${part4}-${part5}`;
+};
 
 // ===============================================
 // CUSTOMER LOYALTY INTERFACES
@@ -365,6 +417,8 @@ class POSService {
   private isInitialized = false;
   private readonly initPromise: Promise<void>;
   private readonly productSyncPageSize = 100;
+  private offlineSyncPromise: Promise<number> | null = null;
+  private readonly inFlightTransactionCreates = new Map<string, Promise<POSTransaction>>();
 
   constructor() {
     this.initPromise = this.initializeOfflineDB();
@@ -426,6 +480,7 @@ class POSService {
       category?: string;
       activeOnly?: boolean;
       updatedAfter?: string;
+      includeTotal?: boolean;
     }
   ): Promise<ProductListResult> {
     const safeSize = Math.min(Math.max(options.size, 1), this.productSyncPageSize);
@@ -434,6 +489,7 @@ class POSService {
       page: options.page.toString(),
       size: safeSize.toString(),
       active_only: (options.activeOnly !== false).toString(),
+      include_total: (options.includeTotal !== false).toString(),
       ...options.search && { search: options.search },
       ...options.category && { category: options.category },
       ...options.updatedAfter && { updated_after: options.updatedAfter }
@@ -473,7 +529,8 @@ class POSService {
         size: safeSize,
         search: options.search,
         category: options.category,
-        activeOnly: options.activeOnly
+        activeOnly: options.activeOnly,
+        includeTotal: true,
       });
 
       // Cache products offline for future use
@@ -618,6 +675,7 @@ class POSService {
     options: {
       forceFull?: boolean;
       maxPages?: number;
+      onProgress?: (progress: ProductCatalogSyncProgress) => void;
     } = {}
   ): Promise<{ mode: 'full' | 'delta'; updated: number }> {
     const offlineReady = await this.ensureOfflineInitialized();
@@ -637,6 +695,15 @@ class POSService {
     let page = 1;
     let updated = 0;
     let latestCursor = typeof existingCursor === 'string' ? existingCursor : '';
+    const publishProgress = (page: number, batchSize: number, stage: 'syncing' | 'completed') => {
+      options.onProgress?.({
+        mode,
+        page,
+        updated,
+        batch_size: batchSize,
+        stage,
+      });
+    };
 
     if (mode === 'full') {
       const allItems: POSProduct[] = [];
@@ -645,13 +712,16 @@ class POSService {
         const response = await this.fetchProductsPageFromApi(outletId, {
           page,
           size: this.productSyncPageSize,
-          activeOnly: false
+          activeOnly: false,
+          includeTotal: false,
         });
 
         const items = response.items || [];
         if (items.length === 0) break;
 
         allItems.push(...items);
+        updated = allItems.length;
+        publishProgress(page, items.length, 'syncing');
         const latestInBatch = this.getLatestUpdatedAt(items);
         if (latestInBatch && this.toTimestamp(latestInBatch) > this.toTimestamp(latestCursor)) {
           latestCursor = latestInBatch;
@@ -669,7 +739,8 @@ class POSService {
           page,
           size: this.productSyncPageSize,
           activeOnly: false,
-          updatedAfter: existingCursor
+          updatedAfter: existingCursor,
+          includeTotal: false,
         });
 
         const items = response.items || [];
@@ -677,6 +748,7 @@ class POSService {
 
         await offlineDatabase.storeProducts(items);
         updated += items.length;
+        publishProgress(page, items.length, 'syncing');
 
         const latestInBatch = this.getLatestUpdatedAt(items);
         if (latestInBatch && this.toTimestamp(latestInBatch) > this.toTimestamp(latestCursor)) {
@@ -692,6 +764,7 @@ class POSService {
       await offlineDatabase.storeSetting(cursorKey, latestCursor);
     }
 
+    publishProgress(page, 0, 'completed');
     return { mode, updated };
   }
 
@@ -826,24 +899,56 @@ class POSService {
    * Process a new POS transaction
    */
   async createTransaction(transaction: CreateTransactionRequest): Promise<POSTransaction> {
-    try {
-      const response = await apiClient.post<POSTransaction>(`${this.baseUrl}/transactions`, transaction);
-      if (!response.data) throw new Error(response.error || 'Failed to create transaction');
+    const normalizedOfflineId = transaction.offline_id
+      ? normalizeOfflineIdForApi(transaction.offline_id)
+      : undefined;
+    const requestPayload: CreateTransactionRequest = normalizedOfflineId
+      ? { ...transaction, offline_id: normalizedOfflineId }
+      : transaction;
 
-      // Immediately cache the new transaction for other terminals
-      if (this.isInitialized && response.data) {
-        try {
-          await offlineDatabase.storeTransactions([response.data]);
-          logger.log('📝 New transaction cached for multi-terminal access');
-        } catch (cacheError) {
-          logger.warn('Failed to cache new transaction:', cacheError);
-        }
+    const offlineKey = normalizedOfflineId
+      ? `${transaction.outlet_id}:${normalizedOfflineId}`
+      : null;
+
+    if (offlineKey) {
+      const existingRequest = this.inFlightTransactionCreates.get(offlineKey);
+      if (existingRequest) {
+        return existingRequest;
       }
+    }
 
-      return response.data;
-    } catch (error) {
-      logger.error('Error creating transaction:', error);
-      throw this.handleError(error);
+    const requestPromise = (async () => {
+      try {
+        const response = await apiClient.post<POSTransaction>(`${this.baseUrl}/transactions`, requestPayload);
+        if (!response.data) throw new Error(response.error || 'Failed to create transaction');
+
+        // Immediately cache the new transaction for other terminals
+        if (this.isInitialized && response.data) {
+          try {
+            await offlineDatabase.storeTransactions([response.data]);
+            logger.log('📝 New transaction cached for multi-terminal access');
+          } catch (cacheError) {
+            logger.warn('Failed to cache new transaction:', cacheError);
+          }
+        }
+
+        return response.data;
+      } catch (error) {
+        logger.error('Error creating transaction:', error);
+        throw this.handleError(error);
+      }
+    })();
+
+    if (offlineKey) {
+      this.inFlightTransactionCreates.set(offlineKey, requestPromise);
+    }
+
+    try {
+      return await requestPromise;
+    } finally {
+      if (offlineKey) {
+        this.inFlightTransactionCreates.delete(offlineKey);
+      }
     }
   }
 
@@ -1024,7 +1129,7 @@ class POSService {
         return await offlineDatabase.storeOfflineTransaction(transaction);
       } else {
         // Fallback to localStorage
-        const offlineId = `offline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const offlineId = createOfflineTransactionId();
         const offlineTransactions = JSON.parse(localStorage.getItem('offline_transactions') || '[]');
         offlineTransactions.push({
           id: offlineId,
@@ -1046,47 +1151,59 @@ class POSService {
    * Sync offline transactions when back online
    */
   async syncOfflineTransactions(): Promise<number> {
-    try {
-      let offlineTransactions: any[] = [];
+    if (this.offlineSyncPromise) {
+      return this.offlineSyncPromise;
+    }
 
-      if (this.isInitialized) {
-        // Use IndexedDB/SQLite
-        offlineTransactions = await offlineDatabase.getOfflineTransactions();
-      } else {
-        // Fallback to localStorage
-        offlineTransactions = JSON.parse(localStorage.getItem('offline_transactions') || '[]');
-      }
+    this.offlineSyncPromise = (async () => {
+      try {
+        let offlineTransactions: any[] = [];
 
-      let syncedCount = 0;
-      const failedTransactions: string[] = [];
+        if (this.isInitialized) {
+          // Use IndexedDB/SQLite
+          offlineTransactions = await offlineDatabase.getOfflineTransactions();
+        } else {
+          // Fallback to localStorage
+          offlineTransactions = JSON.parse(localStorage.getItem('offline_transactions') || '[]');
+        }
 
-      for (const transaction of offlineTransactions) {
-        try {
-          await this.createTransaction(transaction);
-          syncedCount++;
+        let syncedCount = 0;
+        const failedTransactions: string[] = [];
 
-          // Remove successfully synced transaction
-          if (this.isInitialized && transaction.offline_id) {
-            await offlineDatabase.removeOfflineTransaction(transaction.offline_id);
-            await offlineDatabase.removeTransaction(transaction.offline_id);
-          }
-        } catch (error) {
-          logger.error('Failed to sync offline transaction:', error);
-          if (transaction.offline_id) {
-            failedTransactions.push(transaction.offline_id);
+        for (const transaction of offlineTransactions) {
+          try {
+            await this.createTransaction(transaction);
+            syncedCount++;
+
+            // Remove successfully synced transaction
+            if (this.isInitialized && transaction.offline_id) {
+              await offlineDatabase.removeOfflineTransaction(transaction.offline_id);
+              await offlineDatabase.removeTransaction(transaction.offline_id);
+            }
+          } catch (error) {
+            logger.error('Failed to sync offline transaction:', error);
+            if (transaction.offline_id) {
+              failedTransactions.push(transaction.offline_id);
+            }
           }
         }
-      }
 
-      // For localStorage fallback, remove all on success (simple approach)
-      if (!this.isInitialized && syncedCount > 0 && failedTransactions.length === 0) {
-        localStorage.removeItem('offline_transactions');
-      }
+        // For localStorage fallback, remove all on success (simple approach)
+        if (!this.isInitialized && syncedCount > 0 && failedTransactions.length === 0) {
+          localStorage.removeItem('offline_transactions');
+        }
 
-      return syncedCount;
-    } catch (error) {
-      logger.error('Error syncing offline transactions:', error);
-      return 0;
+        return syncedCount;
+      } catch (error) {
+        logger.error('Error syncing offline transactions:', error);
+        return 0;
+      }
+    })();
+
+    try {
+      return await this.offlineSyncPromise;
+    } finally {
+      this.offlineSyncPromise = null;
     }
   }
 

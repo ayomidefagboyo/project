@@ -13,6 +13,7 @@ import { printReceiptContent } from '../lib/receiptPrinter';
 
 // Extend base transaction type with UI-specific fields returned by API
 interface ExtendedTransaction extends POSTransaction {
+  offline_id?: string;
   cashier_name?: string;
   receipt_type?: string;
   voided_by_name?: string;
@@ -36,6 +37,7 @@ const TransactionsPage: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [selectedTransaction, setSelectedTransaction] = useState<ExtendedTransaction | null>(null);
+  const [isLoadingTransactionDetails, setIsLoadingTransactionDetails] = useState(false);
   const [showVoidConfirm, setShowVoidConfirm] = useState(false);
   const [voidReason, setVoidReason] = useState('');
   const [showRefundConfirm, setShowRefundConfirm] = useState(false);
@@ -94,6 +96,7 @@ const TransactionsPage: React.FC = () => {
 
     return {
       id: tx.offline_id,
+      offline_id: tx.offline_id,
       outlet_id: tx.outlet_id,
       transaction_number: buildOfflineReceiptNumber(tx.offline_id, createdAt),
       cashier_id: tx.cashier_id,
@@ -109,7 +112,22 @@ const TransactionsPage: React.FC = () => {
       payment_reference: tx.payment_reference,
       status: 'pending' as any,
       transaction_date: createdAt,
-      items: [],
+      items: (tx.items || []).map((item, index) => {
+        const unitPrice = Number(item.unit_price || 0);
+        const quantity = Number(item.quantity || 0);
+        const discountAmount = Number(item.discount_amount || 0);
+        return {
+          id: `${tx.offline_id}-${index}`,
+          product_id: item.product_id,
+          sku: '',
+          product_name: 'Product',
+          quantity,
+          unit_price: unitPrice,
+          discount_amount: discountAmount,
+          tax_amount: 0,
+          line_total: Math.max(0, unitPrice * quantity - discountAmount),
+        };
+      }),
       notes: tx.notes,
       receipt_printed: false,
       created_at: createdAt,
@@ -127,7 +145,15 @@ const TransactionsPage: React.FC = () => {
       if (pendingRows.length === 0) return base;
 
       const seen = new Set(base.map((tx) => tx.id));
-      const merged = [...pendingRows.filter((tx) => !seen.has(tx.id)), ...base];
+      const seenOfflineIds = new Set(
+        base
+          .map((tx) => (tx as ExtendedTransaction).offline_id)
+          .filter((value): value is string => typeof value === 'string' && value.length > 0)
+      );
+      const merged = [
+        ...pendingRows.filter((tx) => !seen.has(tx.id) && !(tx.offline_id && seenOfflineIds.has(tx.offline_id))),
+        ...base
+      ];
       merged.sort(
         (a, b) =>
           new Date(b.transaction_date || b.created_at || 0).getTime() -
@@ -220,6 +246,33 @@ const TransactionsPage: React.FC = () => {
     mergeWithPendingOffline,
     matchesActiveFilters,
   ]);
+
+  const openTransactionDetails = useCallback(async (tx: ExtendedTransaction) => {
+    setSelectedTransaction(tx);
+    setIsLoadingTransactionDetails(false);
+
+    if (tx.status === 'pending') {
+      return;
+    }
+
+    const hasLineItems = Array.isArray(tx.items) && tx.items.length > 0;
+    if (hasLineItems) {
+      return;
+    }
+
+    setIsLoadingTransactionDetails(true);
+    try {
+      const fullTransaction = await posService.getTransaction(tx.id);
+      setSelectedTransaction((prev) => {
+        if (!prev || prev.id !== tx.id) return prev;
+        return { ...prev, ...(fullTransaction as ExtendedTransaction) };
+      });
+    } catch (err) {
+      console.error('Failed to load transaction details:', err);
+    } finally {
+      setIsLoadingTransactionDetails(false);
+    }
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -469,7 +522,7 @@ const TransactionsPage: React.FC = () => {
             {transactions.map(tx => (
               <button
                 key={tx.id}
-                onClick={() => setSelectedTransaction(tx)}
+                onClick={() => void openTransactionDetails(tx)}
                 className={`w-full text-left bg-white border rounded-lg px-4 py-3 hover:border-blue-300 hover:shadow-sm transition-all ${tx.status === 'voided' ? 'opacity-60 border-red-200' : 'border-gray-200'
                   }`}
               >
@@ -523,12 +576,24 @@ const TransactionsPage: React.FC = () => {
       {/* ─── Transaction Detail Drawer ─── */}
       {selectedTransaction && (
         <>
-          <div className="fixed inset-0 bg-black/40 z-40" onClick={() => setSelectedTransaction(null)} />
+          <div
+            className="fixed inset-0 bg-black/40 z-40"
+            onClick={() => {
+              setSelectedTransaction(null);
+              setIsLoadingTransactionDetails(false);
+            }}
+          />
           <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-50 flex flex-col">
             {/* Drawer header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
               <h3 className="text-base font-bold text-gray-900">Transaction Details</h3>
-              <button onClick={() => setSelectedTransaction(null)} className="p-1.5 hover:bg-gray-100 rounded-lg">
+              <button
+                onClick={() => {
+                  setSelectedTransaction(null);
+                  setIsLoadingTransactionDetails(false);
+                }}
+                className="p-1.5 hover:bg-gray-100 rounded-lg"
+              >
                 <X className="w-5 h-5 text-gray-400" />
               </button>
             </div>
@@ -587,6 +652,39 @@ const TransactionsPage: React.FC = () => {
                   )}
                 </div>
               )}
+
+              {/* Line Items */}
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Items</p>
+                {isLoadingTransactionDetails ? (
+                  <div className="text-sm text-gray-500">Loading items...</div>
+                ) : (selectedTransaction.items || []).length > 0 ? (
+                  <div className="space-y-2">
+                    {(selectedTransaction.items || []).map((item, index) => {
+                      const lineTotal = Number(
+                        item.line_total ?? (Number(item.unit_price || 0) * Number(item.quantity || 0) - Number(item.discount_amount || 0))
+                      );
+                      return (
+                        <div key={item.id || `${item.product_id}-${index}`} className="rounded-lg border border-gray-200 px-3 py-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-gray-900 truncate">
+                                {item.product_name || item.sku || `Product ${index + 1}`}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                {Number(item.quantity || 0)} × {formatCurrency(Number(item.unit_price || 0))}
+                              </p>
+                            </div>
+                            <p className="text-sm font-semibold text-gray-900">{formatCurrency(lineTotal)}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-sm text-gray-500">No line items recorded.</div>
+                )}
+              </div>
 
               {/* Amounts */}
               <div className="bg-gray-50 rounded-xl p-4 space-y-2">

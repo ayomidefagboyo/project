@@ -289,23 +289,14 @@ class EODService {
   }
 
   // Get EOD statistics
-  async getEODStats(dateFrom?: string, dateTo?: string): Promise<EODStatsResponse> {
+  async getEODStats(dateFrom?: string, dateTo?: string, outletId?: string): Promise<EODStatsResponse> {
     try {
-      let url = '/eod/stats/overview';
-      const params: string[] = [];
+      const params: Record<string, string> = {};
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
+      if (outletId) params.outlet_id = outletId;
 
-      if (dateFrom) {
-        params.push(`date_from=${dateFrom}`);
-      }
-      if (dateTo) {
-        params.push(`date_to=${dateTo}`);
-      }
-
-      if (params.length > 0) {
-        url += `?${params.join('&')}`;
-      }
-
-      const response = await apiClient.get(url);
+      const response = await apiClient.get('/eod/stats/overview', params);
 
       if (response.error) {
         return { data: null, error: response.error };
@@ -463,7 +454,6 @@ export type {
   EODStatsResponse, 
   EODSearchRequest 
 };
-
 
 
 

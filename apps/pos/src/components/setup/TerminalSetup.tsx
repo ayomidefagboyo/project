@@ -12,8 +12,16 @@ interface TerminalConfig {
   initialized_at: string;
 }
 
+interface TerminalSetupProgress {
+  stage: 'saving' | 'syncing' | 'verifying' | 'complete';
+  message: string;
+}
+
 interface TerminalSetupProps {
-  onSetupComplete: (config: TerminalConfig) => void;
+  onSetupComplete: (
+    config: TerminalConfig,
+    onProgress?: (progress: TerminalSetupProgress) => void
+  ) => void | Promise<void>;
 }
 
 const TerminalSetup: React.FC<TerminalSetupProps> = ({ onSetupComplete }) => {
@@ -22,6 +30,9 @@ const TerminalSetup: React.FC<TerminalSetupProps> = ({ onSetupComplete }) => {
   const { currentUser, userOutlets, isLoading, setCurrentUser, setUserOutlets, setCurrentOutlet } = useOutlet();
   const [selectedOutletId, setSelectedOutletId] = useState<string>('');
   const [isConfirming, setIsConfirming] = useState(false);
+  const [isInitializingTerminal, setIsInitializingTerminal] = useState(false);
+  const [initializationError, setInitializationError] = useState<string | null>(null);
+  const [initializationMessage, setInitializationMessage] = useState<string>('Preparing terminal initialization...');
 
   const formatOutletAddress = (address: unknown): string => {
     if (!address) return 'Not provided';
@@ -77,7 +88,7 @@ const TerminalSetup: React.FC<TerminalSetupProps> = ({ onSetupComplete }) => {
     }
   }, [userOutlets]);
 
-  const handleSetupComplete = () => {
+  const handleSetupComplete = async () => {
     if (!currentUser || !selectedOutletId) return;
 
     const selectedOutlet = userOutlets.find(o => o.id === selectedOutletId);
@@ -94,7 +105,18 @@ const TerminalSetup: React.FC<TerminalSetupProps> = ({ onSetupComplete }) => {
     localStorage.setItem('pos_terminal_config', JSON.stringify(config));
     setCurrentOutlet(selectedOutlet);
 
-    onSetupComplete(config);
+    try {
+      setInitializationError(null);
+      setIsInitializingTerminal(true);
+      setInitializationMessage('Saving terminal setup...');
+      await Promise.resolve(onSetupComplete(config, (progress) => {
+        setInitializationMessage(progress.message);
+      }));
+    } catch (setupError) {
+      console.error('Terminal setup failed:', setupError);
+      setInitializationError('Initialization failed. Check internet and try again.');
+      setIsInitializingTerminal(false);
+    }
   };
 
   // Show auth wrapper if not authenticated
@@ -270,17 +292,29 @@ const TerminalSetup: React.FC<TerminalSetupProps> = ({ onSetupComplete }) => {
               <div className="flex gap-3">
                 <button
                   onClick={() => setIsConfirming(false)}
+                  disabled={isInitializingTerminal}
                   className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleSetupComplete}
+                  disabled={isInitializingTerminal}
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >
-                  Confirm
+                  {isInitializingTerminal ? 'Initializing...' : 'Confirm'}
                 </button>
               </div>
+              {isInitializingTerminal && (
+                <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+                  {initializationMessage}
+                </div>
+              )}
+              {initializationError && (
+                <div className="mt-4 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {initializationError}
+                </div>
+              )}
             </div>
           </div>
         )}

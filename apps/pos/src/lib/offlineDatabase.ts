@@ -70,6 +70,15 @@ const tokenize = (text: string): string[] => {
   return text.toLowerCase().split(/[\s\-_,.]+/).filter(t => t.length > 0);
 };
 
+const createOfflineTransactionId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // Fallback for older runtimes without randomUUID.
+  const randomPart = Math.random().toString(36).slice(2, 12);
+  return `${Date.now()}-${randomPart}`;
+};
+
 // Interface compatible with previous implementation
 interface OfflineDatabase {
   init(): Promise<void>;
@@ -246,7 +255,7 @@ class DexieOfflineDatabase implements OfflineDatabase {
   }
 
   async storeOfflineTransaction(transaction: CreateTransactionRequest): Promise<string> {
-    const offlineId = `offline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const offlineId = createOfflineTransactionId();
 
     const offlineItem: OfflineTransaction = {
       ...transaction,

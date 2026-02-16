@@ -312,6 +312,58 @@ const Dashboard: React.FC = () => {
 
   const currentDateRange = getDateRange(selectedDateRange);
 
+  const aggregateEodStats = (statsList: any[]) => {
+    const reportsByStatus: Record<string, number> = {};
+    const salesByPaymentMethod: Record<string, number> = {};
+    const monthlyByMonth = new Map<string, { month: string; sales: number; expenses: number; profit: number }>();
+
+    let totalReports = 0;
+    let totalSales = 0;
+    let totalExpenses = 0;
+    let netProfit = 0;
+    let cashVariance = 0;
+
+    for (const stats of statsList) {
+      totalReports += Number(stats?.total_reports || 0);
+      totalSales += Number(stats?.total_sales || 0);
+      totalExpenses += Number(stats?.total_expenses || 0);
+      netProfit += Number(stats?.net_profit || 0);
+      cashVariance += Number(stats?.cash_variance || 0);
+
+      Object.entries(stats?.reports_by_status || {}).forEach(([status, count]) => {
+        reportsByStatus[status] = (reportsByStatus[status] || 0) + Number(count || 0);
+      });
+
+      Object.entries(stats?.sales_by_payment_method || {}).forEach(([method, amount]) => {
+        salesByPaymentMethod[method] = (salesByPaymentMethod[method] || 0) + Number(amount || 0);
+      });
+
+      for (const trend of stats?.monthly_trends || []) {
+        const key = String(trend?.month || '');
+        if (!key) continue;
+        const existing = monthlyByMonth.get(key) || { month: key, sales: 0, expenses: 0, profit: 0 };
+        existing.sales += Number(trend?.sales || 0);
+        existing.expenses += Number(trend?.expenses || 0);
+        existing.profit += Number(trend?.profit || 0);
+        monthlyByMonth.set(key, existing);
+      }
+    }
+
+    const monthly_trends = Array.from(monthlyByMonth.values()).sort((a, b) => a.month.localeCompare(b.month));
+
+    return {
+      total_reports: totalReports,
+      total_sales: totalSales,
+      total_expenses: totalExpenses,
+      net_profit: netProfit,
+      average_daily_sales: totalReports > 0 ? totalSales / totalReports : 0,
+      cash_variance: cashVariance,
+      reports_by_status: reportsByStatus,
+      sales_by_payment_method: salesByPaymentMethod,
+      monthly_trends,
+    };
+  };
+
   // Helper function to get date range label for button display
   const getDateRangeLabel = (range: string, customFrom: string, customTo: string): string => {
     switch (range) {
@@ -356,6 +408,8 @@ const Dashboard: React.FC = () => {
 
       const outletIds = dashboardView.selectedOutlets;
       if (outletIds.length === 0) {
+        setVendorInvoices([]);
+        setEodStats(null);
         setLoading(false);
         return;
       }
@@ -371,17 +425,30 @@ const Dashboard: React.FC = () => {
 
       // Load EOD statistics for the selected date range
       try {
-        const { data: statsData, error: statsError } = await eodService.getEODStats(
-          currentDateRange.from,
-          currentDateRange.to
+        const statsResponses = await Promise.all(
+          outletIds.map((outletId) =>
+            eodService.getEODStats(currentDateRange.from, currentDateRange.to, outletId)
+          )
         );
-        if (statsError) {
-          console.warn('Failed to load EOD stats:', statsError);
-        } else if (statsData) {
-          setEodStats(statsData);
+
+        const successfulStats = statsResponses
+          .filter((response) => !response.error && response.data)
+          .map((response) => response.data as NonNullable<typeof response.data>);
+
+        if (successfulStats.length === 0) {
+          const firstError = statsResponses.find((response) => response.error)?.error;
+          if (firstError) {
+            console.warn('Failed to load EOD stats:', firstError);
+          }
+          setEodStats(null);
+        } else if (successfulStats.length === 1) {
+          setEodStats(successfulStats[0]);
+        } else {
+          setEodStats(aggregateEodStats(successfulStats));
         }
       } catch (eodError) {
         console.warn('Error loading EOD stats:', eodError);
+        setEodStats(null);
       }
 
     } catch (err) {
