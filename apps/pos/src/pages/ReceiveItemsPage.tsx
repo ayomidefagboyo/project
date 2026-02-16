@@ -24,6 +24,7 @@ import {
   UserPlus,
   X,
 } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useOutlet } from '../contexts/OutletContext';
 import {
   invoiceService,
@@ -37,6 +38,7 @@ import { useTerminalId } from '../hooks/useTerminalId';
 import { printProductLabels, type ProductLabelData } from '../lib/labelPrinter';
 import { loadHardwareState, resolveLabelPrinter } from '../lib/hardwareProfiles';
 import { resolveAdapterCapabilities, supportsHardwareAction } from '../lib/hardwareAdapters';
+import { clearMissingProductIntent, peekMissingProductIntent } from '../lib/missingProductIntent';
 
 interface VendorOption {
   id: string;
@@ -93,7 +95,16 @@ const parseQuickToken = (value: string): { identifier: string; quantity: number 
   return { identifier, quantity: parsedQty };
 };
 
+const looksLikeBarcode = (value: string): boolean => {
+  const normalized = value.trim();
+  if (normalized.length < 4) return false;
+  if (!/^[A-Z0-9._/-]+$/i.test(normalized)) return false;
+  return /\d/.test(normalized) || normalized.length >= 8;
+};
+
 const ReceiveItemsPage: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
   const { currentOutlet } = useOutlet();
   const { terminalId } = useTerminalId();
 
@@ -165,22 +176,30 @@ const ReceiveItemsPage: React.FC = () => {
 
   const quickToken = useMemo(() => parseQuickToken(quickEntry), [quickEntry]);
 
-  const quickMatches = useMemo(() => {
-    const q = quickToken.identifier.trim().toLowerCase();
-    if (!q) return [];
+  const findQuickMatches = useCallback(
+    (identifier: string): POSProduct[] => {
+      const q = identifier.trim().toLowerCase();
+      if (!q) return [];
 
-    return products
-      .filter((product) => {
-        const barcode = product.barcode?.toLowerCase() || '';
-        const sku = product.sku?.toLowerCase() || '';
-        return (
-          product.name.toLowerCase().includes(q) ||
-          barcode.includes(q) ||
-          sku.includes(q)
-        );
-      })
-      .slice(0, 8);
-  }, [quickToken.identifier, products]);
+      return products
+        .filter((product) => {
+          const barcode = product.barcode?.toLowerCase() || '';
+          const sku = product.sku?.toLowerCase() || '';
+          return (
+            product.name.toLowerCase().includes(q) ||
+            barcode.includes(q) ||
+            sku.includes(q)
+          );
+        })
+        .slice(0, 8);
+    },
+    [products]
+  );
+
+  const quickMatches = useMemo(
+    () => findQuickMatches(quickToken.identifier),
+    [quickToken.identifier, findQuickMatches]
+  );
 
   const lineSearchMatches = useMemo(() => {
     const q = lineProductSearch.trim().toLowerCase();
@@ -398,8 +417,8 @@ const ReceiveItemsPage: React.FC = () => {
     });
   };
 
-  const handleQuickAdd = () => {
-    const token = parseQuickToken(quickEntry);
+  const addQuickEntryToken = useCallback((rawEntry: string) => {
+    const token = parseQuickToken(rawEntry);
     const query = token.identifier;
     if (!query) return;
 
@@ -414,13 +433,15 @@ const ReceiveItemsPage: React.FC = () => {
       return;
     }
 
-    if (quickMatches.length === 1) {
-      upsertLineFromProduct(quickMatches[0], qty, unitPrice);
+    const matches = findQuickMatches(query);
+    if (matches.length === 1) {
+      upsertLineFromProduct(matches[0], qty, unitPrice);
       setQuickEntry('');
       focusQuickEntry();
       return;
     }
 
+    const inferredBarcode = looksLikeBarcode(query) ? query : undefined;
     setItems((prev) => [
       ...prev,
       makeLine({
@@ -428,11 +449,33 @@ const ReceiveItemsPage: React.FC = () => {
         quantity: qty,
         unit_price: unitPrice ?? 0,
         product_id: null,
+        barcode: inferredBarcode,
       }),
     ]);
     setQuickEntry('');
     focusQuickEntry();
+  }, [findProductExact, findQuickMatches, quickCost, quickQuantity]);
+
+  const handleQuickAdd = () => {
+    addQuickEntryToken(quickEntry);
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const autoCreate = params.get('auto_create') === '1';
+    const queryBarcode = (params.get('barcode') || '').trim();
+    const intentBarcode = peekMissingProductIntent()?.barcode?.trim() || '';
+    const barcode = queryBarcode || intentBarcode;
+
+    if (!barcode) return;
+
+    addQuickEntryToken(barcode);
+    clearMissingProductIntent();
+
+    if (autoCreate) {
+      navigate('/receive', { replace: true });
+    }
+  }, [location.search, navigate, addQuickEntryToken]);
 
   const parseBulkRows = (input: string): ReceiveLine[] => {
     const rows = input

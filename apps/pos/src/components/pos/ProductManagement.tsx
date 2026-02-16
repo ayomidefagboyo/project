@@ -19,8 +19,9 @@ import {
   ArrowLeft
 } from 'lucide-react';
 import { posService, type POSProduct } from '../../lib/posService';
+import { clearMissingProductIntent, peekMissingProductIntent } from '../../lib/missingProductIntent';
 import { useOutlet } from '../../contexts/OutletContext';
-import { Link } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 interface ProductManagementProps {
   onShowNewRow?: () => void;
@@ -32,6 +33,8 @@ export interface ProductManagementHandle {
 }
 
 const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementProps>(({ onShowNewRow }, ref) => {
+  const location = useLocation();
+  const navigate = useNavigate();
   const { currentOutlet } = useOutlet();
   const [products, setProducts] = useState<POSProduct[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -43,6 +46,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
   const [showNewRow, setShowNewRow] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
   const loadRequestRef = useRef(0);
+  const newBarcodeInputRef = useRef<HTMLInputElement | null>(null);
 
   const categories = [
     'Beverages',
@@ -59,6 +63,41 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
   useEffect(() => {
     loadProducts();
   }, [currentOutlet?.id, searchQuery, selectedCategory]);
+
+  const openNewRowForScannedBarcode = (rawBarcode: string) => {
+    const barcode = rawBarcode.trim();
+    if (!barcode) return;
+    setShowNewRow(true);
+    setNewProduct((prev) => ({
+      ...prev,
+      barcode,
+      sku: prev.sku || barcode,
+    }));
+    requestAnimationFrame(() => newBarcodeInputRef.current?.focus());
+  };
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('auto_create') !== '1') return;
+
+    const barcode = (params.get('barcode') || '').trim();
+    if (!barcode) return;
+
+    openNewRowForScannedBarcode(barcode);
+    clearMissingProductIntent();
+    navigate('/products', { replace: true });
+  }, [location.search, navigate]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('auto_create') === '1') return;
+
+    const intent = peekMissingProductIntent();
+    if (!intent?.barcode) return;
+
+    openNewRowForScannedBarcode(intent.barcode);
+    clearMissingProductIntent();
+  }, [location.search]);
 
   const loadProducts = async () => {
     if (!currentOutlet?.id) {
@@ -306,6 +345,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                     </td>
                     <td className="p-2">
                       <input
+                        ref={newBarcodeInputRef}
                         type="text"
                         placeholder="Scan or type barcode"
                         value={newProduct.barcode || ''}

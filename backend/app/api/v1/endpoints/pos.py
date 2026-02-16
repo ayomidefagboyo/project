@@ -111,6 +111,34 @@ def _insert_pos_transaction_compat(supabase, transaction_data: Dict[str, Any]):
     )
 
 
+def _insert_cash_drawer_session_compat(supabase, session_data: Dict[str, Any]):
+    """
+    Insert into pos_cash_drawer_sessions with backward compatibility for older schemas.
+    If a column is missing in schema cache, remove it and retry.
+    """
+    payload = dict(session_data)
+    removed_columns = []
+
+    for _ in range(12):
+        try:
+            return supabase.table(Tables.CASH_DRAWER_SESSIONS).insert(payload).execute()
+        except Exception as exc:
+            missing_column = _extract_missing_column_name(exc)
+            if missing_column and missing_column in payload:
+                payload.pop(missing_column, None)
+                removed_columns.append(missing_column)
+                logger.warning(
+                    "pos_cash_drawer_sessions.%s missing in schema cache; retrying insert without it",
+                    missing_column
+                )
+                continue
+            raise
+
+    raise RuntimeError(
+        f"Failed to insert pos_cash_drawer_sessions after compatibility retries; removed columns={removed_columns}"
+    )
+
+
 def _insert_pos_product_compat(supabase, product_data: Dict[str, Any]):
     """
     Insert into pos_products with backward compatibility for older schemas.
@@ -317,14 +345,19 @@ async def get_products(
     category: Optional[str] = Query(None, description="Filter by category"),
     updated_after: Optional[str] = Query(None, description="Fetch products updated after this ISO timestamp"),
     active_only: bool = Query(True, description="Show only active products"),
+    include_total: bool = Query(True, description="Include exact total count (slower on very large catalogs)"),
     current_user=Depends(CurrentUser())
 ):
     """Get products for POS with pagination and filtering"""
     try:
         supabase = get_supabase_admin()
+        offset = (page - 1) * size
 
         # Build query
-        query = supabase.table(Tables.POS_PRODUCTS).select('*').eq('outlet_id', outlet_id)
+        if include_total:
+            query = supabase.table(Tables.POS_PRODUCTS).select('*', count='exact').eq('outlet_id', outlet_id)
+        else:
+            query = supabase.table(Tables.POS_PRODUCTS).select('*').eq('outlet_id', outlet_id)
 
         if active_only:
             query = query.eq('is_active', True)
@@ -343,15 +376,14 @@ async def get_products(
                 f"barcode.ilike.%{search}%"
             )
 
-        # Get total count for pagination
-        count_result = query.execute()
-        total = len(count_result.data) if count_result.data else 0
-
-        # Apply pagination
-        offset = (page - 1) * size
+        # Apply pagination + ordering in one query to avoid expensive full-list count fetches.
         query = query.range(offset, offset + size - 1).order('name')
 
         result = query.execute()
+        if include_total:
+            total = int(getattr(result, 'count', 0) or len(result.data or []))
+        else:
+            total = 0
 
         return ProductListResponse(
             items=result.data or [],
@@ -814,6 +846,28 @@ async def create_transaction(
             )
         cashier_id = authenticated_user_id
         staff_profile_id = actor_context.get('staff_profile_id')
+        normalized_offline_id = _normalize_optional_uuid(transaction.offline_id, "offline_id")
+
+        if normalized_offline_id:
+            try:
+                existing_transaction = supabase.table('pos_transactions')\
+                    .select('*, items:pos_transaction_items(*)')\
+                    .eq('outlet_id', transaction.outlet_id)\
+                    .eq('offline_id', normalized_offline_id)\
+                    .order('transaction_date', desc=True)\
+                    .limit(1)\
+                    .execute()
+
+                if existing_transaction.data and len(existing_transaction.data) > 0:
+                    return POSTransactionResponse(**existing_transaction.data[0])
+            except Exception as lookup_error:
+                missing_column = _extract_missing_column_name(lookup_error)
+                if missing_column == 'offline_id':
+                    logger.warning(
+                        "pos_transactions.offline_id missing in schema cache; skipping idempotency lookup"
+                    )
+                else:
+                    raise
         
         # Extract split_payments from transaction notes if present (temporary solution)
         # In future, we should add split_payments as a proper field in the schema
@@ -932,7 +986,6 @@ async def create_transaction(
             logger.warning(f"Cashier name lookup failed for {cashier_id}: {cashier_lookup_error}")
 
         # Prepare transaction data
-        normalized_offline_id = _normalize_optional_uuid(transaction.offline_id, "offline_id")
         transaction_data = {
             'id': transaction_id,
             'transaction_number': transaction_number,
@@ -1075,21 +1128,15 @@ async def get_transactions(
 
             return query_builder
 
-        # Count query kept lightweight for pagination metadata.
-        count_query = apply_filters(
-            supabase.table('pos_transactions').select('id')
-        )
-        count_result = count_query.execute()
-        total = len(count_result.data) if count_result.data else 0
-
         # Apply pagination and ordering
         offset = (page - 1) * size
         query = apply_filters(
-            supabase.table('pos_transactions').select('*, items:pos_transaction_items(*)')
+            supabase.table('pos_transactions').select('*, items:pos_transaction_items(*)', count='exact')
         )
         query = query.range(offset, offset + size - 1).order('transaction_date', desc=True)
 
         result = query.execute()
+        total = int(getattr(result, 'count', 0) or len(result.data or []))
 
         return TransactionListResponse(
             items=result.data or [],
@@ -2489,7 +2536,7 @@ async def open_cash_drawer_session(
             'updated_at': datetime.utcnow().isoformat()
         }
         
-        result = supabase.table(Tables.CASH_DRAWER_SESSIONS).insert(session_data).execute()
+        result = _insert_cash_drawer_session_compat(supabase, session_data)
         
         if not result.data:
             raise HTTPException(

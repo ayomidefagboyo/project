@@ -14,6 +14,7 @@ import { Upload, Download, Plus, Wifi, WifiOff, ChevronDown } from 'lucide-react
 import ImportProductsModal from './components/pos/ImportProductsModal';
 import { exportProducts } from './lib/inventoryImportExport';
 import { posService, type POSProduct } from './lib/posService';
+import { setMissingProductIntent } from './lib/missingProductIntent';
 import { useToast } from './components/ui/Toast';
 import TerminalSetup from './components/setup/TerminalSetup';
 import StaffAuthentication from './components/auth/StaffAuthentication';
@@ -24,6 +25,11 @@ interface TerminalConfig {
   outlet_name: string;
   initialized_by: string;
   initialized_at: string;
+}
+
+interface TerminalSetupProgress {
+  stage: 'saving' | 'syncing' | 'verifying' | 'complete';
+  message: string;
 }
 
 interface StaffProfile {
@@ -127,10 +133,36 @@ function AppContent() {
   }, []);
 
   // Helper functions
-  const handleTerminalSetup = (config: TerminalConfig) => {
+  const handleTerminalSetup = async (
+    config: TerminalConfig,
+    onProgress?: (progress: TerminalSetupProgress) => void
+  ) => {
+    onProgress?.({ stage: 'saving', message: 'Saving terminal configuration...' });
     setTerminalConfig(config);
     localStorage.setItem('pos_terminal_config', JSON.stringify(config));
+
+    onProgress?.({ stage: 'syncing', message: 'Syncing outlet catalog...' });
+    await posService.syncProductCatalog(config.outlet_id, {
+      forceFull: true,
+      maxPages: 1200,
+      onProgress: (progress) => {
+        if (progress.stage !== 'syncing') return;
+        onProgress?.({
+          stage: 'syncing',
+          message: `Syncing catalog: page ${progress.page} (${progress.updated} items cached)`,
+        });
+      },
+    });
+
+    onProgress?.({ stage: 'verifying', message: 'Verifying local catalog...' });
+    await posService.getCachedProducts(config.outlet_id, {
+      activeOnly: false,
+      page: 1,
+      size: 100,
+    });
+
     setTerminalPhase('staff_auth');
+    onProgress?.({ stage: 'complete', message: 'Initialization complete.' });
   };
 
   const handleStaffAuthenticated = (staff: StaffProfile) => {
@@ -199,7 +231,22 @@ function AppContent() {
       const localResults = await posService.searchLocalProducts(currentOutlet.id, query.trim());
 
       // Limit dropdown size for UX
-      const topResults = localResults.slice(0, 25);
+      let topResults = localResults.slice(0, 25);
+
+      // New terminals may have empty local cache while bootstrap sync is still running.
+      if (topResults.length === 0 && navigator.onLine) {
+        try {
+          const onlineResult = await posService.getProducts(currentOutlet.id, {
+            search: query.trim(),
+            activeOnly: true,
+            page: 1,
+            size: 25,
+          });
+          topResults = (onlineResult.items || []).slice(0, 25);
+        } catch (onlineErr) {
+          console.warn('Online search fallback failed:', onlineErr);
+        }
+      }
 
       setSearchResults(topResults);
       setShowSearchDropdown(topResults.length > 0);
@@ -221,17 +268,25 @@ function AppContent() {
   };
 
   // Handle barcode scan
-  const handleBarcodeScan = async (barcode: string) => {
-    if (!currentOutlet?.id) return;
+  const handleBarcodeScan = async (barcode: string): Promise<boolean> => {
+    if (!currentOutlet?.id) return false;
 
     try {
       const product = await posService.getProductByBarcode(barcode, currentOutlet.id);
       if (posDashboardRef.current) {
         posDashboardRef.current.addToCart(product);
       }
-    } catch (error) {
-      console.error('Barcode scan error:', error);
-      error('Product not found. Please try again.');
+      return true;
+    } catch (err) {
+      console.error('Barcode scan error:', err);
+      setMissingProductIntent({
+        barcode,
+        created_at: new Date().toISOString(),
+        source: 'register_scan',
+      });
+      navigate(`/products?auto_create=1&barcode=${encodeURIComponent(barcode)}`);
+      error('Item not found. Opening product creation.');
+      return false;
     }
   };
 
@@ -252,13 +307,11 @@ function AppContent() {
               const query = searchQuery.trim();
               // If it looks like a barcode (long numeric/alphanumeric string), try barcode scan first
               if (query.length >= 8 && /^[A-Z0-9]+$/i.test(query)) {
-                try {
-                  await handleBarcodeScan(query);
+                const foundByScan = await handleBarcodeScan(query);
+                if (foundByScan) {
                   setSearchQuery('');
                   setShowSearchDropdown(false);
                   return;
-                } catch (error) {
-                  // If barcode scan fails, fall through to normal search
                 }
               }
               // If Enter pressed and there are search results, add first result
