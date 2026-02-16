@@ -1398,9 +1398,12 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       return;
     }
 
-    const notes = splitPayments.length > 1
-      ? JSON.stringify({ split_payments: splitPayments.map(sp => ({ method: sp.method, amount: sp.amount })) })
-      : undefined;
+    const splitPaymentPayload =
+      splitPayments.length > 1
+        ? splitPayments.map((payment) => ({ method: payment.method, amount: payment.amount }))
+        : undefined;
+    const primaryPaymentMethod =
+      splitPayments.length > 0 ? splitPayments[0].method : PaymentMethod.CASH;
 
     const hasCashComponent = (activePayments.cash || 0) > 0 || cashbackAmount > 0;
     const drawerCanOpen =
@@ -1421,10 +1424,10 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       outlet_id: outletId,
       cashier_id: cashierId,
       items,
-      payment_method: splitPayments.length === 1 ? splitPayments[0].method : PaymentMethod.CASH,
+      payment_method: primaryPaymentMethod,
       tendered_amount: totalPaid,
       discount_amount: 0,
-      notes,
+      split_payments: splitPaymentPayload,
       customer_id: selectedCustomer?.id,
       customer_name: selectedCustomer?.name,
       offline_id: offlineId,

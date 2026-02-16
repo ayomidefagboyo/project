@@ -4,15 +4,99 @@ Daily, weekly, monthly summaries with sales, expenses, and profit breakdowns.
 """
 
 from fastapi import APIRouter, HTTPException, Depends, status, Query
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime, date, timedelta
 import logging
+import json
 
 from app.core.database import get_supabase_admin, Tables
 from app.core.security import CurrentUser
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _safe_json_object(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return {}
+    return {}
+
+
+def _normalize_split_payments(raw_split_payments: Any) -> List[Dict[str, float]]:
+    if not isinstance(raw_split_payments, list):
+        return []
+
+    normalized: List[Dict[str, float]] = []
+    for item in raw_split_payments:
+        candidate = item
+        if hasattr(item, "dict"):
+            try:
+                candidate = item.dict()
+            except Exception:
+                candidate = item
+
+        if not isinstance(candidate, dict):
+            continue
+
+        method = str(candidate.get("method") or "").strip().lower()
+        if not method:
+            continue
+
+        try:
+            amount = float(candidate.get("amount") or 0)
+        except Exception:
+            continue
+
+        if amount <= 0:
+            continue
+
+        normalized.append({"method": method, "amount": amount})
+
+    return normalized
+
+
+def _extract_split_payments(transaction: Dict[str, Any]) -> List[Dict[str, float]]:
+    direct = _normalize_split_payments(transaction.get("split_payments"))
+    if direct:
+        return direct
+
+    notes_data = _safe_json_object(transaction.get("notes"))
+    return _normalize_split_payments(notes_data.get("split_payments"))
+
+
+def _allocate_transaction_amount_by_method(transaction: Dict[str, Any]) -> Dict[str, float]:
+    total_amount = float(transaction.get("total_amount", 0) or 0)
+    split_payments = _extract_split_payments(transaction)
+
+    if len(split_payments) > 1:
+        allocations: Dict[str, float] = {}
+        allocated_total = 0.0
+        for split in split_payments:
+            method = split["method"]
+            amount = float(split["amount"])
+            allocations[method] = allocations.get(method, 0.0) + amount
+            allocated_total += amount
+
+        if not allocations:
+            method = str(transaction.get("payment_method") or "cash").strip().lower() or "cash"
+            return {method: total_amount}
+
+        remainder = total_amount - allocated_total
+        if abs(remainder) <= 0.01 and remainder != 0:
+            fallback_method = split_payments[0].get("method") or str(transaction.get("payment_method") or "cash").strip().lower() or "cash"
+            allocations[fallback_method] = allocations.get(fallback_method, 0.0) + remainder
+
+        return allocations
+
+    method = str(transaction.get("payment_method") or "cash").strip().lower() or "cash"
+    return {method: total_amount}
 
 
 # ===============================================
@@ -46,11 +130,12 @@ async def get_daily_report(
         total_discount = sum(float(t.get('discount_amount', 0)) for t in transactions)
         transaction_count = len(transactions)
 
-        # Sales by payment method
-        sales_by_payment = {}
+        # Sales by payment method (split-aware)
+        sales_by_payment: Dict[str, float] = {}
         for t in transactions:
-            method = t.get('payment_method', 'cash')
-            sales_by_payment[method] = sales_by_payment.get(method, 0) + float(t.get('total_amount', 0))
+            allocations = _allocate_transaction_amount_by_method(t)
+            for method, amount in allocations.items():
+                sales_by_payment[method] = sales_by_payment.get(method, 0.0) + amount
 
         # Sales by hour
         sales_by_hour = {}
@@ -193,7 +278,7 @@ async def get_weekly_report(
 
         # ---- SALES ----
         sales_result = supabase.table('pos_transactions')\
-            .select('transaction_date, total_amount, tax_amount, discount_amount, payment_method, status')\
+            .select('transaction_date, total_amount, tax_amount, discount_amount, payment_method, split_payments, notes, status')\
             .eq('outlet_id', outlet_id)\
             .gte('transaction_date', f"{start.isoformat()}T00:00:00")\
             .lte('transaction_date', f"{end.isoformat()}T23:59:59")\
@@ -234,11 +319,12 @@ async def get_weekly_report(
         total_expenses = sum(d['expenses'] for d in daily_sales.values())
         total_transactions = sum(d['transactions'] for d in daily_sales.values())
 
-        # Payment method breakdown
-        by_payment = {}
+        # Payment method breakdown (split-aware)
+        by_payment: Dict[str, float] = {}
         for t in transactions:
-            method = t.get('payment_method', 'cash')
-            by_payment[method] = by_payment.get(method, 0) + float(t.get('total_amount', 0))
+            allocations = _allocate_transaction_amount_by_method(t)
+            for method, amount in allocations.items():
+                by_payment[method] = by_payment.get(method, 0.0) + amount
 
         return {
             "week_start": start.isoformat(),
@@ -292,7 +378,7 @@ async def get_monthly_report(
 
         # ---- SALES ----
         sales_result = supabase.table('pos_transactions')\
-            .select('transaction_date, total_amount, tax_amount, discount_amount, payment_method')\
+            .select('transaction_date, total_amount, tax_amount, discount_amount, payment_method, split_payments, notes')\
             .eq('outlet_id', outlet_id)\
             .gte('transaction_date', f"{month_start.isoformat()}T00:00:00")\
             .lte('transaction_date', f"{month_end.isoformat()}T23:59:59")\
@@ -319,11 +405,12 @@ async def get_monthly_report(
             except (ValueError, KeyError):
                 pass
 
-        # Payment breakdown
-        by_payment = {}
+        # Payment breakdown (split-aware)
+        by_payment: Dict[str, float] = {}
         for t in transactions:
-            method = t.get('payment_method', 'cash')
-            by_payment[method] = by_payment.get(method, 0) + float(t.get('total_amount', 0))
+            allocations = _allocate_transaction_amount_by_method(t)
+            for method, amount in allocations.items():
+                by_payment[method] = by_payment.get(method, 0.0) + amount
 
         # ---- EXPENSES ----
         expenses_result = supabase.table(Tables.EXPENSES)\

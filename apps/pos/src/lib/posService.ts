@@ -49,6 +49,12 @@ export interface POSTransactionItem {
   discount_amount?: number;
 }
 
+export interface SplitPaymentLine {
+  method: PaymentMethod;
+  amount: number;
+  reference?: string;
+}
+
 export interface POSTransaction {
   id: string;
   offline_id?: string;
@@ -68,6 +74,7 @@ export interface POSTransaction {
   status: TransactionStatus;
   transaction_date: string;
   items: POSTransactionItemResponse[];
+  split_payments?: SplitPaymentLine[];
   notes?: string;
   receipt_printed: boolean;
   created_at: string;
@@ -95,6 +102,7 @@ export interface CreateTransactionRequest {
   tendered_amount?: number;
   payment_reference?: string;
   discount_amount?: number;
+  split_payments?: SplitPaymentLine[];
   notes?: string;
   offline_id?: string;
 }
@@ -1004,6 +1012,7 @@ class POSService {
       date_to?: string;
       cashier_id?: string;
       payment_method?: PaymentMethod;
+      split_only?: boolean;
       status?: string;
       search?: string;
     } = {}
@@ -1017,6 +1026,7 @@ class POSService {
         ...options.date_to && { date_to: options.date_to },
         ...options.cashier_id && { cashier_id: options.cashier_id },
         ...options.payment_method && { payment_method: options.payment_method },
+        ...(options.split_only ? { split_only: 'true' } : {}),
         ...options.status && { status: options.status },
         ...options.search && { search: options.search.trim() }
       });
