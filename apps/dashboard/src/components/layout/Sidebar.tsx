@@ -15,7 +15,8 @@ import {
   Users,
   Shield,
   ShoppingCart,
-  Package
+  Package,
+  ClipboardCheck
 } from 'lucide-react';
 
 import CreateStoreModal, { StoreFormData } from '@/components/modals/CreateStoreModal';
@@ -91,6 +92,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
     { name: 'Staff Management', href: '/dashboard/staff', icon: Users },
     { name: 'Compazz Insights', href: '/dashboard/ai-assistant', icon: Bot },
     { name: 'Daily Reports', href: '/dashboard/daily-reports', icon: BarChart3 },
+    { name: 'Stocktake Reports', href: '/dashboard/stocktake-reports', icon: ClipboardCheck },
     { name: 'Invoices', href: '/dashboard/invoices', icon: FileText },
     { name: 'Expenses', href: '/dashboard/expenses', icon: CreditCard },
     { name: 'Vendors', href: '/dashboard/vendors', icon: Building2 },

@@ -24,6 +24,7 @@ import Expenses from '@/pages/expenses/Expenses';
 import CreateExpense from '@/pages/expenses/CreateExpense';
 import DailyReports from '@/pages/reports/DailyReports';
 import CreateReport from '@/pages/reports/CreateReport';
+import StocktakeReports from '@/pages/reports/StocktakeReports';
 import Vendors from '@/pages/vendors/Vendors';
 import AIAssistant from '@/pages/AIAssistant';
 import AuditTrail from '@/pages/AuditTrail';
@@ -112,6 +113,7 @@ const AppRoutes = () => {
         <Route path="expenses" element={<Expenses />} />
         <Route path="expenses/create" element={<CreateExpense />} />
         <Route path="daily-reports" element={<DailyReports />} />
+        <Route path="stocktake-reports" element={<StocktakeReports />} />
         <Route path="daily-reports/create" element={<CreateReport />} />
         <Route path="vendors" element={<Vendors />} />
         <Route path="ai-assistant" element={<AIAssistant />} />

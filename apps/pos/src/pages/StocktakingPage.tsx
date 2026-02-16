@@ -180,7 +180,7 @@ const StocktakingPage: React.FC = () => {
 
     setIsSaving(true);
     try {
-      await posService.applyStocktake({
+      const result = await posService.applyStocktake({
         outlet_id: currentOutlet.id,
         performed_by: activeStaffId,
         items: changedRows.map((row) => ({
@@ -193,12 +193,15 @@ const StocktakingPage: React.FC = () => {
         })),
       });
 
-      success(`Stocktake completed for ${changedRows.length} item${changedRows.length > 1 ? 's' : ''}.`);
+      success(
+        `Stocktake completed: ${result.adjusted_count} adjusted, ${result.unchanged_count} unchanged.`
+      );
       setEdits({});
       await loadProducts();
     } catch (err) {
       console.error('Stocktake failed:', err);
-      showError('Stocktake failed. Please try again.');
+      const message = err instanceof Error ? err.message : 'Stocktake failed. Please try again.';
+      showError(message.replace(/^Error:\s*/i, ''));
     } finally {
       setIsSaving(false);
     }
