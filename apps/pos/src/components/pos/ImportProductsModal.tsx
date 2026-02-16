@@ -513,10 +513,16 @@ const ImportProductsModal: React.FC<ImportProductsModalProps> = ({
         {/* ─── Step: Done ─── */}
         {step === 'done' && (
           <div className="flex-1 flex flex-col items-center justify-center px-6 py-12">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
-              <CheckCircle className="w-8 h-8 text-green-600" />
+            <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${
+              Math.max(0, importProgress.done - importProgress.errors) > 0 ? 'bg-green-100' : 'bg-amber-100'
+            }`}>
+              <CheckCircle className={`w-8 h-8 ${
+                Math.max(0, importProgress.done - importProgress.errors) > 0 ? 'text-green-600' : 'text-amber-600'
+              }`} />
             </div>
-            <p className="text-lg font-bold text-gray-900">Import Complete!</p>
+            <p className="text-lg font-bold text-gray-900">
+              {Math.max(0, importProgress.done - importProgress.errors) > 0 ? 'Import Complete!' : 'Import Finished'}
+            </p>
             <p className="text-sm text-gray-600 mt-1">
               {Math.max(0, importProgress.done - importProgress.errors)} of {importProgress.total} products imported successfully
             </p>

@@ -127,6 +127,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     error?: string;
   } | null>(null);
   const printDecisionResolverRef = useRef<((value: boolean) => void) | null>(null);
+  const productLoadRequestRef = useRef(0);
 
   // Split Payment State
   const [activePayments, setActivePayments] = useState<{
@@ -167,7 +168,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       const response = await staffService.getOutletStaff(currentOutlet.id);
       setStaffProfiles(response.profiles || []);
     } catch (err) {
-      console.log('Could not load staff profiles:', err);
+      logger.warn('Could not load staff profiles:', err);
       setStaffProfiles([]);
     }
   };
@@ -616,25 +617,28 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   const loadProducts = async () => {
     if (!currentOutlet?.id) {
       logger.warn('No active outlet found for POS');
+      setProducts([]);
       setIsLoading(false);
       return;
     }
 
+    const outletId = currentOutlet.id;
+    const requestId = ++productLoadRequestRef.current;
+
     try {
       setIsLoading(true);
-      const localResult = await posService.getCachedProducts(currentOutlet.id, {
+      const localResult = await posService.getCachedProducts(outletId, {
         category: selectedCategory || undefined,
         activeOnly: true,
         page: 1,
         size: 5000
       });
+      if (requestId !== productLoadRequestRef.current) return;
 
       const hasLocalProducts = (localResult.items || []).length > 0;
-      if (hasLocalProducts) {
-        setProducts(localResult.items);
-        setPosError(null);
-        setIsLoading(false);
-      }
+      setProducts(localResult.items || []);
+      setPosError(null);
+      setIsLoading(false);
 
       const isOnlineNow = typeof navigator === 'undefined' ? true : navigator.onLine;
       if (!isOnlineNow) {
@@ -644,39 +648,58 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
         return;
       }
 
-      await posService.syncProductCatalog(currentOutlet.id, {
-        forceFull: !hasLocalProducts
-      });
+      void (async () => {
+        try {
+          await posService.syncProductCatalog(outletId, {
+            forceFull: !hasLocalProducts
+          });
 
-      const refreshedLocal = await posService.getCachedProducts(currentOutlet.id, {
-        category: selectedCategory || undefined,
-        activeOnly: true,
-        page: 1,
-        size: 5000
-      });
+          const refreshedLocal = await posService.getCachedProducts(outletId, {
+            category: selectedCategory || undefined,
+            activeOnly: true,
+            page: 1,
+            size: 5000
+          });
+          if (requestId !== productLoadRequestRef.current) return;
 
-      if ((refreshedLocal.items || []).length > 0) {
-        setProducts(refreshedLocal.items);
-        setPosError(null);
-      } else if (!hasLocalProducts) {
-        // Fallback: if sync produced nothing, attempt direct online read once.
-        const response = await posService.getProducts(currentOutlet.id, {
-          category: selectedCategory || undefined,
-          activeOnly: true,
-          size: 100
-        });
-        setProducts(response?.items || []);
-        setPosError((response?.items || []).length > 0 ? null : 'No products found for this outlet.');
-      }
+          if ((refreshedLocal.items || []).length > 0) {
+            setProducts(refreshedLocal.items);
+            setPosError(null);
+            return;
+          }
+
+          if (!hasLocalProducts) {
+            // Fallback: if sync produced nothing, attempt direct online read once.
+            const response = await posService.getProducts(outletId, {
+              category: selectedCategory || undefined,
+              activeOnly: true,
+              size: 100
+            });
+            if (requestId !== productLoadRequestRef.current) return;
+
+            const onlineItems = response?.items || [];
+            setProducts(onlineItems);
+            setPosError(onlineItems.length > 0 ? null : 'No products found for this outlet.');
+          }
+        } catch (syncErr) {
+          logger.error('Background product sync failed:', syncErr);
+          if (requestId !== productLoadRequestRef.current) return;
+          if (!hasLocalProducts) {
+            setPosError('No products found. Connect to internet once to sync local catalog.');
+          }
+        }
+      })();
     } catch (err) {
+      if (requestId !== productLoadRequestRef.current) return;
       logger.error('Error loading products from cache/sync:', err);
       try {
-        const offlineProducts = await posService.getCachedProducts(currentOutlet.id, {
+        const offlineProducts = await posService.getCachedProducts(outletId, {
           category: selectedCategory || undefined,
           activeOnly: true,
           page: 1,
           size: 5000
         });
+        if (requestId !== productLoadRequestRef.current) return;
         if (offlineProducts.items && offlineProducts.items.length > 0) {
           setProducts(offlineProducts.items);
           setPosError(null);
@@ -689,7 +712,9 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
         setPosError('Failed to load products from both online and offline sources.');
       }
     } finally {
-      setIsLoading(false);
+      if (requestId === productLoadRequestRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 

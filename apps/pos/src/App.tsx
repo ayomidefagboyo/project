@@ -515,12 +515,12 @@ function AppContent() {
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
         onImportComplete={() => {
-          // Reload products in ProductManagement if it's mounted
+          // Reload products in ProductManagement if it's mounted.
           if (productManagementRef.current) {
-            productManagementRef.current.handleShowNewRow(); // This triggers a refresh
+            productManagementRef.current.refresh();
           }
-          // Navigate to products page to see results
-          window.location.href = '/products';
+          // Route without hard reload so outlet/session context remains stable.
+          navigate('/products');
         }}
       />
     </AppLayout>

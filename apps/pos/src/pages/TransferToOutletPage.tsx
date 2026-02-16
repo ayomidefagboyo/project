@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, RefreshCw, Send, Truck, X } from 'lucide-react';
 import { useOutlet } from '@/contexts/OutletContext';
 import { posService, TransferStatus, type InventoryTransfer, type POSProduct } from '@/lib/posService';
@@ -26,6 +26,7 @@ const TransferToOutletPage: React.FC = () => {
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const [isLoadingTransfers, setIsLoadingTransfers] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const productLoadRequestRef = useRef(0);
 
   const destinationOutlets = useMemo(() => {
     if (!currentOutlet?.id) return [] as Outlet[];
@@ -47,21 +48,26 @@ const TransferToOutletPage: React.FC = () => {
   }, [products]);
 
   const loadProducts = async () => {
-    if (!currentOutlet?.id) return;
+    if (!currentOutlet?.id) {
+      setProducts([]);
+      setIsLoadingProducts(false);
+      return;
+    }
+
+    const outletId = currentOutlet.id;
+    const requestId = ++productLoadRequestRef.current;
 
     setIsLoadingProducts(true);
     try {
-      const cached = await posService.getCachedProducts(currentOutlet.id, {
+      const cached = await posService.getCachedProducts(outletId, {
         activeOnly: true,
         page: 1,
         size: 20000,
       });
-      const hasCached = cached.items.length > 0;
-
-      if (hasCached) {
-        setProducts(cached.items);
-        setIsLoadingProducts(false);
-      }
+      if (requestId !== productLoadRequestRef.current) return;
+      const hasCached = (cached.items || []).length > 0;
+      setProducts(cached.items || []);
+      setIsLoadingProducts(false);
 
       const isOnlineNow = typeof navigator === 'undefined' ? true : navigator.onLine;
       if (!isOnlineNow) {
@@ -71,18 +77,32 @@ const TransferToOutletPage: React.FC = () => {
         return;
       }
 
-      await posService.syncProductCatalog(currentOutlet.id, { forceFull: !hasCached });
-      const refreshed = await posService.getCachedProducts(currentOutlet.id, {
-        activeOnly: true,
-        page: 1,
-        size: 20000,
-      });
-      setProducts(refreshed.items);
+      void (async () => {
+        try {
+          await posService.syncProductCatalog(outletId, { forceFull: !hasCached });
+          const refreshed = await posService.getCachedProducts(outletId, {
+            activeOnly: true,
+            page: 1,
+            size: 20000,
+          });
+          if (requestId !== productLoadRequestRef.current) return;
+          setProducts(refreshed.items || []);
+        } catch (syncErr) {
+          if (requestId !== productLoadRequestRef.current) return;
+          console.error('Background transfer product sync failed:', syncErr);
+          if (!hasCached) {
+            showError('Unable to sync products right now. Try again shortly.');
+          }
+        }
+      })();
     } catch (err) {
+      if (requestId !== productLoadRequestRef.current) return;
       console.error('Failed to load products for transfer:', err);
       showError('Failed to load products for transfer.');
     } finally {
-      setIsLoadingProducts(false);
+      if (requestId === productLoadRequestRef.current) {
+        setIsLoadingProducts(false);
+      }
     }
   };
 

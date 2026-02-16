@@ -6,6 +6,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { RealtimeChannel } from '@supabase/supabase-js';
+import logger from '@/lib/logger';
 
 interface UseRealtimeSyncOptions {
   outletId: string;
@@ -97,13 +98,13 @@ export function useRealtimeSync({
         .channel(`products:${outletId}:${channelRunId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'pos_products', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
-            console.log('📦 Product changed:', payload.eventType, payload.new || payload.old);
+            logger.debug('📦 Product changed:', payload.eventType, payload.new || payload.old);
             callbacksRef.current.onProductChange?.(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
             setSyncStats(prev => ({ ...prev, products: prev.products + 1 }));
           }
         )
         .subscribe((status) => {
-          console.log('📡 Products channel:', status);
+          logger.debug('📡 Products channel:', status);
           setIsConnected(status === 'SUBSCRIBED');
         });
       activeChannels.push(productChannel);
@@ -117,12 +118,12 @@ export function useRealtimeSync({
         .channel(`transactions:${outletId}:${channelRunId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'pos_transactions', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
-            console.log('💰 Transaction changed:', payload.eventType, payload.new || payload.old);
+            logger.debug('💰 Transaction changed:', payload.eventType, payload.new || payload.old);
             callbacksRef.current.onTransactionChange?.(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
             setSyncStats(prev => ({ ...prev, transactions: prev.transactions + 1 }));
           }
         )
-        .subscribe((status) => console.log('📡 Transactions channel:', status));
+        .subscribe((status) => logger.debug('📡 Transactions channel:', status));
       activeChannels.push(transactionChannel);
     }
 
@@ -134,12 +135,12 @@ export function useRealtimeSync({
         .channel(`inventory:${outletId}:${channelRunId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'pos_stock_movements', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
-            console.log('📊 Inventory changed:', payload.eventType, payload.new || payload.old);
+            logger.debug('📊 Inventory changed:', payload.eventType, payload.new || payload.old);
             callbacksRef.current.onInventoryChange?.(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
             setSyncStats(prev => ({ ...prev, inventory: prev.inventory + 1 }));
           }
         )
-        .subscribe((status) => console.log('📡 Inventory channel:', status));
+        .subscribe((status) => logger.debug('📡 Inventory channel:', status));
       activeChannels.push(inventoryChannel);
     }
 
@@ -152,12 +153,12 @@ export function useRealtimeSync({
         .on('postgres_changes', { event: '*', schema: 'public', table: 'pos_stock_transfers', 
           filter: `from_outlet_id=eq.${outletId}` },
           (payload) => {
-            console.log('🚚 Stock transfer changed:', payload.eventType, payload.new || payload.old);
+            logger.debug('🚚 Stock transfer changed:', payload.eventType, payload.new || payload.old);
             callbacksRef.current.onStockTransferChange?.(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
             setSyncStats(prev => ({ ...prev, transfers: prev.transfers + 1 }));
           }
         )
-        .subscribe((status) => console.log('📡 Transfers channel:', status));
+        .subscribe((status) => logger.debug('📡 Transfers channel:', status));
       activeChannels.push(transferChannel);
     }
 
@@ -169,12 +170,12 @@ export function useRealtimeSync({
         .channel(`cash_drawer:${outletId}:${channelRunId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'pos_cash_drawer_sessions', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
-            console.log('💵 Cash drawer changed:', payload.eventType, payload.new || payload.old);
+            logger.debug('💵 Cash drawer changed:', payload.eventType, payload.new || payload.old);
             callbacksRef.current.onCashDrawerChange?.(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
             setSyncStats(prev => ({ ...prev, cashDrawer: prev.cashDrawer + 1 }));
           }
         )
-        .subscribe((status) => console.log('📡 Cash drawer channel:', status));
+        .subscribe((status) => logger.debug('📡 Cash drawer channel:', status));
       activeChannels.push(cashDrawerChannel);
     }
 
@@ -186,12 +187,12 @@ export function useRealtimeSync({
         .channel(`customers:${outletId}:${channelRunId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'customers', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
-            console.log('👤 Customer changed:', payload.eventType, payload.new || payload.old);
+            logger.debug('👤 Customer changed:', payload.eventType, payload.new || payload.old);
             callbacksRef.current.onCustomerChange?.(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
             setSyncStats(prev => ({ ...prev, customers: prev.customers + 1 }));
           }
         )
-        .subscribe((status) => console.log('📡 Customers channel:', status));
+        .subscribe((status) => logger.debug('📡 Customers channel:', status));
       activeChannels.push(customerChannel);
     }
 
@@ -203,12 +204,12 @@ export function useRealtimeSync({
         .channel(`invoices:${outletId}:${channelRunId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
-            console.log('🧾 Invoice changed:', payload.eventType, payload.new || payload.old);
+            logger.debug('🧾 Invoice changed:', payload.eventType, payload.new || payload.old);
             callbacksRef.current.onInvoiceChange?.(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
             setSyncStats(prev => ({ ...prev, invoices: prev.invoices + 1 }));
           }
         )
-        .subscribe((status) => console.log('📡 Invoices channel:', status));
+        .subscribe((status) => logger.debug('📡 Invoices channel:', status));
       activeChannels.push(invoiceChannel);
     }
 
@@ -220,12 +221,12 @@ export function useRealtimeSync({
         .channel(`staff:${outletId}:${channelRunId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'staff_profiles', filter: `outlet_id=eq.${outletId}` },
           (payload) => {
-            console.log('👥 Staff changed:', payload.eventType, payload.new || payload.old);
+            logger.debug('👥 Staff changed:', payload.eventType, payload.new || payload.old);
             callbacksRef.current.onStaffChange?.(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
             setSyncStats(prev => ({ ...prev, staff: prev.staff + 1 }));
           }
         )
-        .subscribe((status) => console.log('📡 Staff channel:', status));
+        .subscribe((status) => logger.debug('📡 Staff channel:', status));
       activeChannels.push(staffChannel);
     }
 

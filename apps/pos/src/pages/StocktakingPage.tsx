@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, RefreshCw, Search } from 'lucide-react';
 import { useOutlet } from '@/contexts/OutletContext';
 import { posService, type POSProduct } from '@/lib/posService';
@@ -29,6 +29,7 @@ const StocktakingPage: React.FC = () => {
   const [onlyChanged, setOnlyChanged] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const loadRequestRef = useRef(0);
 
   const activeStaffId = useMemo(() => {
     try {
@@ -42,21 +43,26 @@ const StocktakingPage: React.FC = () => {
   }, [currentUser?.id]);
 
   const loadProducts = async () => {
-    if (!currentOutlet?.id) return;
+    if (!currentOutlet?.id) {
+      setProducts([]);
+      setIsLoading(false);
+      return;
+    }
+
+    const outletId = currentOutlet.id;
+    const requestId = ++loadRequestRef.current;
 
     setIsLoading(true);
     try {
-      const cached = await posService.getCachedProducts(currentOutlet.id, {
+      const cached = await posService.getCachedProducts(outletId, {
         activeOnly: true,
         page: 1,
         size: 20000,
       });
-      const hasCached = cached.items.length > 0;
-
-      if (hasCached) {
-        setProducts(cached.items);
-        setIsLoading(false);
-      }
+      if (requestId !== loadRequestRef.current) return;
+      const hasCached = (cached.items || []).length > 0;
+      setProducts(cached.items || []);
+      setIsLoading(false);
 
       const isOnlineNow = typeof navigator === 'undefined' ? true : navigator.onLine;
       if (!isOnlineNow) {
@@ -66,18 +72,32 @@ const StocktakingPage: React.FC = () => {
         return;
       }
 
-      await posService.syncProductCatalog(currentOutlet.id, { forceFull: !hasCached });
-      const refreshed = await posService.getCachedProducts(currentOutlet.id, {
-        activeOnly: true,
-        page: 1,
-        size: 20000,
-      });
-      setProducts(refreshed.items);
+      void (async () => {
+        try {
+          await posService.syncProductCatalog(outletId, { forceFull: !hasCached });
+          const refreshed = await posService.getCachedProducts(outletId, {
+            activeOnly: true,
+            page: 1,
+            size: 20000,
+          });
+          if (requestId !== loadRequestRef.current) return;
+          setProducts(refreshed.items || []);
+        } catch (syncErr) {
+          if (requestId !== loadRequestRef.current) return;
+          console.error('Background stocktaking sync failed:', syncErr);
+          if (!hasCached) {
+            showError('Unable to sync products right now. Try again shortly.');
+          }
+        }
+      })();
     } catch (err) {
+      if (requestId !== loadRequestRef.current) return;
       console.error('Failed to load products for stocktaking:', err);
       showError('Failed to load inventory for stocktaking.');
     } finally {
-      setIsLoading(false);
+      if (requestId === loadRequestRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 

@@ -3,7 +3,7 @@
  * Swiss Premium Design with touch optimization
  */
 
-import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import {
   Plus,
   Save,
@@ -42,6 +42,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
   const [newProduct, setNewProduct] = useState<Partial<POSProduct>>({});
   const [showNewRow, setShowNewRow] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
+  const loadRequestRef = useRef(0);
 
   const categories = [
     'Beverages',
@@ -57,42 +58,62 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
 
   useEffect(() => {
     loadProducts();
-  }, [currentOutlet, searchQuery, selectedCategory]);
+  }, [currentOutlet?.id, searchQuery, selectedCategory]);
 
   const loadProducts = async () => {
-    if (!currentOutlet?.id) return;
+    if (!currentOutlet?.id) {
+      setProducts([]);
+      setIsLoading(false);
+      return;
+    }
+
+    const outletId = currentOutlet.id;
+    const requestId = ++loadRequestRef.current;
 
     try {
       setIsLoading(true);
-      const cached = await posService.getCachedProducts(currentOutlet.id, {
+      const cached = await posService.getCachedProducts(outletId, {
         search: searchQuery || undefined,
         category: selectedCategory || undefined,
         activeOnly: false, // Show all products including inactive
         page: 1,
         size: 20000
       });
+      if (requestId !== loadRequestRef.current) return;
 
-      const hasCached = cached.items.length > 0;
+      const hasCached = (cached.items || []).length > 0;
       setProducts(cached.items || []);
       setError(null);
+      setIsLoading(false);
 
       const isOnlineNow = typeof navigator === 'undefined' ? true : navigator.onLine;
       const shouldSyncFromBackend = !searchQuery.trim();
       if (!isOnlineNow || !shouldSyncFromBackend) return;
 
-      await posService.syncProductCatalog(currentOutlet.id, { forceFull: !hasCached });
-      const refreshed = await posService.getCachedProducts(currentOutlet.id, {
-        search: searchQuery || undefined,
-        category: selectedCategory || undefined,
-        activeOnly: false,
-        page: 1,
-        size: 20000
-      });
-      setProducts(refreshed.items || []);
+      void (async () => {
+        try {
+          await posService.syncProductCatalog(outletId, { forceFull: !hasCached });
+          const refreshed = await posService.getCachedProducts(outletId, {
+            search: searchQuery || undefined,
+            category: selectedCategory || undefined,
+            activeOnly: false,
+            page: 1,
+            size: 20000
+          });
+          if (requestId !== loadRequestRef.current) return;
+          setProducts(refreshed.items || []);
+        } catch (syncErr) {
+          if (requestId !== loadRequestRef.current) return;
+          console.error('Background product sync failed:', syncErr);
+          if (!hasCached) {
+            setError('No products found for this outlet. Add your first product to begin.');
+          }
+        }
+      })();
     } catch (err) {
+      if (requestId !== loadRequestRef.current) return;
       console.error('Failed to load products:', err);
       setError('Failed to load products from server/cache. Check connection and try again.');
-    } finally {
       setIsLoading(false);
     }
   };
