@@ -117,6 +117,86 @@ const sampleTransaction = {
   change_amount: 53.75
 };
 
+const LEGACY_RECEIPT_TEMPLATE_CACHE_KEY = 'pos-receipt-template';
+
+const getReceiptTemplateCacheKey = (outletId: string): string => `pos-receipt-template:${outletId}`;
+
+const mergeReceiptTemplate = (base: ReceiptTemplate, overrides?: Partial<ReceiptTemplate>): ReceiptTemplate => {
+  if (!overrides) return base;
+  return {
+    ...base,
+    ...overrides,
+    header: {
+      ...base.header,
+      ...(overrides.header || {})
+    },
+    body: {
+      ...base.body,
+      ...(overrides.body || {})
+    },
+    footer: {
+      ...base.footer,
+      ...(overrides.footer || {})
+    },
+    styling: {
+      ...base.styling,
+      ...(overrides.styling || {})
+    }
+  };
+};
+
+const mapBackendFontSizeToUi = (fontSize?: string): ReceiptTemplate['styling']['fontSize'] => {
+  if (fontSize === 'small') return 'small';
+  if (fontSize === 'large') return 'large';
+  return 'medium';
+};
+
+const mapUiFontSizeToBackend = (fontSize: ReceiptTemplate['styling']['fontSize']): string => {
+  if (fontSize === 'medium') return 'normal';
+  return fontSize;
+};
+
+const mapBackendWidthToUi = (width?: number): ReceiptTemplate['styling']['paperWidth'] => {
+  if (width === 58) return '58mm';
+  if (width === 80) return '80mm';
+  return 'A4';
+};
+
+const parseCachedTemplate = (raw: string): ReceiptTemplate | null => {
+  try {
+    const parsed = JSON.parse(raw) as Partial<ReceiptTemplate>;
+    return mergeReceiptTemplate(defaultTemplate, parsed);
+  } catch {
+    return null;
+  }
+};
+
+const readCachedReceiptTemplate = (outletId: string): ReceiptTemplate | null => {
+  const scopedKey = getReceiptTemplateCacheKey(outletId);
+  const scopedRaw = localStorage.getItem(scopedKey);
+  if (scopedRaw) {
+    const parsed = parseCachedTemplate(scopedRaw);
+    if (parsed) return parsed;
+    localStorage.removeItem(scopedKey);
+  }
+
+  const legacyRaw = localStorage.getItem(LEGACY_RECEIPT_TEMPLATE_CACHE_KEY);
+  if (!legacyRaw) return null;
+
+  const parsedLegacy = parseCachedTemplate(legacyRaw);
+  if (!parsedLegacy) {
+    localStorage.removeItem(LEGACY_RECEIPT_TEMPLATE_CACHE_KEY);
+    return null;
+  }
+
+  localStorage.setItem(scopedKey, JSON.stringify(parsedLegacy));
+  return parsedLegacy;
+};
+
+const writeCachedReceiptTemplate = (outletId: string, template: ReceiptTemplate): void => {
+  localStorage.setItem(getReceiptTemplateCacheKey(outletId), JSON.stringify(template));
+};
+
 const ReceiptEditor: React.FC = () => {
   const { currentOutlet } = useOutlet();
   const [template, setTemplate] = useState<ReceiptTemplate>(defaultTemplate);
@@ -130,88 +210,89 @@ const ReceiptEditor: React.FC = () => {
   // Load saved template from backend on mount
   useEffect(() => {
     const loadSettings = async () => {
-      if (!currentOutlet?.id) return;
-      
+      const outletId = currentOutlet?.id;
+      if (!outletId) return;
+
+      const cachedTemplate = readCachedReceiptTemplate(outletId);
+      if (cachedTemplate) {
+        setTemplate(cachedTemplate);
+      }
+
       setIsLoading(true);
       try {
-        // Load receipt settings from backend
-        const receiptSettings = await posService.getReceiptSettings(currentOutlet.id);
-        
-        // Load outlet business info for header
-        const outletInfo = await posService.getOutletInfo(currentOutlet.id);
-        
-        // Merge backend settings with template
-        setTemplate(prev => {
-          // Parse address - handle both string and object formats
-          let addressText = prev.header.address;
+        const [receiptSettings, outletInfo] = await Promise.all([
+          posService.getReceiptSettings(outletId),
+          posService.getOutletInfo(outletId),
+        ]);
+
+        setTemplate((prev) => {
+          const source = cachedTemplate ? mergeReceiptTemplate(prev, cachedTemplate) : prev;
+
+          let addressText = source.header.address;
           if (outletInfo.address) {
             if (typeof outletInfo.address === 'string') {
               addressText = outletInfo.address;
             } else if (typeof outletInfo.address === 'object') {
-              const addr = outletInfo.address as any;
+              const addr = outletInfo.address as Record<string, string | undefined>;
               const parts = [
                 addr.street,
-                addr.city && addr.state ? `${addr.city}, ${addr.state} ${addr.zip || ''}`.trim() : addr.city || addr.state,
+                addr.city && addr.state
+                  ? `${addr.city}, ${addr.state} ${addr.zip || ''}`.trim()
+                  : addr.city || addr.state,
                 addr.country
               ].filter(Boolean);
-              addressText = parts.join('\n') || prev.header.address;
+              addressText = parts.join('\n') || source.header.address;
             }
           }
-          
+
           return {
-            ...prev,
+            ...source,
             header: {
-              ...prev.header,
-              businessName: outletInfo.name || prev.header.businessName,
+              ...source.header,
+              businessName: receiptSettings.header_text || outletInfo.name || source.header.businessName,
               address: addressText,
-              phone: outletInfo.phone || prev.header.phone,
-              email: outletInfo.email || prev.header.email,
-              website: outletInfo.website || prev.header.website,
-              logoUrl: receiptSettings.logo_url,
-              showQR: receiptSettings.show_qr_code ?? prev.header.showQR
+              phone: outletInfo.phone || source.header.phone,
+              email: outletInfo.email || source.header.email,
+              website: outletInfo.website || source.header.website,
+              logoUrl: receiptSettings.logo_url ?? source.header.logoUrl,
+              showQR: receiptSettings.show_qr_code ?? source.header.showQR
             },
-          body: {
-            ...prev.body,
-            showTaxBreakdown: receiptSettings.show_tax_breakdown ?? prev.body.showTaxBreakdown
-          },
-          footer: {
-            ...prev.footer,
-            thankYouMessage: receiptSettings.footer_text || prev.footer.thankYouMessage
-          },
-          styling: {
-            ...prev.styling,
-            fontSize: (receiptSettings.font_size || 'medium') as 'small' | 'medium' | 'large',
-            paperWidth: receiptSettings.receipt_width === 58 ? '58mm' : receiptSettings.receipt_width === 80 ? '80mm' : 'A4' as '58mm' | '80mm' | 'A4'
-          }
+            body: {
+              ...source.body,
+              showTaxBreakdown: receiptSettings.show_tax_breakdown ?? source.body.showTaxBreakdown
+            },
+            footer: {
+              ...source.footer,
+              thankYouMessage: receiptSettings.footer_text || source.footer.thankYouMessage,
+              showCashierName: receiptSettings.show_customer_points ?? source.footer.showCashierName
+            },
+            styling: {
+              ...source.styling,
+              fontSize: mapBackendFontSizeToUi(receiptSettings.font_size),
+              paperWidth: mapBackendWidthToUi(receiptSettings.receipt_width)
+            }
           };
         });
-        
-        // Note: localStorage caching happens after state update via useEffect on template change
       } catch (error) {
         logger.error('Failed to load receipt settings from backend:', error);
-        setUiMessage({ type: 'info', text: 'Could not load settings from server. Showing last saved (offline) settings.' });
-        // Fallback to localStorage if backend fails
-        const saved = localStorage.getItem('pos-receipt-template');
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved);
-            setTemplate(parsed);
-          } catch (e) {
-            console.warn('Failed to load saved receipt template from localStorage');
-          }
-        }
+        setUiMessage({
+          type: 'info',
+          text: cachedTemplate
+            ? 'Could not refresh settings from server. Showing saved local settings.'
+            : 'Could not load settings from server. Please try again.'
+        });
       } finally {
         setIsLoading(false);
       }
     };
-    
-    loadSettings();
+
+    void loadSettings();
   }, [currentOutlet?.id]);
 
   // Cache template to localStorage whenever it changes (for offline fallback)
   useEffect(() => {
     if (template && currentOutlet?.id) {
-      localStorage.setItem('pos-receipt-template', JSON.stringify(template));
+      writeCachedReceiptTemplate(currentOutlet.id, template);
     }
   }, [template, currentOutlet?.id]);
 
@@ -236,11 +317,10 @@ const ReceiptEditor: React.FC = () => {
         show_customer_points: template.footer.showCashierName, // Map appropriately
         show_tax_breakdown: template.body.showTaxBreakdown,
         receipt_width: template.styling.paperWidth === '58mm' ? 58 : template.styling.paperWidth === '80mm' ? 80 : 80,
-        font_size: template.styling.fontSize
+        font_size: mapUiFontSizeToBackend(template.styling.fontSize)
       });
       
       // Also save outlet business info if changed
-      const addressParts = template.header.address.split('\n');
       await posService.updateOutletInfo(currentOutlet.id, {
         name: template.header.businessName,
         phone: template.header.phone,
@@ -250,7 +330,7 @@ const ReceiptEditor: React.FC = () => {
       });
       
       // Cache in localStorage for offline support
-      localStorage.setItem('pos-receipt-template', JSON.stringify(template));
+      writeCachedReceiptTemplate(currentOutlet.id, template);
       
       setSaveStatus('success');
       setUiMessage({ type: 'success', text: 'Settings saved successfully.' });
@@ -272,7 +352,7 @@ const ReceiptEditor: React.FC = () => {
   const resetTemplate = async () => {
     if (!currentOutlet?.id) {
       setTemplate(defaultTemplate);
-      localStorage.removeItem('pos-receipt-template');
+      localStorage.removeItem(LEGACY_RECEIPT_TEMPLATE_CACHE_KEY);
       return;
     }
     
@@ -285,17 +365,17 @@ const ReceiptEditor: React.FC = () => {
         show_customer_points: defaultTemplate.footer.showCashierName,
         show_tax_breakdown: defaultTemplate.body.showTaxBreakdown,
         receipt_width: 80,
-        font_size: 'medium'
+        font_size: mapUiFontSizeToBackend(defaultTemplate.styling.fontSize)
       });
       setTemplate(defaultTemplate);
-      localStorage.removeItem('pos-receipt-template');
+      writeCachedReceiptTemplate(currentOutlet.id, defaultTemplate);
       setSaveStatus('success');
       setTimeout(() => setSaveStatus(null), 2000);
     } catch (error) {
       logger.error('Failed to reset receipt settings:', error);
       // Still reset locally even if backend fails
       setTemplate(defaultTemplate);
-      localStorage.removeItem('pos-receipt-template');
+      writeCachedReceiptTemplate(currentOutlet.id, defaultTemplate);
     }
   };
 
