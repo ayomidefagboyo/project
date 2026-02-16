@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Monitor, Store, CheckCircle, AlertCircle, LogOut } from 'lucide-react';
+import { Monitor, Store, CheckCircle, AlertCircle, LogOut, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useOutlet } from '@/contexts/OutletContext';
 import AuthWrapper from '../auth/AuthWrapper';
@@ -24,6 +24,48 @@ interface TerminalSetupProps {
   ) => void | Promise<void>;
 }
 
+const setupStages: Array<TerminalSetupProgress['stage']> = [
+  'saving',
+  'syncing',
+  'verifying',
+  'complete',
+];
+
+const stageLabelMap: Record<TerminalSetupProgress['stage'], string> = {
+  saving: 'Saving',
+  syncing: 'Syncing',
+  verifying: 'Verifying',
+  complete: 'Ready',
+};
+
+const inferProgressPercent = (
+  progress: TerminalSetupProgress,
+  previousPercent: number
+): number => {
+  if (progress.stage === 'saving') {
+    return Math.max(previousPercent, 15);
+  }
+
+  if (progress.stage === 'syncing') {
+    const pageMatch = progress.message.match(/page\s+(\d+)/i);
+    const cachedMatch = progress.message.match(/(\d+)\s*items\s*cached/i);
+    const page = pageMatch ? Number(pageMatch[1]) : 0;
+    const cached = cachedMatch ? Number(cachedMatch[1]) : 0;
+
+    const fromPage = page > 0 ? 25 + Math.floor(page * 1.1) : 35;
+    const fromCached = cached > 0 ? 25 + Math.floor(cached / 120) : 35;
+    const inferred = Math.min(85, Math.max(fromPage, fromCached, 35));
+
+    return Math.max(previousPercent, inferred);
+  }
+
+  if (progress.stage === 'verifying') {
+    return Math.max(previousPercent, 92);
+  }
+
+  return 100;
+};
+
 const TerminalSetup: React.FC<TerminalSetupProps> = ({ onSetupComplete }) => {
   const navigate = useNavigate();
   const dashboardAppUrl = resolveDashboardAppUrl(import.meta.env.VITE_DASHBOARD_APP_URL);
@@ -32,7 +74,11 @@ const TerminalSetup: React.FC<TerminalSetupProps> = ({ onSetupComplete }) => {
   const [isConfirming, setIsConfirming] = useState(false);
   const [isInitializingTerminal, setIsInitializingTerminal] = useState(false);
   const [initializationError, setInitializationError] = useState<string | null>(null);
-  const [initializationMessage, setInitializationMessage] = useState<string>('Preparing terminal initialization...');
+  const [initializationProgress, setInitializationProgress] = useState<TerminalSetupProgress>({
+    stage: 'saving',
+    message: 'Preparing terminal initialization...',
+  });
+  const [initializationPercent, setInitializationPercent] = useState(0);
 
   const formatOutletAddress = (address: unknown): string => {
     if (!address) return 'Not provided';
@@ -108,9 +154,15 @@ const TerminalSetup: React.FC<TerminalSetupProps> = ({ onSetupComplete }) => {
     try {
       setInitializationError(null);
       setIsInitializingTerminal(true);
-      setInitializationMessage('Saving terminal setup...');
+      const startProgress: TerminalSetupProgress = {
+        stage: 'saving',
+        message: 'Saving terminal setup...',
+      };
+      setInitializationProgress(startProgress);
+      setInitializationPercent(10);
       await Promise.resolve(onSetupComplete(config, (progress) => {
-        setInitializationMessage(progress.message);
+        setInitializationProgress(progress);
+        setInitializationPercent((prev) => inferProgressPercent(progress, prev));
       }));
     } catch (setupError) {
       console.error('Terminal setup failed:', setupError);
@@ -268,7 +320,15 @@ const TerminalSetup: React.FC<TerminalSetupProps> = ({ onSetupComplete }) => {
             Sign Out
           </button>
           <button
-            onClick={() => setIsConfirming(true)}
+            onClick={() => {
+              setInitializationError(null);
+              setInitializationPercent(0);
+              setInitializationProgress({
+                stage: 'saving',
+                message: 'Preparing terminal initialization...',
+              });
+              setIsConfirming(true);
+            }}
             disabled={!selectedOutletId}
             className="flex-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
           >
@@ -306,8 +366,49 @@ const TerminalSetup: React.FC<TerminalSetupProps> = ({ onSetupComplete }) => {
                 </button>
               </div>
               {isInitializingTerminal && (
-                <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-700">
-                  {initializationMessage}
+                <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-blue-800">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span className="truncate">{initializationProgress.message}</span>
+                    </div>
+                    <span className="text-xs font-semibold text-blue-700 whitespace-nowrap">
+                      {initializationPercent}%
+                    </span>
+                  </div>
+
+                  <div className="mt-3 h-2.5 w-full rounded-full bg-blue-100 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full bg-blue-600 transition-all duration-500 ease-out ${
+                        initializationProgress.stage === 'syncing' ? 'animate-pulse' : ''
+                      }`}
+                      style={{ width: `${initializationPercent}%` }}
+                    />
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-4 gap-2">
+                    {setupStages.map((stage) => {
+                      const stageIdx = setupStages.indexOf(stage);
+                      const currentIdx = setupStages.indexOf(initializationProgress.stage);
+                      const isDone = stageIdx < currentIdx || initializationProgress.stage === 'complete';
+                      const isCurrent = stageIdx === currentIdx && initializationProgress.stage !== 'complete';
+
+                      return (
+                        <div
+                          key={stage}
+                          className={`rounded-md px-2 py-1 text-center text-[11px] font-semibold ${
+                            isDone
+                              ? 'bg-blue-200 text-blue-900'
+                              : isCurrent
+                              ? 'bg-white text-blue-800 border border-blue-300'
+                              : 'bg-blue-50 text-blue-500 border border-blue-100'
+                          }`}
+                        >
+                          {stageLabelMap[stage]}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
               {initializationError && (

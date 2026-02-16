@@ -205,7 +205,7 @@ const StocktakingPage: React.FC = () => {
   };
 
   return (
-    <div className="h-full overflow-y-auto bg-stone-50">
+    <div className="h-full min-h-0 overflow-y-auto bg-stone-50">
       <div className="max-w-[1600px] mx-auto p-4 lg:p-6 space-y-4">
         <div className="rounded-2xl border border-stone-200 bg-white p-5 lg:p-6">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">

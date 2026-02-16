@@ -115,7 +115,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent, staffRol
   });
 
   return (
-    <div className="w-screen h-screen overflow-hidden bg-stone-50 flex">
+    <div className="w-full h-screen min-h-0 overflow-hidden bg-stone-50 flex">
       {/* ======== Sidebar ======== */}
       {showSidebar && (
         <>
@@ -230,34 +230,34 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent, staffRol
       )}
 
       {/* ======== Main Content ======== */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden">
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col h-full overflow-hidden">
         {/* Header */}
         <div className="bg-white shadow-sm border-b border-gray-200 px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             {/* Left: Menu + Outlet */}
-            <div className="flex items-center space-x-3 flex-shrink-0">
+            <div className="flex min-w-0 items-center space-x-3 flex-shrink-0">
               <button
                 onClick={() => setShowSidebar(true)}
                 className="p-3 hover:bg-gray-200 rounded-xl transition-colors"
               >
                 <Menu className="w-7 h-7 text-gray-600" />
               </button>
-              <div>
-                <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight capitalize">
+              <div className="min-w-0">
+                <h1 className="truncate text-lg sm:text-xl font-bold text-gray-900 leading-tight capitalize">
                   {currentOutlet?.name || 'Outlet'}
                 </h1>
               </div>
             </div>
 
             {/* Right: Dynamic page header content */}
-            <div className="flex-1 lg:flex-initial lg:max-w-4xl w-full">
+            <div className="w-full min-w-0 flex-1 xl:flex-initial">
               {headerContent}
             </div>
           </div>
         </div>
 
         {/* Page Content */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-hidden">
           {children}
         </div>
       </div>

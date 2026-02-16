@@ -820,7 +820,7 @@ const ReceiveItemsPage: React.FC = () => {
   };
 
   return (
-    <div className="h-full overflow-y-auto bg-stone-50">
+    <div className="h-full min-h-0 overflow-y-auto bg-stone-50">
       <div className="max-w-[1440px] mx-auto px-4 lg:px-6 py-5 lg:py-6">
         <div className="space-y-4">
           <div className="rounded-2xl border border-stone-200 bg-white px-4 lg:px-5 py-4">

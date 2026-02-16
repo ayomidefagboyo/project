@@ -228,7 +228,7 @@ const TransferToOutletPage: React.FC = () => {
   };
 
   return (
-    <div className="h-full overflow-y-auto bg-stone-50">
+    <div className="h-full min-h-0 overflow-y-auto bg-stone-50">
       <div className="max-w-[1600px] mx-auto p-4 lg:p-6 space-y-4">
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
           <div className="xl:col-span-2 rounded-2xl border border-stone-200 bg-white p-4 lg:p-5 space-y-4">

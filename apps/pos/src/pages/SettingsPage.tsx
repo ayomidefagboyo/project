@@ -241,10 +241,10 @@ const SettingsPage: React.FC = () => {
   };
 
   return (
-    <div className="flex h-full bg-gray-50 dark:bg-gray-900 overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col xl:flex-row bg-gray-50 dark:bg-gray-900 overflow-hidden">
         {/* Sidebar Navigation */}
-        <div className="w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 p-4 overflow-y-auto">
-          <div className="space-y-2">
+        <div className="shrink-0 xl:w-80 bg-white dark:bg-gray-800 border-b xl:border-b-0 xl:border-r border-gray-200 dark:border-gray-700 p-3 sm:p-4 overflow-x-auto xl:overflow-y-auto">
+          <div className="flex xl:flex-col gap-2 min-w-max xl:min-w-0">
             {settingsTabs.map((tab) => {
               const isActive = activeTab === tab.id;
               const colors = colorMap[tab.color];
@@ -254,7 +254,7 @@ const SettingsPage: React.FC = () => {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`w-full text-left p-4 rounded-xl border-2 transition-all ${
+                  className={`min-w-[250px] xl:min-w-0 w-full text-left p-4 rounded-xl border-2 transition-all ${
                     isActive
                       ? `${colors.bg} ${colors.border} ${colors.text} dark:bg-gray-700 dark:border-gray-600`
                       : `border-transparent hover:bg-gray-50 dark:hover:bg-gray-700 ${colors.hover}`
@@ -280,7 +280,7 @@ const SettingsPage: React.FC = () => {
         </div>
 
       {/* Main Content */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {renderTabContent()}
       </div>
     </div>
@@ -289,7 +289,7 @@ const SettingsPage: React.FC = () => {
 
 // Placeholder components for each settings section
 const ReceiptCustomizationTab = () => (
-  <div className="p-6 h-full">
+  <div className="p-4 sm:p-6 h-full">
     <div className="max-w-7xl h-full flex flex-col">
       <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Receipt Customization</h2>
       <div className="flex-1 overflow-hidden">
@@ -320,14 +320,14 @@ const AppearanceTab: React.FC<AppearanceTabProps> = ({
   brandColorStatus,
   canEditBrandColor,
 }) => (
-  <div className="p-6">
-    <div className="max-w-4xl">
+  <div className="p-4 sm:p-6">
+    <div className="max-w-5xl">
       <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Appearance</h2>
 
       {/* Theme Selection */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Color Theme</h3>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {/* Light Mode */}
           <button
             onClick={() => onThemeChange('light')}
@@ -501,15 +501,15 @@ const TerminalSettingsTab: React.FC<TerminalSettingsTabProps> = ({ outletId, ter
   }, [settings, storageKey]);
 
   return (
-    <div className="p-6">
-      <div className="max-w-4xl">
+    <div className="p-4 sm:p-6">
+      <div className="max-w-5xl">
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Terminal Settings</h2>
 
         {/* Terminal Identity */}
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Terminal Identity</h3>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Terminal Name
@@ -757,8 +757,8 @@ const StaffSecurityTab: React.FC = () => {
   };
 
   return (
-    <div className="p-6">
-      <div className="max-w-4xl">
+    <div className="p-4 sm:p-6">
+      <div className="max-w-5xl">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Staff & Security</h2>
           <button
@@ -787,7 +787,7 @@ const StaffSecurityTab: React.FC = () => {
             Staff profiles are synced from the admin dashboard. This tab controls outlet-wide POS policy only.
           </p>
 
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             <div>
               <h4 className="font-medium text-gray-900 dark:text-white mb-3">Cashier Permissions</h4>
               <div className="space-y-2">
@@ -857,7 +857,7 @@ const StaffSecurityTab: React.FC = () => {
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Security Settings</h3>
 
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Maximum discount % (without approval)
@@ -990,8 +990,8 @@ const OutletSettingsTab: React.FC<OutletSettingsTabProps> = ({ outletId }) => {
   }, [state, storageKey]);
 
   return (
-    <div className="p-6">
-      <div className="max-w-4xl">
+    <div className="p-4 sm:p-6">
+      <div className="max-w-5xl">
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Outlet Settings</h2>
 
         {/* Business Information */}
@@ -1011,7 +1011,7 @@ const OutletSettingsTab: React.FC<OutletSettingsTabProps> = ({ outletId }) => {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Phone Number
@@ -1051,7 +1051,7 @@ const OutletSettingsTab: React.FC<OutletSettingsTabProps> = ({ outletId }) => {
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Financial Settings</h3>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Default Tax Rate (%)
@@ -1111,8 +1111,8 @@ const OutletSettingsTab: React.FC<OutletSettingsTabProps> = ({ outletId }) => {
 
           <div className="space-y-3">
             {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => (
-              <div key={day} className="flex items-center gap-4">
-                <div className="w-24">
+              <div key={day} className="flex flex-wrap items-center gap-3">
+                <div className="w-full sm:w-24">
                   <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{day}</span>
                 </div>
                 <input
@@ -1126,7 +1126,7 @@ const OutletSettingsTab: React.FC<OutletSettingsTabProps> = ({ outletId }) => {
                   defaultValue={day === 'Sunday' ? '18:00' : '20:00'}
                   className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
-                <label className="flex items-center gap-2">
+                <label className="flex items-center gap-2 sm:ml-auto">
                   <input type="checkbox" className="rounded border-gray-300" defaultChecked={day !== 'Sunday'} />
                   <span className="text-sm text-gray-600 dark:text-gray-400">Open</span>
                 </label>
