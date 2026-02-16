@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime, date, timedelta
 import logging
 import json
+import re
 
 from app.core.database import get_supabase_admin, Tables
 from app.core.security import CurrentUser
@@ -60,6 +61,40 @@ def _normalize_split_payments(raw_split_payments: Any) -> List[Dict[str, float]]
         normalized.append({"method": method, "amount": amount})
 
     return normalized
+
+
+def _is_missing_table_error(exc: Exception, table_name: str) -> bool:
+    message = str(exc).lower()
+    return (
+        table_name.lower() in message
+        and (
+            "does not exist" in message
+            or "could not find the table" in message
+            or "42p01" in message
+            or "pgrst205" in message
+        )
+    )
+
+
+def _extract_stocktake_reason_and_notes(raw_notes: Any) -> Dict[str, Optional[str]]:
+    payload = _safe_json_object(raw_notes)
+    if payload:
+        reason = str(payload.get("reason") or "").strip() or None
+        notes = str(payload.get("notes") or "").strip() or None
+        return {"reason": reason, "notes": notes}
+
+    text = str(raw_notes or "").strip()
+    if not text:
+        return {"reason": None, "notes": None}
+
+    # Backward compatibility with legacy "[Reason] free text notes" format.
+    match = re.match(r"^\[(?P<reason>[^\]]+)\]\s*(?P<notes>.*)$", text)
+    if match:
+        reason = str(match.group("reason") or "").strip() or None
+        notes = str(match.group("notes") or "").strip() or None
+        return {"reason": reason, "notes": notes}
+
+    return {"reason": None, "notes": text}
 
 
 def _extract_split_payments(transaction: Dict[str, Any]) -> List[Dict[str, float]]:
@@ -576,4 +611,303 @@ async def get_reports_overview(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate reports overview: {str(e)}"
+        )
+
+
+# ===============================================
+# STOCKTAKE REPORTS
+# ===============================================
+
+@router.get("/stocktakes")
+async def list_stocktake_reports(
+    outlet_id: str,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(50, ge=1, le=200, description="Page size"),
+    date_from: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: Dict[str, Any] = Depends(CurrentUser())
+):
+    """List stocktake sessions with summary metrics for an outlet."""
+    try:
+        supabase = get_supabase_admin()
+        offset = (page - 1) * size
+        used_session_table = True
+
+        session_rows: List[Dict[str, Any]] = []
+        total = 0
+
+        try:
+            session_query = supabase.table('pos_stocktake_sessions').select('*', count='exact').eq('outlet_id', outlet_id)
+            if date_from:
+                session_query = session_query.gte('completed_at', f"{date_from}T00:00:00")
+            if date_to:
+                session_query = session_query.lte('completed_at', f"{date_to}T23:59:59")
+
+            session_result = session_query.order('completed_at', desc=True).range(offset, offset + size - 1).execute()
+            session_rows = session_result.data or []
+            total = int(getattr(session_result, 'count', 0) or len(session_rows))
+        except Exception as exc:
+            if _is_missing_table_error(exc, 'pos_stocktake_sessions'):
+                used_session_table = False
+                logger.warning("pos_stocktake_sessions table missing; using movement fallback for stocktake reports")
+            else:
+                raise
+
+        if not used_session_table:
+            movements_query = supabase.table('pos_stock_movements')\
+                .select('*')\
+                .eq('outlet_id', outlet_id)\
+                .eq('reference_type', 'stocktake_session')
+            if date_from:
+                movements_query = movements_query.gte('movement_date', f"{date_from}T00:00:00")
+            if date_to:
+                movements_query = movements_query.lte('movement_date', f"{date_to}T23:59:59")
+
+            movement_rows = movements_query.order('movement_date', desc=True).limit(20000).execute().data or []
+            grouped: Dict[str, Dict[str, Any]] = {}
+
+            for row in movement_rows:
+                session_id = row.get('reference_id')
+                if not session_id:
+                    continue
+                bucket = grouped.get(session_id)
+                if not bucket:
+                    bucket = {
+                        "id": session_id,
+                        "outlet_id": outlet_id,
+                        "terminal_id": None,
+                        "performed_by": row.get('performed_by'),
+                        "performed_by_name": None,
+                        "started_at": row.get('movement_date'),
+                        "completed_at": row.get('movement_date'),
+                        "status": "completed",
+                        "total_items": 0,
+                        "adjusted_items": 0,
+                        "unchanged_items": 0,
+                        "positive_variance_items": 0,
+                        "negative_variance_items": 0,
+                        "net_quantity_variance": 0,
+                        "total_variance_value": 0.0
+                    }
+                    grouped[session_id] = bucket
+
+                bucket["total_items"] += 1
+                bucket["adjusted_items"] += 1
+                quantity_change = int(row.get('quantity_change') or 0)
+                bucket["net_quantity_variance"] += quantity_change
+                if quantity_change > 0:
+                    bucket["positive_variance_items"] += 1
+                elif quantity_change < 0:
+                    bucket["negative_variance_items"] += 1
+
+                unit_cost = row.get('unit_cost')
+                if unit_cost is not None:
+                    try:
+                        bucket["total_variance_value"] += abs(quantity_change) * float(unit_cost)
+                    except Exception:
+                        pass
+
+                movement_date = row.get('movement_date')
+                if movement_date and (bucket.get("started_at") is None or movement_date < bucket["started_at"]):
+                    bucket["started_at"] = movement_date
+                if movement_date and (bucket.get("completed_at") is None or movement_date > bucket["completed_at"]):
+                    bucket["completed_at"] = movement_date
+
+            fallback_rows = sorted(
+                grouped.values(),
+                key=lambda item: item.get("completed_at") or "",
+                reverse=True
+            )
+            total = len(fallback_rows)
+            session_rows = fallback_rows[offset:offset + size]
+
+        items = [{
+            "id": row.get("id"),
+            "outlet_id": row.get("outlet_id"),
+            "terminal_id": row.get("terminal_id"),
+            "performed_by": row.get("performed_by"),
+            "performed_by_name": row.get("performed_by_name"),
+            "started_at": row.get("started_at"),
+            "completed_at": row.get("completed_at"),
+            "status": row.get("status") or "completed",
+            "total_items": int(row.get("total_items") or 0),
+            "adjusted_items": int(row.get("adjusted_items") or 0),
+            "unchanged_items": int(row.get("unchanged_items") or 0),
+            "positive_variance_items": int(row.get("positive_variance_items") or 0),
+            "negative_variance_items": int(row.get("negative_variance_items") or 0),
+            "net_quantity_variance": int(row.get("net_quantity_variance") or 0),
+            "total_variance_value": float(row.get("total_variance_value") or 0),
+            "source": "session_table" if used_session_table else "movement_fallback"
+        } for row in session_rows]
+
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "size": size
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing stocktake reports: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list stocktake reports: {str(e)}"
+        )
+
+
+@router.get("/stocktakes/{session_id}")
+async def get_stocktake_report_detail(
+    session_id: str,
+    outlet_id: str = Query(..., description="Outlet ID"),
+    current_user: Dict[str, Any] = Depends(CurrentUser())
+):
+    """Get stocktake session details including product-level variances."""
+    try:
+        supabase = get_supabase_admin()
+        session_row: Optional[Dict[str, Any]] = None
+
+        try:
+            session_result = supabase.table('pos_stocktake_sessions')\
+                .select('*')\
+                .eq('id', session_id)\
+                .eq('outlet_id', outlet_id)\
+                .limit(1)\
+                .execute()
+            session_row = session_result.data[0] if session_result.data else None
+        except Exception as exc:
+            if not _is_missing_table_error(exc, 'pos_stocktake_sessions'):
+                raise
+
+        movement_result = supabase.table('pos_stock_movements')\
+            .select('*')\
+            .eq('outlet_id', outlet_id)\
+            .eq('reference_id', session_id)\
+            .eq('reference_type', 'stocktake_session')\
+            .order('movement_date', desc=False)\
+            .execute()
+        movement_rows = movement_result.data or []
+
+        if not session_row and not movement_rows:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Stocktake session not found"
+            )
+
+        product_ids = list({row.get('product_id') for row in movement_rows if row.get('product_id')})
+        product_map: Dict[str, Dict[str, Any]] = {}
+        if product_ids:
+            products_result = supabase.table('pos_products')\
+                .select('id,name,sku,barcode')\
+                .in_('id', product_ids)\
+                .execute()
+            product_map = {
+                str(product.get('id')): product
+                for product in (products_result.data or [])
+                if product.get('id')
+            }
+
+        detail_items: List[Dict[str, Any]] = []
+        positive_variance_items = 0
+        negative_variance_items = 0
+        net_quantity_variance = 0
+        total_variance_value = 0.0
+
+        for row in movement_rows:
+            product_id = row.get('product_id')
+            product = product_map.get(str(product_id), {})
+            quantity_before = int(row.get('quantity_before') or 0)
+            quantity_after = int(
+                row.get('quantity_after')
+                or (quantity_before + int(row.get('quantity_change') or 0))
+            )
+            quantity_change = int(row.get('quantity_change') or (quantity_after - quantity_before))
+
+            if quantity_change > 0:
+                positive_variance_items += 1
+            elif quantity_change < 0:
+                negative_variance_items += 1
+            net_quantity_variance += quantity_change
+
+            unit_cost = row.get('unit_cost')
+            variance_value = None
+            if unit_cost is not None:
+                try:
+                    variance_value = abs(quantity_change) * float(unit_cost)
+                    total_variance_value += variance_value
+                except Exception:
+                    variance_value = None
+
+            parsed_notes = _extract_stocktake_reason_and_notes(row.get('notes'))
+            detail_items.append({
+                "movement_id": row.get('id'),
+                "product_id": product_id,
+                "product_name": product.get('name') or 'Unknown product',
+                "sku": product.get('sku'),
+                "barcode": product.get('barcode'),
+                "system_quantity": quantity_before,
+                "counted_quantity": quantity_after,
+                "quantity_change": quantity_change,
+                "reason": parsed_notes.get("reason"),
+                "notes": parsed_notes.get("notes"),
+                "unit_cost": float(unit_cost) if unit_cost is not None else None,
+                "variance_value": variance_value,
+                "movement_date": row.get('movement_date')
+            })
+
+        if session_row:
+            session = {
+                "id": session_row.get("id"),
+                "outlet_id": session_row.get("outlet_id"),
+                "terminal_id": session_row.get("terminal_id"),
+                "performed_by": session_row.get("performed_by"),
+                "performed_by_name": session_row.get("performed_by_name"),
+                "started_at": session_row.get("started_at"),
+                "completed_at": session_row.get("completed_at"),
+                "status": session_row.get("status") or "completed",
+                "total_items": int(session_row.get("total_items") or len(detail_items)),
+                "adjusted_items": int(session_row.get("adjusted_items") or len(detail_items)),
+                "unchanged_items": int(session_row.get("unchanged_items") or 0),
+                "positive_variance_items": int(session_row.get("positive_variance_items") or positive_variance_items),
+                "negative_variance_items": int(session_row.get("negative_variance_items") or negative_variance_items),
+                "net_quantity_variance": int(session_row.get("net_quantity_variance") or net_quantity_variance),
+                "total_variance_value": float(session_row.get("total_variance_value") or total_variance_value),
+                "notes": session_row.get("notes")
+            }
+        else:
+            started_at = detail_items[0]["movement_date"] if detail_items else None
+            completed_at = detail_items[-1]["movement_date"] if detail_items else None
+            performed_by = movement_rows[0].get("performed_by") if movement_rows else None
+            session = {
+                "id": session_id,
+                "outlet_id": outlet_id,
+                "terminal_id": None,
+                "performed_by": performed_by,
+                "performed_by_name": None,
+                "started_at": started_at,
+                "completed_at": completed_at,
+                "status": "completed",
+                "total_items": len(detail_items),
+                "adjusted_items": len(detail_items),
+                "unchanged_items": 0,
+                "positive_variance_items": positive_variance_items,
+                "negative_variance_items": negative_variance_items,
+                "net_quantity_variance": net_quantity_variance,
+                "total_variance_value": total_variance_value,
+                "notes": None
+            }
+
+        return {
+            "session": session,
+            "items": detail_items
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error loading stocktake report detail for {session_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load stocktake report detail: {str(e)}"
         )

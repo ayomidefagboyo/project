@@ -341,6 +341,46 @@ class StockMovementResponse(BaseModel):
         from_attributes = True
 
 
+class StocktakeCommitItem(BaseModel):
+    """Schema for stocktake line-item commit payload."""
+    product_id: str = Field(..., description="Product ID")
+    current_quantity: int = Field(..., ge=0, description="System quantity seen during count")
+    counted_quantity: int = Field(..., ge=0, description="Physical counted quantity")
+    reason: Optional[str] = Field(None, max_length=255, description="Variance reason")
+    notes: Optional[str] = Field(None, description="Optional line notes")
+    unit_cost: Optional[Decimal] = Field(None, ge=0, description="Unit cost for variance valuation")
+
+
+class StocktakeCommitRequest(BaseModel):
+    """Batch stocktake commit payload."""
+    outlet_id: str = Field(..., description="Outlet ID")
+    performed_by: Optional[str] = Field(None, description="Actor identifier from client context")
+    terminal_id: Optional[str] = Field(None, max_length=120, description="Terminal identifier")
+    started_at: Optional[datetime] = Field(None, description="Count start time")
+    notes: Optional[str] = Field(None, description="Session notes")
+    items: List[StocktakeCommitItem] = Field(..., min_items=1, description="Stocktake rows")
+
+
+class StocktakeCommitResponse(BaseModel):
+    """Result summary for a committed stocktake session."""
+    session_id: str = Field(..., description="Stocktake session ID")
+    outlet_id: str = Field(..., description="Outlet ID")
+    terminal_id: Optional[str] = Field(None, description="Terminal identifier")
+    performed_by: str = Field(..., description="Authenticated actor user ID")
+    performed_by_name: Optional[str] = Field(None, description="Staff display name at commit time")
+    started_at: datetime = Field(..., description="Session start timestamp")
+    completed_at: datetime = Field(..., description="Session completion timestamp")
+    status: str = Field(..., description="Session status")
+    total_items: int = Field(..., description="Rows submitted for stocktake")
+    adjusted_items: int = Field(..., description="Rows that changed stock")
+    unchanged_items: int = Field(..., description="Rows without variance")
+    positive_variance_items: int = Field(..., description="Rows with positive variance")
+    negative_variance_items: int = Field(..., description="Rows with negative variance")
+    net_quantity_variance: int = Field(..., description="Net quantity variance")
+    total_variance_value: Optional[Decimal] = Field(None, description="Total absolute variance value")
+    movement_ids: List[str] = Field(default_factory=list, description="Created stock movement IDs")
+
+
 # ===============================================
 # CASH DRAWER SCHEMAS
 # ===============================================

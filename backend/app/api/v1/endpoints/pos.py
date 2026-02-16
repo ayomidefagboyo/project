@@ -4,7 +4,7 @@ Nigerian Supermarket Focus
 """
 
 from fastapi import APIRouter, HTTPException, Depends, status, Query, Header, Body
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, date, timedelta
 import uuid
 import logging
@@ -25,6 +25,7 @@ from app.schemas.pos import (
     TransactionListResponse, TransactionSearchRequest,
     # Inventory
     StockMovementCreate, StockMovementResponse,
+    StocktakeCommitRequest, StocktakeCommitResponse,
     InventoryTransferCreate, InventoryTransferResponse,
     # Cash Drawer
     CashDrawerSessionCreate, CashDrawerSessionClose, CashDrawerSessionResponse,
@@ -75,6 +76,20 @@ def _extract_missing_column_name(exc: Exception) -> Optional[str]:
         if match:
             return match.group(1)
     return None
+
+
+def _is_missing_table_error(exc: Exception, table_name: str) -> bool:
+    """Detect missing-table errors from PostgREST/Postgres payloads."""
+    message = str(exc).lower()
+    return (
+        table_name.lower() in message
+        and (
+            "does not exist" in message
+            or "could not find the table" in message
+            or "42p01" in message
+            or "pgrst205" in message
+        )
+    )
 
 
 def _insert_pos_transaction_compat(supabase, transaction_data: Dict[str, Any]):
@@ -205,6 +220,67 @@ def _upsert_pos_products_compat(supabase, rows: List[Dict[str, Any]]):
     raise RuntimeError(
         f"Failed to upsert pos_products after compatibility retries; removed columns={removed_columns}"
     )
+
+
+def _insert_stocktake_session_compat(supabase, session_data: Dict[str, Any]):
+    """
+    Insert into pos_stocktake_sessions with backward compatibility.
+    Removes missing columns and retries until success or non-recoverable error.
+    """
+    payload = dict(session_data)
+    removed_columns: List[str] = []
+
+    for _ in range(12):
+        try:
+            return supabase.table('pos_stocktake_sessions').insert(payload).execute()
+        except Exception as exc:
+            if _is_missing_table_error(exc, 'pos_stocktake_sessions'):
+                raise
+
+            missing_column = _extract_missing_column_name(exc)
+            if missing_column and missing_column in payload:
+                payload.pop(missing_column, None)
+                removed_columns.append(missing_column)
+                logger.warning(
+                    "pos_stocktake_sessions.%s missing in schema cache; retrying insert without it",
+                    missing_column
+                )
+                continue
+            raise
+
+    raise RuntimeError(
+        f"Failed to insert pos_stocktake_sessions after compatibility retries; removed columns={removed_columns}"
+    )
+
+
+def _rollback_stocktake_changes(
+    supabase,
+    product_rollbacks: List[Tuple[str, int]],
+    movement_ids: List[str]
+) -> None:
+    """
+    Best-effort rollback for stocktake commit failures after partial writes.
+    """
+    if movement_ids:
+        try:
+            supabase.table('pos_stock_movements').delete().in_('id', movement_ids).execute()
+        except Exception as rollback_error:
+            logger.error("Rollback failed while deleting stock movements: %s", rollback_error)
+
+    # Restore product stock levels in reverse application order.
+    for product_id, previous_quantity in reversed(product_rollbacks):
+        try:
+            supabase.table('pos_products').update({
+                'quantity_on_hand': previous_quantity,
+                'updated_at': datetime.utcnow().isoformat()
+            }).eq('id', product_id).execute()
+        except Exception as rollback_error:
+            logger.error(
+                "Rollback failed while restoring product %s quantity to %s: %s",
+                product_id,
+                previous_quantity,
+                rollback_error
+            )
 
 
 def _safe_json_loads(value: Any) -> Dict[str, Any]:
@@ -1534,6 +1610,286 @@ async def create_stock_adjustment(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create stock adjustment: {str(e)}"
+        )
+
+
+@router.post("/inventory/stocktakes/commit", response_model=StocktakeCommitResponse)
+async def commit_stocktake(
+    stocktake: StocktakeCommitRequest,
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
+    current_user=Depends(CurrentUser())
+):
+    """Commit an entire stocktake in one operation with conflict checks and rollback safety."""
+    try:
+        supabase = get_supabase_admin()
+        actor_context = _require_manager_role(
+            supabase,
+            current_user,
+            stocktake.outlet_id,
+            x_pos_staff_session
+        )
+        actor_id = _resolve_actor_user_id(current_user)
+
+        if not stocktake.items:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Stocktake payload must include at least one item"
+            )
+
+        product_ids = [item.product_id for item in stocktake.items]
+        if len(set(product_ids)) != len(product_ids):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Duplicate product rows found in stocktake payload"
+            )
+
+        # Resolve actor name for human-readable reporting.
+        performed_by_name: Optional[str] = None
+        staff_profile_id = actor_context.get('staff_profile_id')
+        if staff_profile_id:
+            profile_result = supabase.table(Tables.STAFF_PROFILES)\
+                .select('display_name,staff_code')\
+                .eq('id', staff_profile_id)\
+                .limit(1)\
+                .execute()
+            if profile_result.data:
+                profile = profile_result.data[0]
+                performed_by_name = str(
+                    profile.get('display_name')
+                    or profile.get('staff_code')
+                    or ''
+                ).strip() or None
+
+        if not performed_by_name:
+            performed_by_name = str(
+                current_user.get('name')
+                or current_user.get('email')
+                or ''
+            ).strip() or None
+
+        # Fetch product rows in chunks to avoid oversized IN clauses.
+        product_map: Dict[str, Dict[str, Any]] = {}
+        chunk_size = 250
+        for index in range(0, len(product_ids), chunk_size):
+            chunk = product_ids[index:index + chunk_size]
+            products_result = supabase.table('pos_products')\
+                .select('id,name,sku,barcode,quantity_on_hand,cost_price,outlet_id')\
+                .eq('outlet_id', stocktake.outlet_id)\
+                .in_('id', chunk)\
+                .execute()
+            for product in (products_result.data or []):
+                product_id = product.get('id')
+                if product_id:
+                    product_map[str(product_id)] = product
+
+        missing_products = [product_id for product_id in product_ids if product_id not in product_map]
+        if missing_products:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "message": "Some stocktake products were not found in this outlet",
+                    "missing_product_ids": missing_products[:50]
+                }
+            )
+
+        conflicts: List[Dict[str, Any]] = []
+        changed_rows: List[Dict[str, Any]] = []
+        unchanged_items = 0
+        positive_variance_items = 0
+        negative_variance_items = 0
+        net_quantity_variance = 0
+        total_variance_value = Decimal('0')
+
+        for row in stocktake.items:
+            product = product_map[row.product_id]
+            live_quantity = int(product.get('quantity_on_hand') or 0)
+            if live_quantity != int(row.current_quantity):
+                conflicts.append({
+                    "product_id": row.product_id,
+                    "product_name": product.get('name'),
+                    "expected_quantity": int(row.current_quantity),
+                    "actual_quantity": live_quantity
+                })
+                continue
+
+            quantity_change = int(row.counted_quantity) - live_quantity
+            if quantity_change == 0:
+                unchanged_items += 1
+                continue
+
+            reason = str(row.reason or '').strip()
+            if not reason:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Reason is required for product {product.get('name') or row.product_id}"
+                )
+
+            if quantity_change > 0:
+                positive_variance_items += 1
+            else:
+                negative_variance_items += 1
+
+            unit_cost_decimal: Optional[Decimal]
+            if row.unit_cost is not None:
+                unit_cost_decimal = Decimal(str(row.unit_cost))
+            elif product.get('cost_price') is not None:
+                unit_cost_decimal = Decimal(str(product.get('cost_price')))
+            else:
+                unit_cost_decimal = None
+
+            if unit_cost_decimal is not None and unit_cost_decimal >= 0:
+                total_variance_value += abs(Decimal(quantity_change) * unit_cost_decimal)
+
+            net_quantity_variance += quantity_change
+            changed_rows.append({
+                "product_id": row.product_id,
+                "product_name": product.get('name'),
+                "sku": product.get('sku'),
+                "barcode": product.get('barcode'),
+                "current_quantity": live_quantity,
+                "counted_quantity": int(row.counted_quantity),
+                "quantity_change": quantity_change,
+                "reason": reason,
+                "notes": str(row.notes or '').strip(),
+                "unit_cost": unit_cost_decimal
+            })
+
+        if conflicts:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "message": "Stock levels changed while counting. Refresh and recount before applying stocktake.",
+                    "conflicts": conflicts[:50]
+                }
+            )
+
+        session_id = str(uuid.uuid4())
+        started_at = stocktake.started_at or datetime.utcnow()
+        completed_at = datetime.utcnow()
+        completed_at_iso = completed_at.isoformat()
+
+        movement_ids: List[str] = []
+        product_rollbacks: List[Tuple[str, int]] = []
+
+        try:
+            for row in changed_rows:
+                product_rollbacks.append((row["product_id"], row["current_quantity"]))
+
+                product_update = supabase.table('pos_products').update({
+                    'quantity_on_hand': row["counted_quantity"],
+                    'updated_at': completed_at_iso
+                }).eq('id', row["product_id"]).execute()
+
+                if not product_update.data:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Failed to update stock for product {row['product_id']}"
+                    )
+
+                movement_id = str(uuid.uuid4())
+                note_payload = {
+                    "reason": row["reason"],
+                    "notes": row["notes"]
+                }
+                unit_cost_value = row["unit_cost"]
+                movement_payload = {
+                    'id': movement_id,
+                    'product_id': row["product_id"],
+                    'outlet_id': stocktake.outlet_id,
+                    'movement_type': MovementType.ADJUSTMENT.value,
+                    'quantity_change': row["quantity_change"],
+                    'quantity_before': row["current_quantity"],
+                    'quantity_after': row["counted_quantity"],
+                    'reference_id': session_id,
+                    'reference_type': 'stocktake_session',
+                    'unit_cost': float(unit_cost_value) if unit_cost_value is not None else None,
+                    'total_value': float(abs(Decimal(row["quantity_change"]) * unit_cost_value)) if unit_cost_value is not None else None,
+                    'notes': json.dumps(note_payload),
+                    'performed_by': actor_id,
+                    'movement_date': completed_at_iso
+                }
+                movement_result = supabase.table('pos_stock_movements').insert(movement_payload).execute()
+                if not movement_result.data:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Failed to record stock movement for product {row['product_id']}"
+                    )
+
+                movement_ids.append(movement_id)
+
+        except HTTPException:
+            _rollback_stocktake_changes(supabase, product_rollbacks, movement_ids)
+            raise
+        except Exception as commit_error:
+            _rollback_stocktake_changes(supabase, product_rollbacks, movement_ids)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to apply stocktake changes: {str(commit_error)}"
+            )
+
+        session_payload = {
+            "id": session_id,
+            "outlet_id": stocktake.outlet_id,
+            "terminal_id": stocktake.terminal_id,
+            "performed_by": actor_id,
+            "performed_by_staff_profile_id": staff_profile_id,
+            "performed_by_name": performed_by_name,
+            "started_at": started_at.isoformat(),
+            "completed_at": completed_at_iso,
+            "status": "completed",
+            "total_items": len(stocktake.items),
+            "adjusted_items": len(changed_rows),
+            "unchanged_items": unchanged_items,
+            "positive_variance_items": positive_variance_items,
+            "negative_variance_items": negative_variance_items,
+            "net_quantity_variance": net_quantity_variance,
+            "total_variance_value": float(total_variance_value),
+            "notes": stocktake.notes,
+            "created_at": completed_at_iso,
+            "updated_at": completed_at_iso
+        }
+
+        try:
+            _insert_stocktake_session_compat(supabase, session_payload)
+        except Exception as session_error:
+            if _is_missing_table_error(session_error, 'pos_stocktake_sessions'):
+                logger.warning(
+                    "pos_stocktake_sessions table missing; committed stocktake %s using movement records only",
+                    session_id
+                )
+            else:
+                logger.error(
+                    "Stocktake %s committed but failed to persist session summary: %s",
+                    session_id,
+                    session_error
+                )
+
+        return StocktakeCommitResponse(
+            session_id=session_id,
+            outlet_id=stocktake.outlet_id,
+            terminal_id=stocktake.terminal_id,
+            performed_by=actor_id,
+            performed_by_name=performed_by_name,
+            started_at=started_at,
+            completed_at=completed_at,
+            status='completed',
+            total_items=len(stocktake.items),
+            adjusted_items=len(changed_rows),
+            unchanged_items=unchanged_items,
+            positive_variance_items=positive_variance_items,
+            negative_variance_items=negative_variance_items,
+            net_quantity_variance=net_quantity_variance,
+            total_variance_value=total_variance_value,
+            movement_ids=movement_ids
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error committing stocktake: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to commit stocktake: {str(e)}"
         )
 
 

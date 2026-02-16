@@ -401,6 +401,25 @@ export interface StocktakeItem {
   unit_cost?: number;
 }
 
+interface StocktakeCommitApiResponse {
+  session_id: string;
+  outlet_id: string;
+  terminal_id?: string;
+  performed_by: string;
+  performed_by_name?: string;
+  started_at: string;
+  completed_at: string;
+  status: string;
+  total_items: number;
+  adjusted_items: number;
+  unchanged_items: number;
+  positive_variance_items: number;
+  negative_variance_items: number;
+  net_quantity_variance: number;
+  total_variance_value?: number;
+  movement_ids: string[];
+}
+
 // ===============================================
 // ENHANCED TRANSACTION INTERFACES
 // ===============================================
@@ -456,6 +475,16 @@ class POSService {
 
   private getProductCursorSettingKey(outletId: string): string {
     return `pos_products_cursor_${outletId}`;
+  }
+
+  private getTerminalIdForOutlet(outletId: string): string | undefined {
+    try {
+      const value = localStorage.getItem(`pos_terminal_id_${outletId}`) || '';
+      const trimmed = value.trim();
+      return trimmed || undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private toTimestamp(value?: string | null): number {
@@ -1562,7 +1591,7 @@ class POSService {
   /**
    * Apply a full stocktake by posting adjustments only where counted differs from system quantity.
    */
-  async applyStocktake(params: {
+  private async applyStocktakeLegacy(params: {
     outlet_id: string;
     performed_by: string;
     items: StocktakeItem[];
@@ -1593,6 +1622,65 @@ class POSService {
     }
 
     return { adjusted_count, unchanged_count, movements };
+  }
+
+  async applyStocktake(params: {
+    outlet_id: string;
+    performed_by: string;
+    items: StocktakeItem[];
+  }): Promise<{
+    session_id?: string;
+    adjusted_count: number;
+    unchanged_count: number;
+    movements: StockMovement[];
+    total_items?: number;
+    positive_variance_items?: number;
+    negative_variance_items?: number;
+    net_quantity_variance?: number;
+    total_variance_value?: number;
+  }> {
+    try {
+      const response = await apiClient.post<StocktakeCommitApiResponse>(
+        `${this.baseUrl}/inventory/stocktakes/commit`,
+        {
+          outlet_id: params.outlet_id,
+          performed_by: params.performed_by,
+          terminal_id: this.getTerminalIdForOutlet(params.outlet_id),
+          started_at: new Date().toISOString(),
+          items: params.items.map((item) => ({
+            product_id: item.product_id,
+            current_quantity: item.current_quantity,
+            counted_quantity: item.counted_quantity,
+            reason: item.reason,
+            notes: item.notes,
+            unit_cost: item.unit_cost
+          }))
+        }
+      );
+
+      if (!response.data) {
+        if (response.status === 404) {
+          logger.warn('Stocktake commit endpoint unavailable (404); falling back to legacy per-item adjustments');
+          return this.applyStocktakeLegacy(params);
+        }
+        throw new Error(response.error || 'Failed to commit stocktake');
+      }
+
+      return {
+        session_id: response.data.session_id,
+        adjusted_count: response.data.adjusted_items ?? 0,
+        unchanged_count: response.data.unchanged_items ?? 0,
+        movements: [],
+        total_items: response.data.total_items,
+        positive_variance_items: response.data.positive_variance_items,
+        negative_variance_items: response.data.negative_variance_items,
+        net_quantity_variance: response.data.net_quantity_variance,
+        total_variance_value: response.data.total_variance_value
+      };
+    } catch (error) {
+      logger.error('Error committing stocktake:', error);
+      throw this.handleError(error);
+    }
   }
 
   /**
