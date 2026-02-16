@@ -363,10 +363,11 @@ export interface EnhancedCreateTransactionRequest extends CreateTransactionReque
 class POSService {
   private baseUrl = '/pos';
   private isInitialized = false;
+  private readonly initPromise: Promise<void>;
   private readonly productSyncPageSize = 100;
 
   constructor() {
-    this.initializeOfflineDB();
+    this.initPromise = this.initializeOfflineDB();
   }
 
   private async initializeOfflineDB(): Promise<void> {
@@ -377,6 +378,18 @@ class POSService {
     } catch (error) {
       logger.error('Failed to initialize offline database:', error);
     }
+  }
+
+  private async ensureOfflineInitialized(): Promise<boolean> {
+    if (this.isInitialized) return true;
+
+    try {
+      await this.initPromise;
+    } catch (error) {
+      logger.error('Offline database initialization wait failed:', error);
+    }
+
+    return this.isInitialized;
   }
 
   private getProductCursorSettingKey(outletId: string): string {
@@ -450,6 +463,8 @@ class POSService {
       activeOnly?: boolean;
     } = {}
   ): Promise<ProductListResult> {
+    const offlineReady = await this.ensureOfflineInitialized();
+
     try {
       const requestedSize = options.size || 20;
       const safeSize = Math.min(Math.max(requestedSize, 1), this.productSyncPageSize);
@@ -462,7 +477,7 @@ class POSService {
       });
 
       // Cache products offline for future use
-      if (this.isInitialized && response.items) {
+      if (offlineReady && response.items) {
         await offlineDatabase.storeProducts(response.items);
       }
 
@@ -478,7 +493,7 @@ class POSService {
       }
 
       // Fallback to offline cache
-      if (this.isInitialized) {
+      if (offlineReady) {
         try {
           let filteredProducts: POSProduct[] = [];
 
@@ -546,7 +561,8 @@ class POSService {
       activeOnly?: boolean;
     } = {}
   ): Promise<ProductListResult> {
-    if (!this.isInitialized) {
+    const offlineReady = await this.ensureOfflineInitialized();
+    if (!offlineReady) {
       return { items: [], total: 0, page: options.page || 1, size: options.size || 20, offline: true };
     }
 
@@ -604,7 +620,8 @@ class POSService {
       maxPages?: number;
     } = {}
   ): Promise<{ mode: 'full' | 'delta'; updated: number }> {
-    if (!this.isInitialized) {
+    const offlineReady = await this.ensureOfflineInitialized();
+    if (!offlineReady) {
       return { mode: options.forceFull ? 'full' : 'delta', updated: 0 };
     }
 
@@ -719,7 +736,8 @@ class POSService {
    * Search products locally (Optimized for instant search)
    */
   async searchLocalProducts(outletId: string, query: string): Promise<POSProduct[]> {
-    if (!this.isInitialized || !query) return [];
+    const offlineReady = await this.ensureOfflineInitialized();
+    if (!offlineReady || !query) return [];
     return await offlineDatabase.searchProducts(outletId, query);
   }
 
