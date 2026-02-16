@@ -118,7 +118,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   // UI State
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showClearCartConfirm, setShowClearCartConfirm] = useState(false);
-  const [showPrintDecisionModal, setShowPrintDecisionModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [posError, setPosError] = useState<string | null>(null);
   const [isFinalizingSale, setIsFinalizingSale] = useState(false);
@@ -127,7 +126,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     amount: string;
     error?: string;
   } | null>(null);
-  const printDecisionResolverRef = useRef<((value: boolean) => void) | null>(null);
   const productLoadRequestRef = useRef(0);
 
   // Split Payment State
@@ -420,20 +418,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [cart]);
-
-  const requestPrintDecision = (): Promise<boolean> =>
-    new Promise((resolve) => {
-      printDecisionResolverRef.current = resolve;
-      setShowPrintDecisionModal(true);
-    });
-
-  const resolvePrintDecision = (decision: boolean) => {
-    if (printDecisionResolverRef.current) {
-      printDecisionResolverRef.current(decision);
-      printDecisionResolverRef.current = null;
-    }
-    setShowPrintDecisionModal(false);
-  };
 
   const refreshOfflineTransactionCount = async () => {
     try {
@@ -1427,14 +1411,10 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       (hardwarePolicy.autoOpenDrawerMode === 'on-sale' ||
         (hardwarePolicy.autoOpenDrawerMode === 'cash-only' && hasCashComponent));
 
-    let shouldPrintReceipt = mode === 'save_and_print';
-    if (!shouldPrintReceipt && mode === 'save') {
-      if (hardwarePolicy.autoPrintMode === 'always') {
-        shouldPrintReceipt = true;
-      } else if (hardwarePolicy.autoPrintMode === 'ask') {
-        shouldPrintReceipt = await requestPrintDecision();
-      }
-    }
+    // Explicit button semantics:
+    // - Save Only never prints
+    // - Save & Print always attempts to print
+    const shouldPrintReceipt = mode === 'save_and_print';
 
     const offlineId = createLocalOfflineId();
     const transactionRequest: any = {
@@ -2148,31 +2128,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                   className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700"
                 >
                   Clear Cart
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {showPrintDecisionModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
-              <h3 className="text-lg font-bold text-gray-900">Print receipt?</h3>
-              <p className="mt-2 text-sm text-gray-600">
-                Choose whether to print a receipt for this completed sale.
-              </p>
-              <div className="mt-5 flex justify-end gap-2">
-                <button
-                  onClick={() => resolvePrintDecision(false)}
-                  className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200"
-                >
-                  Skip
-                </button>
-                <button
-                  onClick={() => resolvePrintDecision(true)}
-                  className="px-4 py-2 rounded-lg bg-slate-900 text-stone-100 hover:bg-slate-800"
-                >
-                  Print
                 </button>
               </div>
             </div>
