@@ -38,6 +38,7 @@ const TransactionsPage: React.FC = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [selectedTransaction, setSelectedTransaction] = useState<ExtendedTransaction | null>(null);
   const [isLoadingTransactionDetails, setIsLoadingTransactionDetails] = useState(false);
+  const [pendingProductLookup, setPendingProductLookup] = useState<Record<string, { name: string; sku?: string }>>({});
   const [showVoidConfirm, setShowVoidConfirm] = useState(false);
   const [voidReason, setVoidReason] = useState('');
   const [showRefundConfirm, setShowRefundConfirm] = useState(false);
@@ -113,14 +114,15 @@ const TransactionsPage: React.FC = () => {
       status: 'pending' as any,
       transaction_date: createdAt,
       items: (tx.items || []).map((item, index) => {
+        const itemLookup = pendingProductLookup[item.product_id] || null;
         const unitPrice = Number(item.unit_price || 0);
         const quantity = Number(item.quantity || 0);
         const discountAmount = Number(item.discount_amount || 0);
         return {
           id: `${tx.offline_id}-${index}`,
           product_id: item.product_id,
-          sku: '',
-          product_name: 'Product',
+          sku: itemLookup?.sku || '',
+          product_name: itemLookup?.name || `Product ${index + 1}`,
           quantity,
           unit_price: unitPrice,
           discount_amount: discountAmount,
@@ -134,6 +136,39 @@ const TransactionsPage: React.FC = () => {
       cashier_name: 'Pending Sync',
     };
   };
+
+  useEffect(() => {
+    if (!currentOutlet?.id) {
+      setPendingProductLookup({});
+      return;
+    }
+
+    let cancelled = false;
+    const hydratePendingNames = async () => {
+      try {
+        const cached = await posService.getCachedProducts(currentOutlet.id, {
+          activeOnly: false,
+          page: 1,
+          size: 20000,
+        });
+        if (cancelled) return;
+        const lookup: Record<string, { name: string; sku?: string }> = {};
+        (cached.items || []).forEach((product) => {
+          lookup[product.id] = { name: product.name, sku: product.sku };
+        });
+        setPendingProductLookup(lookup);
+      } catch {
+        if (!cancelled) {
+          setPendingProductLookup({});
+        }
+      }
+    };
+
+    hydratePendingNames();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentOutlet?.id]);
 
   const mergeWithPendingOffline = useCallback(
     (base: ExtendedTransaction[], pending: PendingOfflineTransaction[]): ExtendedTransaction[] => {
@@ -162,7 +197,7 @@ const TransactionsPage: React.FC = () => {
 
       return merged;
     },
-    [currentOutlet?.id, matchesActiveFilters]
+    [currentOutlet?.id, matchesActiveFilters, pendingProductLookup]
   );
 
   const filterLocalTransactions = useCallback(
