@@ -270,10 +270,21 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       copies?: number;
     }
   ): Promise<boolean> => {
+    let printerName: string | undefined;
+    try {
+      const runtimeOutletId = currentOutlet?.id;
+      if (runtimeOutletId) {
+        const runtime = getHardwareRuntimeForTerminal(runtimeOutletId, terminalId || undefined);
+        printerName = runtime.receiptPrinter?.name;
+      }
+    } catch (runtimeError) {
+      logger.warn('Failed to resolve hardware runtime for receipt print:', runtimeError);
+    }
+
     const result = await printReceiptContent(receiptContent, {
       title: options?.title || 'Receipt',
       copies: options?.copies || 1,
-      printerName: hardwareRuntime.receiptPrinter?.name,
+      printerName,
     });
     return result.success;
   };
@@ -1366,8 +1377,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     const outletId = currentOutlet.id;
     const cashierId = currentUser.id;
     const activeTerminalId = terminalId || undefined;
-    const hardwareRuntime = getHardwareRuntimeForTerminal(outletId, activeTerminalId);
-    const hardwarePolicy = hardwareRuntime.policy;
+    const terminalHardware = getHardwareRuntimeForTerminal(outletId, activeTerminalId);
+    const hardwarePolicy = terminalHardware.policy;
 
     const totals = calculateCartTotals();
     const totalPaid = (activePayments.cash || 0) + (activePayments.card || 0) + (activePayments.transfer || 0);
@@ -1409,8 +1420,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
 
     const hasCashComponent = (activePayments.cash || 0) > 0 || cashbackAmount > 0;
     const drawerCanOpen =
-      !!hardwareRuntime.drawerCapabilities &&
-      supportsHardwareAction(hardwareRuntime.drawerCapabilities, 'open-drawer');
+      !!terminalHardware.drawerCapabilities &&
+      supportsHardwareAction(terminalHardware.drawerCapabilities, 'open-drawer');
     const shouldAutoOpenDrawer =
       drawerCanOpen &&
       (hardwarePolicy.autoOpenDrawerMode === 'on-sale' ||
@@ -1464,8 +1475,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       let printedAtCheckout = false;
       if (shouldPrintReceipt) {
         const canPrintReceipt =
-          !!hardwareRuntime.receiptPrinterCapabilities &&
-          supportsHardwareAction(hardwareRuntime.receiptPrinterCapabilities, 'print-receipt');
+          !!terminalHardware.receiptPrinterCapabilities &&
+          supportsHardwareAction(terminalHardware.receiptPrinterCapabilities, 'print-receipt');
         if (!canPrintReceipt) {
           warning('Receipt printer is not configured for receipt printing on this terminal.', 5000);
         } else {
