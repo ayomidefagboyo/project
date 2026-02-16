@@ -255,7 +255,8 @@ class DexieOfflineDatabase implements OfflineDatabase {
   }
 
   async storeOfflineTransaction(transaction: CreateTransactionRequest): Promise<string> {
-    const offlineId = createOfflineTransactionId();
+    const providedOfflineId = typeof transaction.offline_id === 'string' ? transaction.offline_id.trim() : '';
+    const offlineId = providedOfflineId || createOfflineTransactionId();
 
     const offlineItem: OfflineTransaction = {
       ...transaction,

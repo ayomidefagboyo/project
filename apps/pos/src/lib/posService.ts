@@ -1129,7 +1129,8 @@ class POSService {
         return await offlineDatabase.storeOfflineTransaction(transaction);
       } else {
         // Fallback to localStorage
-        const offlineId = createOfflineTransactionId();
+        const providedOfflineId = typeof transaction.offline_id === 'string' ? transaction.offline_id.trim() : '';
+        const offlineId = providedOfflineId || createOfflineTransactionId();
         const offlineTransactions = JSON.parse(localStorage.getItem('offline_transactions') || '[]');
         offlineTransactions.push({
           id: offlineId,
@@ -1205,6 +1206,27 @@ class POSService {
     } finally {
       this.offlineSyncPromise = null;
     }
+  }
+
+  /**
+   * Remove an offline transaction from queue/local cache by offline id.
+   */
+  async removeOfflineTransaction(offlineId: string): Promise<void> {
+    if (!offlineId) return;
+
+    if (this.isInitialized) {
+      await offlineDatabase.removeOfflineTransaction(offlineId);
+      await offlineDatabase.removeTransaction(offlineId);
+      return;
+    }
+
+    const offlineTransactions = JSON.parse(localStorage.getItem('offline_transactions') || '[]');
+    const filtered = offlineTransactions.filter((tx: any) => {
+      const id = typeof tx?.id === 'string' ? tx.id : '';
+      const queueOfflineId = typeof tx?.offline_id === 'string' ? tx.offline_id : '';
+      return id !== offlineId && queueOfflineId !== offlineId;
+    });
+    localStorage.setItem('offline_transactions', JSON.stringify(filtered));
   }
 
   /**

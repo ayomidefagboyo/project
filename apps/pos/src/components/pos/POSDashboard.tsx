@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { useOutlet } from '../../contexts/OutletContext';
 import { posService, PaymentMethod } from '../../lib/posService';
-import type { POSProduct, POSTransaction, POSTransactionItemResponse } from '../../lib/posService';
+import type { POSProduct } from '../../lib/posService';
 import { staffService } from '../../lib/staffService';
 import type { StaffProfile, StaffAuthResponse } from '../../types';
 import { offlineDatabase } from '../../lib/offlineDatabase';
@@ -121,6 +121,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   const [showPrintDecisionModal, setShowPrintDecisionModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [posError, setPosError] = useState<string | null>(null);
+  const [isFinalizingSale, setIsFinalizingSale] = useState(false);
   const [tenderModal, setTenderModal] = useState<{
     method: 'cash' | 'card' | 'transfer';
     amount: string;
@@ -283,6 +284,13 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     return `OFF-${stamp}-${suffix}`;
   };
 
+  const createLocalOfflineId = (): string => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return `offline_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  };
+
   const buildLocalReceiptPayloadFromCart = (params: {
     offlineId: string;
     createdAtIso: string;
@@ -321,7 +329,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     };
   };
 
-  const printLocalReceiptPayload = async (payload: LocalReceiptPayload, copies = 1) => {
+  const printLocalReceiptPayload = async (payload: LocalReceiptPayload, copies = 1): Promise<boolean> => {
     const receiptContent = buildLocalReceiptContent(payload);
     const opened = await openReceiptPrintWindow(receiptContent, {
       title: `Receipt ${payload.receiptNumber}`,
@@ -330,62 +338,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     if (!opened) {
       warning('Allow pop-ups to print receipts.', 5000);
     }
-  };
-
-  const buildOptimisticTransaction = (params: {
-    offlineId: string;
-    createdAtIso: string;
-    outletId: string;
-    cashierId: string;
-    customerId?: string;
-    customerName?: string;
-    paymentMethod: PaymentMethod;
-    totalPaid: number;
-    totals: { subtotal: number; totalDiscount: number; totalTax: number; total: number };
-    cartSnapshot: CartItem[];
-    notes?: string;
-    receiptPrinted: boolean;
-  }): POSTransaction => {
-    const txItems: POSTransactionItemResponse[] = params.cartSnapshot.map((item, index) => {
-      const lineDiscount = Math.max(0, item.discount) * item.quantity;
-      const lineGrossAfterDiscount = item.unitPrice * item.quantity - lineDiscount;
-      const rate = item.product.tax_rate || 0;
-      const lineTax = rate > 0 ? lineGrossAfterDiscount * (rate / (1 + rate)) : 0;
-      return {
-        id: `${params.offlineId}-item-${index + 1}`,
-        product_id: item.product.id,
-        sku: item.product.sku,
-        product_name: item.product.name,
-        quantity: item.quantity,
-        unit_price: item.unitPrice,
-        discount_amount: lineDiscount,
-        tax_amount: lineTax,
-        line_total: lineGrossAfterDiscount,
-      };
-    });
-
-    return {
-      id: params.offlineId,
-      outlet_id: params.outletId,
-      transaction_number: buildReceiptNumberFromOfflineId(params.offlineId),
-      cashier_id: params.cashierId,
-      customer_id: params.customerId,
-      customer_name: params.customerName,
-      subtotal: params.totals.subtotal,
-      tax_amount: params.totals.totalTax,
-      discount_amount: params.totals.totalDiscount,
-      total_amount: params.totals.total,
-      payment_method: params.paymentMethod,
-      tendered_amount: params.totalPaid,
-      change_amount: Math.max(0, params.totalPaid - params.totals.total),
-      payment_reference: undefined,
-      status: 'completed' as any,
-      transaction_date: params.createdAtIso,
-      items: txItems,
-      notes: params.notes,
-      receipt_printed: params.receiptPrinted,
-      created_at: params.createdAtIso,
-    };
+    return opened;
   };
 
   const getHardwareRuntimeForTerminal = (outletId?: string, activeTerminalId?: string) => {
@@ -1408,7 +1361,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
    * Handle split payment processing
    */
   const handleSplitPayment = async (mode: 'save' | 'save_and_print' = 'save') => {
-    if (!currentUser?.id || !currentOutlet?.id) return;
+    if (!currentUser?.id || !currentOutlet?.id || isFinalizingSale) return;
 
     const outletId = currentOutlet.id;
     const cashierId = currentUser.id;
@@ -1431,7 +1384,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       discount_amount: item.discount * item.quantity
     }));
 
-    // Build split payments array
     const splitPayments: Array<{ method: PaymentMethod; amount: number }> = [];
     if (activePayments.cash && activePayments.cash > 0) {
       splitPayments.push({ method: PaymentMethod.CASH, amount: activePayments.cash });
@@ -1451,8 +1403,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       return;
     }
 
-    // Use enhanced transaction with split payments
-    // Store split payments in notes field as JSON (temporary until schema is updated)
     const notes = splitPayments.length > 1
       ? JSON.stringify({ split_payments: splitPayments.map(sp => ({ method: sp.method, amount: sp.amount })) })
       : undefined;
@@ -1465,19 +1415,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       drawerCanOpen &&
       (hardwarePolicy.autoOpenDrawerMode === 'on-sale' ||
         (hardwarePolicy.autoOpenDrawerMode === 'cash-only' && hasCashComponent));
-      
-    const transactionRequest: any = {
-      outlet_id: outletId,
-      cashier_id: cashierId,
-      items,
-      payment_method: splitPayments.length === 1 ? splitPayments[0].method : PaymentMethod.CASH, // Primary method
-      tendered_amount: totalPaid,
-      // Per-line discounts already included in items; keep transaction-level discount 0 for now
-      discount_amount: 0,
-      notes,
-      customer_id: selectedCustomer?.id,
-      customer_name: selectedCustomer?.name,
-    };
 
     let shouldPrintReceipt = mode === 'save_and_print';
     if (!shouldPrintReceipt && mode === 'save') {
@@ -1488,6 +1425,20 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       }
     }
 
+    const offlineId = createLocalOfflineId();
+    const transactionRequest: any = {
+      outlet_id: outletId,
+      cashier_id: cashierId,
+      items,
+      payment_method: splitPayments.length === 1 ? splitPayments[0].method : PaymentMethod.CASH,
+      tendered_amount: totalPaid,
+      discount_amount: 0,
+      notes,
+      customer_id: selectedCustomer?.id,
+      customer_name: selectedCustomer?.name,
+      offline_id: offlineId,
+    };
+
     const copies = hardwarePolicy.duplicateReceiptsEnabled ? 2 : 1;
     const cartSnapshot: CartItem[] = cart.map((item) => ({
       product: { ...item.product },
@@ -1496,69 +1447,45 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       discount: item.discount,
     }));
     const createdAtIso = new Date().toISOString();
+    const localReceiptPayload = buildLocalReceiptPayloadFromCart({
+      offlineId,
+      createdAtIso,
+      cartSnapshot,
+      totals,
+      totalPaid,
+      splitPayments,
+      customerName: selectedCustomer?.name,
+      pendingSync: !isOnline,
+    });
+
+    setIsFinalizingSale(true);
 
     try {
-      // Always store transaction locally first for instant UX and offline safety
-      const offlineId = await posService.storeOfflineTransaction(transactionRequest);
-      const onlineTransactionRequest = { ...transactionRequest, offline_id: offlineId };
-      await refreshOfflineTransactionCount();
-      const localReceiptPayload = buildLocalReceiptPayloadFromCart({
-        offlineId,
-        createdAtIso,
-        cartSnapshot,
-        totals,
-        totalPaid,
-        splitPayments,
-        customerName: selectedCustomer?.name,
-        pendingSync: true,
-      });
-      const optimisticTransaction = buildOptimisticTransaction({
-        offlineId,
-        createdAtIso,
-        outletId,
-        cashierId,
-        customerId: selectedCustomer?.id,
-        customerName: selectedCustomer?.name,
-        paymentMethod: splitPayments.length === 1 ? splitPayments[0].method : PaymentMethod.CASH,
-        totalPaid,
-        totals,
-        cartSnapshot,
-        notes,
-        receiptPrinted: shouldPrintReceipt,
-      });
-
-      try {
-        await offlineDatabase.storeTransactions([optimisticTransaction]);
-      } catch (cacheErr) {
-        logger.warn('Failed to cache optimistic transaction locally:', cacheErr);
+      let printedAtCheckout = false;
+      if (shouldPrintReceipt) {
+        const canPrintReceipt =
+          !!hardwareRuntime.receiptPrinterCapabilities &&
+          supportsHardwareAction(hardwareRuntime.receiptPrinterCapabilities, 'print-receipt');
+        if (!canPrintReceipt) {
+          warning('Receipt printer is not configured for receipt printing on this terminal.', 5000);
+        } else {
+          printedAtCheckout = await printLocalReceiptPayload(localReceiptPayload, copies);
+        }
       }
 
-      // Optimistically clear UI for the next customer
+      await posService.storeOfflineTransaction(transactionRequest);
+
+      await refreshOfflineTransactionCount();
+
       clearCart();
       setActivePayments({});
       setTenderModal(null);
       setRestoredHeldReceiptId(null);
       setSelectedCustomer(null);
 
-      // If online, try to sync this specific transaction in the background
       if (isOnline) {
         (async () => {
           try {
-            const transaction = await posService.createTransaction(onlineTransactionRequest);
-
-            // On success, reload products to reflect new stock levels
-            loadProducts();
-
-            // Remove from offline queue if it was stored there
-            try {
-              await offlineDatabase.removeOfflineTransaction(offlineId);
-              await offlineDatabase.removeTransaction(offlineId);
-            } catch (removeErr) {
-              logger.warn('Failed to remove offline transaction after sync:', removeErr);
-            }
-
-            await refreshOfflineTransactionCount();
-
             if (shouldAutoOpenDrawer && activeTerminalId) {
               try {
                 const activeSession = await posService.getActiveCashDrawerSession(outletId, activeTerminalId);
@@ -1576,69 +1503,41 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
               }
             }
 
-            if (shouldPrintReceipt && transaction?.id) {
-              const canPrintReceipt =
-                !!hardwareRuntime.receiptPrinterCapabilities &&
-                supportsHardwareAction(hardwareRuntime.receiptPrinterCapabilities, 'print-receipt');
-              if (!canPrintReceipt) {
-                warning('Receipt printer is not configured for receipt printing on this terminal.', 5000);
-                return;
-              }
-
-              try {
-                const printResult = await posService.printReceipt(transaction.id, copies);
-                if (printResult?.receipt_content) {
-                  await openReceiptPrintWindow(printResult.receipt_content, { title: 'Receipt', copies });
-                }
-              } catch (printError: any) {
-                logger.error('Receipt print error:', printError);
-                // Fall back to local print so cashier is never blocked by backend print endpoint failures.
-                await printLocalReceiptPayload({ ...localReceiptPayload, pendingSync: false }, copies);
-              }
+            // Single authoritative sync path: prevents duplicate create flows drifting.
+            const synced = await posService.syncOfflineTransactions();
+            await refreshOfflineTransactionCount();
+            if (synced > 0) {
+              loadProducts();
             }
           } catch (syncErr: any) {
             logger.error('Online sync for transaction failed, keeping offline copy:', syncErr);
-            // Transaction remains in offline queue and will be retried on next online sync
             await refreshOfflineTransactionCount();
-            if (shouldPrintReceipt) {
+            if (shouldPrintReceipt && !printedAtCheckout) {
               await printLocalReceiptPayload(localReceiptPayload, copies);
             }
           }
         })();
       } else {
-        // Pure offline mode – increment counter so cashier sees pending syncs
         await refreshOfflineTransactionCount();
-        if (shouldPrintReceipt) {
-          await printLocalReceiptPayload(localReceiptPayload, copies);
-        }
       }
 
-      // Delete held receipt if this sale was restored from one
       if (restoredHeldReceiptId) {
         try {
           if (isOnline) {
             await posService.deleteHeldReceipt(restoredHeldReceiptId);
           }
-          // Remove from local list if still there
           const remaining = heldSales.filter((s) => s.id !== restoredHeldReceiptId);
           await persistHeldSales(remaining);
         } catch (err) {
           logger.error('Failed to delete held receipt after sale:', err);
-          // Continue anyway - sale is complete
         }
       }
-
-      // Reset and clear
-      clearCart();
-      setActivePayments({});
-      setTenderModal(null);
-      setRestoredHeldReceiptId(null);
-      setSelectedCustomer(null); // Clear customer after transaction
-
     } catch (err: any) {
       logger.error('Split payment error:', err);
       const errorMessage = err?.response?.data?.detail || err?.message || 'Transaction failed. Please try again.';
       error(errorMessage, 6000);
+    } finally {
+      setIsFinalizingSale(false);
     }
   };
 
@@ -1996,17 +1895,17 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
               </button>
               <button
                 onClick={() => handleSplitPayment('save')}
-                disabled={!canFinalize}
+                disabled={!canFinalize || isFinalizingSale}
                 className="min-h-[64px] px-6 py-3 text-stone-100 text-lg font-extrabold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed btn-brand"
               >
-                Save Only
+                {isFinalizingSale ? 'Saving...' : 'Save Only'}
               </button>
               <button
                 onClick={() => handleSplitPayment('save_and_print')}
-                disabled={!canFinalize}
+                disabled={!canFinalize || isFinalizingSale}
                 className="min-h-[64px] px-6 py-3 text-stone-100 text-lg font-extrabold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed btn-brand"
               >
-                Save &amp; Print
+                {isFinalizingSale ? 'Printing...' : 'Save & Print'}
               </button>
             </div>
           </div>
