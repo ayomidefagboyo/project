@@ -67,6 +67,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [editingRows, setEditingRows] = useState<Set<string>>(new Set());
+  const [editDrafts, setEditDrafts] = useState<Record<string, Partial<POSProduct>>>({});
   const [newProduct, setNewProduct] = useState<Partial<POSProduct>>({});
   const [newProductSellingPriceManuallyEdited, setNewProductSellingPriceManuallyEdited] = useState(false);
   const [showNewRow, setShowNewRow] = useState(false);
@@ -285,19 +286,45 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     }
   };
 
-  const formatCurrency = (amount: number): string => {
+  const formatCurrency = useCallback((amount: number): string => {
     return new Intl.NumberFormat('en-NG', {
       style: 'currency',
       currency: 'NGN',
       minimumFractionDigits: 2
     }).format(amount);
-  };
+  }, []);
 
-  const handleCellEdit = (productId: string, field: keyof POSProduct, value: any) => {
-    setProducts(prev => prev.map(p =>
-      p.id === productId ? { ...p, [field]: value } : p
-    ));
-  };
+  const handleCellEdit = useCallback((productId: string, field: keyof POSProduct, value: any) => {
+    setEditDrafts((prev) => ({
+      ...prev,
+      [productId]: {
+        ...(prev[productId] || {}),
+        [field]: value,
+      },
+    }));
+  }, []);
+
+  const startEditingProduct = useCallback((productId: string) => {
+    setEditingRows((prev) => {
+      const next = new Set(prev);
+      next.add(productId);
+      return next;
+    });
+  }, []);
+
+  const cancelEditingProduct = useCallback((productId: string) => {
+    setEditingRows((prev) => {
+      const next = new Set(prev);
+      next.delete(productId);
+      return next;
+    });
+    setEditDrafts((prev) => {
+      if (!prev[productId]) return prev;
+      const next = { ...prev };
+      delete next[productId];
+      return next;
+    });
+  }, []);
 
   const handleNewProductChange = (field: keyof POSProduct, value: any) => {
     setNewProduct((prev) => {
@@ -451,42 +478,50 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     }
   };
 
-  const saveProduct = async (productId: string) => {
-    const product = products.find(p => p.id === productId);
+  const saveProduct = useCallback(async (productId: string) => {
+    const product = products.find((p) => p.id === productId);
     if (!product) return;
+    const draft = editDrafts[productId] || {};
+    const merged = { ...product, ...draft };
 
     try {
       const updatedProduct = await posService.updateProduct(productId, {
-        sku: product.sku,
-        barcode: product.barcode,
-        name: product.name,
-        description: product.description,
-        category: product.category,
-        unit_price: product.unit_price,
-        cost_price: product.cost_price,
-        tax_rate: product.tax_rate,
-        quantity_on_hand: product.quantity_on_hand,
-        reorder_level: product.reorder_level,
-        reorder_quantity: product.reorder_quantity,
-        is_active: product.is_active,
-        vendor_id: product.vendor_id,
-        image_url: product.image_url,
-        display_order: product.display_order,
+        sku: merged.sku,
+        barcode: merged.barcode,
+        name: merged.name,
+        description: merged.description,
+        category: merged.category,
+        unit_price: merged.unit_price,
+        cost_price: merged.cost_price,
+        tax_rate: merged.tax_rate,
+        quantity_on_hand: merged.quantity_on_hand,
+        reorder_level: merged.reorder_level,
+        reorder_quantity: merged.reorder_quantity,
+        is_active: merged.is_active,
+        vendor_id: merged.vendor_id,
+        image_url: merged.image_url,
+        display_order: merged.display_order,
       });
       setProducts((prev) =>
         prev.map((row) => (row.id === productId ? { ...row, ...updatedProduct } : row))
       );
-      setEditingRows(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(productId);
-        return newSet;
+      setEditingRows((prev) => {
+        const next = new Set(prev);
+        next.delete(productId);
+        return next;
+      });
+      setEditDrafts((prev) => {
+        if (!prev[productId]) return prev;
+        const next = { ...prev };
+        delete next[productId];
+        return next;
       });
       setError(null);
     } catch (error) {
       console.error('Failed to save product:', error);
       setError('Failed to save product changes. Please try again.');
     }
-  };
+  }, [products, editDrafts]);
 
   const addNewProduct = async () => {
     if (!currentOutlet?.id || !newProduct.name) return;
@@ -521,37 +556,59 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
         auto_pricing: autoPricingEnabled,
       };
 
-      await posService.createProduct(productToCreate);
+      const createdProduct = await posService.createProduct(productToCreate);
+
+      const normalizedSearch = searchQuery.trim().toLowerCase();
+      const matchesSearch =
+        !normalizedSearch ||
+        createdProduct.name.toLowerCase().includes(normalizedSearch) ||
+        createdProduct.sku.toLowerCase().includes(normalizedSearch) ||
+        (createdProduct.barcode || '').toLowerCase().includes(normalizedSearch);
+      const matchesCategory =
+        !selectedCategory ||
+        String(createdProduct.category || '').trim() === selectedCategory;
+
+      if (matchesSearch && matchesCategory) {
+        setProducts((prev) => {
+          const existingIndex = prev.findIndex((row) => row.id === createdProduct.id);
+          if (existingIndex >= 0) {
+            const next = [...prev];
+            next[existingIndex] = { ...prev[existingIndex], ...createdProduct };
+            return next;
+          }
+          return [createdProduct, ...prev];
+        });
+      }
+
       setNewProduct({});
       setNewProductSellingPriceManuallyEdited(false);
       setShowNewRow(false);
       setError(null);
-      await loadProducts();
     } catch (error) {
       console.error('Failed to add product:', error);
       setError('Failed to add product. Please check required fields and try again.');
     }
   };
 
-  const toggleSelectProduct = (productId: string) => {
-    setSelectedProducts(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(productId)) {
-        newSet.delete(productId);
+  const toggleSelectProduct = useCallback((productId: string) => {
+    setSelectedProducts((prev) => {
+      const next = new Set(prev);
+      if (next.has(productId)) {
+        next.delete(productId);
       } else {
-        newSet.add(productId);
+        next.add(productId);
       }
-      return newSet;
+      return next;
     });
-  };
+  }, []);
 
-  const selectAllProducts = () => {
+  const selectAllProducts = useCallback(() => {
     if (selectedProducts.size === products.length) {
       setSelectedProducts(new Set());
     } else {
-      setSelectedProducts(new Set(products.map(p => p.id)));
+      setSelectedProducts(new Set(products.map((p) => p.id)));
     }
-  };
+  }, [products, selectedProducts]);
 
   // Handle add product via prop or internal state
   const handleShowNewRow = () => {
@@ -567,6 +624,208 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     handleShowNewRow,
     refresh: loadProducts
   }));
+
+  const productRows = useMemo(
+    () =>
+      products.map((product) => {
+        const isEditing = editingRows.has(product.id);
+        const isSelected = selectedProducts.has(product.id);
+        const draft = editDrafts[product.id] || {};
+
+        const barcodeValue = String(draft.barcode ?? product.barcode ?? '');
+        const nameValue = String(draft.name ?? product.name ?? '');
+        const categoryValue = String(draft.category ?? product.category ?? '');
+        const costPriceValue = Number(draft.cost_price ?? product.cost_price ?? 0);
+        const unitPriceValue = Number(draft.unit_price ?? product.unit_price ?? 0);
+        const quantityValue = Number(draft.quantity_on_hand ?? product.quantity_on_hand ?? 0);
+        const reorderLevelValue = Number(draft.reorder_level ?? product.reorder_level ?? 0);
+        const isActiveValue =
+          typeof draft.is_active === 'boolean' ? draft.is_active : product.is_active;
+
+        return (
+          <tr key={product.id} className={`hover:bg-slate-50 ${isSelected ? 'bg-indigo-50' : ''}`}>
+            <td className="p-4">
+              <input
+                type="checkbox"
+                checked={isSelected}
+                onChange={() => toggleSelectProduct(product.id)}
+                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              />
+            </td>
+            <td className="p-4 font-mono text-sm text-slate-600">{product.sku}</td>
+            <td className="p-4">
+              {isEditing ? (
+                <input
+                  type="text"
+                  defaultValue={barcodeValue}
+                  onBlur={(e) => handleCellEdit(product.id, 'barcode', e.target.value)}
+                  className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 font-mono text-sm"
+                />
+              ) : (
+                <span className="font-mono text-sm text-slate-500">{product.barcode || '—'}</span>
+              )}
+            </td>
+            <td className="p-4">
+              {isEditing ? (
+                <input
+                  type="text"
+                  defaultValue={nameValue}
+                  onBlur={(e) => handleCellEdit(product.id, 'name', e.target.value)}
+                  className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500"
+                />
+              ) : (
+                <div>
+                  <div className="font-medium text-slate-900">{product.name}</div>
+                  {product.description && (
+                    <div className="text-sm text-slate-500">{product.description}</div>
+                  )}
+                </div>
+              )}
+            </td>
+            <td className="p-4">
+              {isEditing ? (
+                <select
+                  value={categoryValue}
+                  onChange={(e) => handleCellEdit(product.id, 'category', e.target.value)}
+                  className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500"
+                >
+                  <option value="">Uncategorized</option>
+                  {categoryOptions.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="px-2 py-1 bg-slate-100 text-slate-700 rounded-full text-sm">
+                  {product.category || 'Uncategorized'}
+                </span>
+              )}
+            </td>
+            <td className="p-4 text-right font-mono">
+              {isEditing ? (
+                <input
+                  type="number"
+                  defaultValue={costPriceValue}
+                  onBlur={(e) => handleCellEdit(product.id, 'cost_price', parseFloat(e.target.value) || 0)}
+                  className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 text-right"
+                />
+              ) : (
+                formatCurrency(product.cost_price || 0)
+              )}
+            </td>
+            <td className="p-4 text-right font-mono font-semibold">
+              {isEditing ? (
+                <input
+                  type="number"
+                  defaultValue={unitPriceValue}
+                  onBlur={(e) => handleCellEdit(product.id, 'unit_price', parseFloat(e.target.value) || 0)}
+                  className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 text-right"
+                />
+              ) : (
+                formatCurrency(product.unit_price)
+              )}
+            </td>
+            <td className="p-4 text-right">
+              {isEditing ? (
+                <input
+                  type="number"
+                  defaultValue={quantityValue}
+                  onBlur={(e) => handleCellEdit(product.id, 'quantity_on_hand', parseInt(e.target.value) || 0)}
+                  className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 text-right"
+                />
+              ) : (
+                <span
+                  className={`font-semibold ${
+                    product.quantity_on_hand <= product.reorder_level
+                      ? 'text-red-600'
+                      : 'text-slate-900'
+                  }`}
+                >
+                  {product.quantity_on_hand}
+                </span>
+              )}
+            </td>
+            <td className="p-4 text-right">
+              {isEditing ? (
+                <input
+                  type="number"
+                  defaultValue={reorderLevelValue}
+                  onBlur={(e) => handleCellEdit(product.id, 'reorder_level', parseInt(e.target.value) || 0)}
+                  className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 text-right"
+                />
+              ) : (
+                product.reorder_level
+              )}
+            </td>
+            <td className="p-4 text-center">
+              <span
+                className={`px-2 py-1 rounded-full text-xs font-medium ${
+                  !isActiveValue
+                    ? 'bg-red-100 text-red-800'
+                    : product.quantity_on_hand === 0
+                      ? 'bg-red-100 text-red-800'
+                      : product.quantity_on_hand <= product.reorder_level
+                        ? 'bg-yellow-100 text-yellow-800'
+                        : 'bg-green-100 text-green-800'
+                }`}
+              >
+                {!isActiveValue
+                  ? 'Inactive'
+                  : product.quantity_on_hand === 0
+                    ? 'Out of Stock'
+                    : product.quantity_on_hand <= product.reorder_level
+                      ? 'Low Stock'
+                      : 'In Stock'}
+              </span>
+            </td>
+            <td className="p-4">
+              <div className="flex items-center space-x-1">
+                {isEditing ? (
+                  <>
+                    <button
+                      onClick={() => void saveProduct(product.id)}
+                      className="p-1 text-green-600 hover:bg-green-100 rounded transition-colors"
+                      title="Save"
+                    >
+                      <Save className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => cancelEditingProduct(product.id)}
+                      className="p-1 text-red-600 hover:bg-red-100 rounded transition-colors"
+                      title="Cancel"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => startEditingProduct(product.id)}
+                    className="p-1 text-slate-600 hover:bg-slate-100 rounded transition-colors"
+                    title="Edit"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </td>
+          </tr>
+        );
+      }),
+    [
+      products,
+      editingRows,
+      selectedProducts,
+      editDrafts,
+      categoryOptions,
+      formatCurrency,
+      handleCellEdit,
+      toggleSelectProduct,
+      saveProduct,
+      startEditingProduct,
+      cancelEditingProduct,
+    ]
+  );
 
   return (
     <div className="h-full min-h-0 bg-slate-50 flex flex-col">
@@ -766,177 +1025,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                 )}
 
                 {/* Existing Products */}
-                {products.map(product => {
-                  const isEditing = editingRows.has(product.id);
-                  const isSelected = selectedProducts.has(product.id);
-
-                  return (
-                    <tr key={product.id} className={`hover:bg-slate-50 ${isSelected ? 'bg-indigo-50' : ''}`}>
-                      <td className="p-4">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleSelectProduct(product.id)}
-                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                        />
-                      </td>
-                      <td className="p-4 font-mono text-sm text-slate-600">{product.sku}</td>
-                      <td className="p-4">
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            value={product.barcode || ''}
-                            onChange={(e) => handleCellEdit(product.id, 'barcode', e.target.value)}
-                            className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 font-mono text-sm"
-                          />
-                        ) : (
-                          <span className="font-mono text-sm text-slate-500">{product.barcode || '—'}</span>
-                        )}
-                      </td>
-                      <td className="p-4">
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            value={product.name}
-                            onChange={(e) => handleCellEdit(product.id, 'name', e.target.value)}
-                            className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500"
-                          />
-                        ) : (
-                          <div>
-                            <div className="font-medium text-slate-900">{product.name}</div>
-                            {product.description && (
-                              <div className="text-sm text-slate-500">{product.description}</div>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                      <td className="p-4">
-                        {isEditing ? (
-                          <select
-                            value={product.category || ''}
-                            onChange={(e) => handleCellEdit(product.id, 'category', e.target.value)}
-                            className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500"
-                          >
-                            <option value="">Uncategorized</option>
-                            {categoryOptions.map((cat) => (
-                              <option key={cat} value={cat}>{cat}</option>
-                            ))}
-                          </select>
-                        ) : (
-                          <span className="px-2 py-1 bg-slate-100 text-slate-700 rounded-full text-sm">
-                            {product.category}
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-4 text-right font-mono">
-                        {isEditing ? (
-                          <input
-                            type="number"
-                            value={product.cost_price}
-                            onChange={(e) => handleCellEdit(product.id, 'cost_price', parseFloat(e.target.value) || 0)}
-                            className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 text-right"
-                          />
-                        ) : (
-                          formatCurrency(product.cost_price || 0)
-                        )}
-                      </td>
-                      <td className="p-4 text-right font-mono font-semibold">
-                        {isEditing ? (
-                          <input
-                            type="number"
-                            value={product.unit_price}
-                            onChange={(e) => handleCellEdit(product.id, 'unit_price', parseFloat(e.target.value) || 0)}
-                            className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 text-right"
-                          />
-                        ) : (
-                          formatCurrency(product.unit_price)
-                        )}
-                      </td>
-                      <td className="p-4 text-right">
-                        {isEditing ? (
-                          <input
-                            type="number"
-                            value={product.quantity_on_hand}
-                            onChange={(e) => handleCellEdit(product.id, 'quantity_on_hand', parseInt(e.target.value) || 0)}
-                            className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 text-right"
-                          />
-                        ) : (
-                          <span className={`font-semibold ${product.quantity_on_hand <= product.reorder_level
-                              ? 'text-red-600'
-                              : 'text-slate-900'
-                            }`}>
-                            {product.quantity_on_hand}
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-4 text-right">
-                        {isEditing ? (
-                          <input
-                            type="number"
-                            value={product.reorder_level}
-                            onChange={(e) => handleCellEdit(product.id, 'reorder_level', parseInt(e.target.value) || 0)}
-                            className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 text-right"
-                          />
-                        ) : (
-                          product.reorder_level
-                        )}
-                      </td>
-                      <td className="p-4 text-center">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${!product.is_active
-                            ? 'bg-red-100 text-red-800'
-                            : product.quantity_on_hand === 0
-                              ? 'bg-red-100 text-red-800'
-                              : product.quantity_on_hand <= product.reorder_level
-                                ? 'bg-yellow-100 text-yellow-800'
-                                : 'bg-green-100 text-green-800'
-                          }`}>
-                          {!product.is_active ? 'Inactive' :
-                            product.quantity_on_hand === 0 ? 'Out of Stock' :
-                              product.quantity_on_hand <= product.reorder_level ? 'Low Stock' : 'In Stock'}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex items-center space-x-1">
-                          {isEditing ? (
-                            <>
-                              <button
-                                onClick={() => saveProduct(product.id)}
-                                className="p-1 text-green-600 hover:bg-green-100 rounded transition-colors"
-                                title="Save"
-                              >
-                                <Save className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setEditingRows(prev => {
-                                    const newSet = new Set(prev);
-                                    newSet.delete(product.id);
-                                    return newSet;
-                                  });
-                                  loadProducts(); // Revert changes
-                                }}
-                                className="p-1 text-red-600 hover:bg-red-100 rounded transition-colors"
-                                title="Cancel"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </>
-                          ) : (
-                            <button
-                              onClick={() => {
-                                setEditingRows(prev => new Set([...prev, product.id]));
-                              }}
-                              className="p-1 text-slate-600 hover:bg-slate-100 rounded transition-colors"
-                              title="Edit"
-                            >
-                              <Edit3 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {productRows}
               </tbody>
             </table>
           </div>
