@@ -85,8 +85,10 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
   });
   const [departmentPolicyDrafts, setDepartmentPolicyDrafts] = useState<Record<string, DepartmentPolicyDraft>>({});
   const [departmentSavingId, setDepartmentSavingId] = useState<string | null>(null);
+  const [hasDeferredCatalogRefresh, setHasDeferredCatalogRefresh] = useState(false);
   const loadRequestRef = useRef(0);
   const newBarcodeInputRef = useRef<HTMLInputElement | null>(null);
+  const hasActiveEditorRef = useRef(false);
 
   const categoryOptions = useMemo(() => {
     const byKey = new Map<string, string>();
@@ -138,7 +140,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     [departmentPolicyByName]
   );
 
-  const loadDepartments = async () => {
+  const loadDepartments = useCallback(async () => {
     if (!currentOutlet?.id) {
       setDepartments([]);
       return;
@@ -151,15 +153,19 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
       console.error('Failed to load departments:', err);
       setDepartments([]);
     }
-  };
+  }, [currentOutlet?.id]);
 
   useEffect(() => {
-    void loadProducts('background');
+    void loadProducts('cache-only');
   }, [currentOutlet?.id]);
 
   useEffect(() => {
     const handleProductsSynced = () => {
-      void loadProducts('cache-only');
+      if (hasActiveEditorRef.current) {
+        setHasDeferredCatalogRefresh(true);
+        return;
+      }
+      void loadProducts('cache-only', { silent: true });
     };
     window.addEventListener('pos-products-synced', handleProductsSynced);
     return () => window.removeEventListener('pos-products-synced', handleProductsSynced);
@@ -167,7 +173,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
 
   useEffect(() => {
     void loadDepartments();
-  }, [currentOutlet?.id]);
+  }, [loadDepartments]);
 
   useEffect(() => {
     if (!selectedCategory) return;
@@ -215,10 +221,13 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     clearMissingProductIntent();
   }, [location.search]);
 
-  const loadProducts = async (mode: 'background' | 'cache-only' = 'background') => {
+  const loadProducts = useCallback(async (
+    mode: 'sync' | 'cache-only' = 'cache-only',
+    options?: { silent?: boolean }
+  ) => {
     if (!currentOutlet?.id) {
       setProducts([]);
-      setIsLoading(false);
+      if (!options?.silent) setIsLoading(false);
       return;
     }
 
@@ -226,7 +235,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     const requestId = ++loadRequestRef.current;
 
     try {
-      setIsLoading(true);
+      if (!options?.silent) setIsLoading(true);
       const cached = await posService.getCachedProducts(outletId, {
         activeOnly: false, // Show all products including inactive
         page: 1,
@@ -237,9 +246,9 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
       const hasCached = (cached.items || []).length > 0;
       setProducts(cached.items || []);
       setError(null);
-      setIsLoading(false);
+      if (!options?.silent) setIsLoading(false);
 
-      if (mode === 'cache-only') {
+      if (mode !== 'sync') {
         return;
       }
 
@@ -268,9 +277,9 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
       if (requestId !== loadRequestRef.current) return;
       console.error('Failed to load products:', err);
       setError('Failed to load products from server/cache. Check connection and try again.');
-      setIsLoading(false);
+      if (!options?.silent) setIsLoading(false);
     }
-  };
+  }, [currentOutlet?.id]);
 
   const formatCurrency = useCallback((amount: number): string => {
     return new Intl.NumberFormat('en-NG', {
@@ -327,6 +336,17 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     () => paginatedProducts.reduce((count, product) => (selectedProducts.has(product.id) ? count + 1 : count), 0),
     [paginatedProducts, selectedProducts]
   );
+  const hasActiveEditor = showNewRow || editingRows.size > 0;
+
+  useEffect(() => {
+    hasActiveEditorRef.current = hasActiveEditor;
+  }, [hasActiveEditor]);
+
+  useEffect(() => {
+    if (hasActiveEditor || !hasDeferredCatalogRefresh) return;
+    setHasDeferredCatalogRefresh(false);
+    void loadProducts('cache-only', { silent: true });
+  }, [hasActiveEditor, hasDeferredCatalogRefresh]);
 
   const handleCellEdit = useCallback((productId: string, field: keyof POSProduct, value: any) => {
     setEditDrafts((prev) => ({
@@ -654,7 +674,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
   useImperativeHandle(ref, () => ({
     handleShowNewRow,
     refresh: () => {
-      void loadProducts('background');
+      void loadProducts('sync');
     },
   }));
 
@@ -903,7 +923,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
 
             <button
               onClick={() => {
-                void loadProducts('background');
+                void loadProducts('sync');
               }}
               className="touch-target-sm bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
             >
@@ -911,6 +931,11 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
             </button>
           </div>
         </div>
+        {hasDeferredCatalogRefresh && hasActiveEditor && (
+          <div className="mt-2 text-xs font-medium text-amber-700">
+            Catalog updated in background. Changes will apply after you finish editing.
+          </div>
+        )}
       </div>
 
       {/* Excel-like Table */}
