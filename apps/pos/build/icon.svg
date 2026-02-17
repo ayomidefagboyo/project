@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded square background — deep navy brand color -->
+  <rect width="512" height="512" rx="96" ry="96" fill="url(#bg)"/>
+
+  <!-- Stylised "C" lettermark — clean, bold, modern -->
+  <path d="
+    M 296 148
+    A 130 130 0 1 0 296 364
+    L 270 326
+    A 90 90 0 1 1 270 186
+    Z
+  " fill="white"/>
+
+  <!-- Accent dot — brand orange -->
+  <circle cx="340" cy="256" r="20" fill="#ea580c"/>
+</svg>
