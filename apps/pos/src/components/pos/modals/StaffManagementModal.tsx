@@ -51,8 +51,17 @@ const StaffManagementModal: React.FC<StaffManagementModalProps> = ({ isOpen, onC
     { value: 'waiter', label: 'Waiter', description: 'Take orders and serve customers' },
     { value: 'kitchen_staff', label: 'Kitchen Staff', description: 'Prepare food and beverages' },
     { value: 'inventory_staff', label: 'Inventory Staff', description: 'Manage stock and inventory' },
-    { value: 'accountant', label: 'Accountant', description: 'Handle financial records and reports' },
+    { value: 'pharmacist', label: 'Pharmacist', description: 'Manage patient records and pharmacy care notes' },
   ];
+
+  const normalizeRole = (role: string): UserRole =>
+    (role === 'accountant' ? 'pharmacist' : role) as UserRole;
+
+  const getRoleLabel = (role: string): string => {
+    if (role === 'pharmacist' || role === 'accountant') return 'Pharmacist';
+    const match = availableRoles.find((item) => item.value === role);
+    return match?.label || role.replace(/_/g, ' ');
+  };
 
   // Load staff profiles when modal opens
   useEffect(() => {
@@ -166,7 +175,7 @@ const StaffManagementModal: React.FC<StaffManagementModalProps> = ({ isOpen, onC
       display_name: profile.display_name,
       pin: '', // Don't show existing PIN
       confirmPin: '',
-      role: profile.role,
+      role: normalizeRole(profile.role),
       permissions: profile.permissions
     });
     setShowAddForm(true);
@@ -297,7 +306,7 @@ const StaffManagementModal: React.FC<StaffManagementModalProps> = ({ isOpen, onC
                             <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
                               {profile.staff_code}
                             </span>
-                            <span className="capitalize">{profile.role}</span>
+                            <span className="capitalize">{getRoleLabel(profile.role)}</span>
                           </div>
                         </div>
                         {!profile.is_active && (

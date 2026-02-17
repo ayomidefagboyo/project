@@ -8,6 +8,7 @@ import ReceiveItemsPage from './pages/ReceiveItemsPage';
 import SettingsPage from './pages/SettingsPage';
 import StocktakingPage from './pages/StocktakingPage';
 import TransferToOutletPage from './pages/TransferToOutletPage';
+import PharmacyPatientsPage from './pages/PharmacyPatientsPage';
 import AppLayout from './components/layout/AppLayout';
 import { OutletProvider, useOutlet } from './contexts/OutletContext';
 import { Upload, Download, Plus, Wifi, WifiOff, ChevronDown } from 'lucide-react';
@@ -515,6 +516,15 @@ function AppContent() {
     </div>
   );
 
+  const pharmacyPatientsHeader = (
+    <div className="flex items-center justify-end w-full">
+      <div className="text-right">
+        <h2 className="text-lg sm:text-xl font-bold text-slate-900">Pharmacy Patients</h2>
+        <p className="text-sm text-stone-500">Capture patient profiles and vitals from the POS terminal.</p>
+      </div>
+    </div>
+  );
+
   // Handle different terminal phases
   if (terminalPhase === 'setup') {
     return <TerminalSetup onSetupComplete={handleTerminalSetup} />;
@@ -533,6 +543,7 @@ function AppContent() {
   // Operational phase - normal POS functionality
   const normalizedStaffRole = (currentStaff?.role || '').toLowerCase();
   const isManager = normalizedStaffRole === 'manager';
+  const isPharmacist = normalizedStaffRole === 'pharmacist' || normalizedStaffRole === 'accountant';
   const canAccessSettings = isManager;
   const canAccessReceive = normalizedStaffRole !== 'cashier';
   const canAccessEod = normalizedStaffRole !== 'cashier';
@@ -544,6 +555,8 @@ function AppContent() {
         ? stocktakingHeader
         : location.pathname === '/transfer-outlet'
           ? transferOutletHeader
+          : location.pathname === '/patients'
+            ? pharmacyPatientsHeader
       : location.pathname === '/'
         ? posTerminalHeader
         : null; // EOD and other pages handle their own headers
@@ -557,6 +570,7 @@ function AppContent() {
         <Route path="/receive" element={canAccessReceive ? <ReceiveItemsPage /> : <Navigate to="/" replace />} />
         <Route path="/stocktaking" element={isManager ? <StocktakingPage /> : <Navigate to="/" replace />} />
         <Route path="/transfer-outlet" element={isManager ? <TransferToOutletPage /> : <Navigate to="/" replace />} />
+        <Route path="/patients" element={isPharmacist ? <PharmacyPatientsPage /> : <Navigate to="/" replace />} />
         <Route path="/eod" element={canAccessEod ? <POSEODDashboard /> : <Navigate to="/" replace />} />
         <Route path="/settings" element={canAccessSettings ? <SettingsPage /> : <Navigate to="/" replace />} />
         <Route path="/auth" element={<AuthWrapper onAuthSuccess={() => window.location.href = '/'} />} />

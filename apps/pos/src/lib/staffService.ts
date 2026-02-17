@@ -166,10 +166,21 @@ class StaffService {
         'manage_inventory',
         'view_reports'
       ],
+      'pharmacist': [
+        'view_dashboard',
+        'create_sales',
+        'view_inventory',
+        'manage_inventory',
+        'view_reports',
+        'view_analytics'
+      ],
+      // Backward compatibility for legacy staff profiles
       'accountant': [
         'view_dashboard',
+        'create_sales',
+        'view_inventory',
+        'manage_inventory',
         'view_reports',
-        'generate_reports',
         'view_analytics'
       ]
     };

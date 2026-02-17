@@ -19,6 +19,8 @@ class UserRole(str, Enum):
     WAITER = "waiter"
     KITCHEN_STAFF = "kitchen_staff"
     INVENTORY_STAFF = "inventory_staff"
+    PHARMACIST = "pharmacist"
+    # Legacy alias retained for backward compatibility
     ACCOUNTANT = "accountant"
     VIEWER = "viewer"
 
@@ -225,4 +227,3 @@ class AcceptInviteRequest(BaseModel):
         if not any(c.isdigit() for c in v):
             raise ValueError('Password must contain at least one digit')
         return v
-

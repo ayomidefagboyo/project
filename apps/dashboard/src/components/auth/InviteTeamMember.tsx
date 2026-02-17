@@ -77,7 +77,7 @@ const InviteTeamMember: React.FC<InviteTeamMemberProps> = ({ onClose }) => {
 
   const roleOptions = [
     { value: 'manager', label: 'Manager' },
-    { value: 'accountant', label: 'Accountant' },
+    { value: 'pharmacist', label: 'Pharmacist' },
     { value: 'cashier', label: 'Cashier' },
     { value: 'outlet_staff', label: 'Staff Member' },
     { value: 'inventory_staff', label: 'Inventory Manager' },
@@ -222,4 +222,3 @@ const InviteTeamMember: React.FC<InviteTeamMemberProps> = ({ onClose }) => {
 };
 
 export default InviteTeamMember;
-

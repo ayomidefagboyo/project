@@ -10,7 +10,7 @@ export type AnomalyType = 'duplicate_payment' | 'price_spike' | 'missing_info' |
 
 export type BusinessType = 'supermarket' | 'restaurant' | 'lounge' | 'retail' | 'cafe';
 
-export type UserRole = 'business_owner' | 'outlet_admin' | 'outlet_staff' | 'super_admin' | 'manager' | 'cashier' | 'waiter' | 'kitchen_staff' | 'inventory_staff' | 'accountant' | 'viewer';
+export type UserRole = 'business_owner' | 'outlet_admin' | 'outlet_staff' | 'super_admin' | 'manager' | 'cashier' | 'waiter' | 'kitchen_staff' | 'inventory_staff' | 'pharmacist' | 'accountant' | 'viewer';
 
 export type OutletStatus = 'active' | 'inactive' | 'maintenance' | 'closed';
 
