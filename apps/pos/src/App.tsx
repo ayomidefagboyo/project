@@ -268,28 +268,6 @@ function AppContent() {
     setTerminalPhase('staff_auth');
   };
 
-  // Handle authentication routing
-  if (location.pathname === '/auth') {
-    return <AuthWrapper onAuthSuccess={() => { reInitAuth(); navigate('/', { replace: true }); }} />;
-  }
-
-  // Show loading state
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Redirect to auth if not authenticated (except for auth page)
-  if (!currentUser) {
-    return <Navigate to="/auth" replace />;
-  }
-
   // Format currency helper
   const formatCurrency = (amount: number): string => {
     return new Intl.NumberFormat('en-NG', {
@@ -461,6 +439,28 @@ function AppContent() {
     window.addEventListener('keydown', handleGlobalScannerInput);
     return () => window.removeEventListener('keydown', handleGlobalScannerInput);
   }, [terminalPhase, location.pathname, handleBarcodeScan]);
+
+  // Handle authentication routing
+  if (location.pathname === '/auth') {
+    return <AuthWrapper onAuthSuccess={() => { reInitAuth(); navigate('/', { replace: true }); }} />;
+  }
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Redirect to auth if not authenticated (except for auth page)
+  if (!currentUser) {
+    return <Navigate to="/auth" replace />;
+  }
 
   // Header content for POS terminal page
   const posTerminalHeader = (
