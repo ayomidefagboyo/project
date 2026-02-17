@@ -81,6 +81,13 @@ const normalizeVendor = (raw: any): VendorOption => ({
   phone: raw?.phone || undefined,
 });
 
+const extractVendorRows = (payload: any): any[] => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.items)) return payload.items;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+};
+
 const parseNumber = (value: string, fallback = 0): number => {
   const next = Number(value);
   if (Number.isNaN(next)) return fallback;
@@ -405,7 +412,14 @@ const ReceiveItemsPage: React.FC = () => {
     const load = async () => {
       try {
         const [vendorRes, cachedProducts, departmentRes] = await Promise.all([
-          vendorService.getVendors(currentOutlet.id),
+          vendorService.getVendors(currentOutlet.id).catch((vendorError) => ({
+            data: null,
+            error:
+              vendorError instanceof Error
+                ? vendorError.message
+                : 'Failed to fetch vendors',
+            status: 0,
+          })),
           posService.getCachedProducts(currentOutlet.id, {
             activeOnly: false,
             page: 1,
@@ -414,11 +428,10 @@ const ReceiveItemsPage: React.FC = () => {
           posService.getDepartments(currentOutlet.id).catch(() => []),
         ]);
 
-        if (vendorRes.data) {
-          const normalized = (vendorRes.data as any[])
-            .map(normalizeVendor)
-            .filter((vendor) => vendor.id);
-          setVendors(normalized);
+        const vendorRows = extractVendorRows((vendorRes as any).data);
+        setVendors(vendorRows.map(normalizeVendor).filter((vendor) => vendor.id));
+        if ((vendorRes as any).error) {
+          console.warn('Vendor list failed to load:', (vendorRes as any).error);
         }
 
         const localProducts = cachedProducts.items || [];
