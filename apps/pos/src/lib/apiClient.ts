@@ -6,6 +6,20 @@ import logger from './logger';
 import { ApiClientBase } from '../../../../shared/services/apiClientBase';
 import { resolveApiBaseUrl } from '../../../../shared/services/urlResolver';
 
+const STAFF_SESSION_STORAGE_KEY = 'pos_staff_session';
+
+const clearExpiredStaffSession = () => {
+  try {
+    localStorage.removeItem(STAFF_SESSION_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('pos-staff-session-expired'));
+  }
+};
+
 class ApiClient extends ApiClientBase {
   constructor() {
     const resolvedApiBase = resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
@@ -22,15 +36,28 @@ class ApiClient extends ApiClientBase {
       },
       getAdditionalHeaders: async () => {
         try {
-          const raw = localStorage.getItem('pos_staff_session');
+          const raw = localStorage.getItem(STAFF_SESSION_STORAGE_KEY);
           if (!raw) return {};
           const parsed = JSON.parse(raw);
           const sessionToken = parsed?.session_token;
-          if (!sessionToken || typeof sessionToken !== 'string') return {};
+          if (!sessionToken || typeof sessionToken !== 'string') {
+            return {};
+          }
+
+          const expiresAtRaw = parsed?.expires_at;
+          if (typeof expiresAtRaw === 'string' && expiresAtRaw.trim().length > 0) {
+            const expiryTs = new Date(expiresAtRaw).getTime();
+            if (!Number.isNaN(expiryTs) && expiryTs <= Date.now()) {
+              clearExpiredStaffSession();
+              return {};
+            }
+          }
+
           return {
-            'X-POS-Staff-Session': sessionToken
+            'X-POS-Staff-Session': sessionToken.trim()
           };
         } catch {
+          clearExpiredStaffSession();
           return {};
         }
       },
