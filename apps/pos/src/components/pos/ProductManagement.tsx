@@ -415,7 +415,26 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     if (!product) return;
 
     try {
-      await posService.updateProduct(productId, product);
+      const updatedProduct = await posService.updateProduct(productId, {
+        sku: product.sku,
+        barcode: product.barcode,
+        name: product.name,
+        description: product.description,
+        category: product.category,
+        unit_price: product.unit_price,
+        cost_price: product.cost_price,
+        tax_rate: product.tax_rate,
+        quantity_on_hand: product.quantity_on_hand,
+        reorder_level: product.reorder_level,
+        reorder_quantity: product.reorder_quantity,
+        is_active: product.is_active,
+        vendor_id: product.vendor_id,
+        image_url: product.image_url,
+        display_order: product.display_order,
+      });
+      setProducts((prev) =>
+        prev.map((row) => (row.id === productId ? { ...row, ...updatedProduct } : row))
+      );
       setEditingRows(prev => {
         const newSet = new Set(prev);
         newSet.delete(productId);

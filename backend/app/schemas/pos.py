@@ -148,6 +148,8 @@ class POSProductCreate(POSProductBase):
 
 class POSProductUpdate(BaseModel):
     """Schema for updating a product"""
+    sku: Optional[str] = Field(None, max_length=100)
+    barcode: Optional[str] = Field(None, max_length=100)
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
     category: Optional[str] = Field(None, max_length=100)
