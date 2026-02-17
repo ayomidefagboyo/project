@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Truck, Plus, Minus } from 'lucide-react';
+import { X, Truck, Plus, Minus, ChevronDown, ChevronUp } from 'lucide-react';
 import { posService } from '@/lib/posService';
 import type { POSProduct } from '@/lib/posService';
 import { useOutlet } from '@/contexts/OutletContext';
@@ -27,6 +27,7 @@ const ReceiveStockModal: React.FC<ReceiveStockModalProps> = ({ isOpen, onClose, 
   const [products, setProducts] = useState<POSProduct[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<string>('');
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
+  const [showDeliveryNotes, setShowDeliveryNotes] = useState(false);
   const [deliveryInfo, setDeliveryInfo] = useState({
     supplier_reference: '',
     delivery_notes: '',
@@ -98,7 +99,6 @@ const ReceiveStockModal: React.FC<ReceiveStockModalProps> = ({ isOpen, onClose, 
 
     setIsLoading(true);
     try {
-      // Create stock movements for each item
       // Create stock receipts for all items
       await posService.receiveStock(stockItems.map(item => ({
         product_id: item.product_id,
@@ -137,78 +137,86 @@ const ReceiveStockModal: React.FC<ReceiveStockModalProps> = ({ isOpen, onClose, 
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-6 border-b">
-          <div className="flex items-center space-x-3">
-            <Truck className="w-6 h-6 text-green-600" />
-            <h2 className="text-xl font-bold text-gray-900">Receive Stock Delivery</h2>
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 dark:border-gray-700 shrink-0">
+          <div className="flex items-center gap-2">
+            <Truck className="w-5 h-5 text-green-600" />
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Receive Stock Delivery</h2>
           </div>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-lg"
+            className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5 text-gray-500" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {/* Delivery Information */}
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Delivery Information</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Supplier Reference
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+          {/* Compact Delivery Info Bar */}
+          <div className="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-5 py-2.5 shrink-0">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="flex-1 min-w-[140px]">
+                <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-0.5">
+                  Invoice / PO #
                 </label>
                 <input
                   type="text"
                   value={deliveryInfo.supplier_reference}
                   onChange={(e) => setDeliveryInfo(prev => ({ ...prev, supplier_reference: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  placeholder="Invoice/PO number"
+                  className="w-full px-2.5 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  placeholder="e.g. INV-001"
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Delivery Date
+              <div className="w-[150px]">
+                <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-0.5">
+                  Date
                 </label>
                 <input
                   type="date"
                   value={deliveryInfo.delivery_date}
                   onChange={(e) => setDeliveryInfo(prev => ({ ...prev, delivery_date: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  className="w-full px-2.5 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 focus:border-transparent"
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Delivery Notes
-                </label>
+              <button
+                type="button"
+                onClick={() => setShowDeliveryNotes(!showDeliveryNotes)}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-md transition-colors"
+              >
+                {showDeliveryNotes ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                Notes
+              </button>
+            </div>
+
+            {showDeliveryNotes && (
+              <div className="mt-2">
                 <input
                   type="text"
                   value={deliveryInfo.delivery_notes}
                   onChange={(e) => setDeliveryInfo(prev => ({ ...prev, delivery_notes: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  placeholder="Additional notes"
+                  className="w-full px-2.5 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  placeholder="Delivery notes..."
                 />
               </div>
-            </div>
+            )}
           </div>
 
-          {/* Add Products */}
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Add Products to Delivery</h3>
-            <div className="flex space-x-3">
+          {/* Combined: Add Product + Line Items */}
+          <div className="flex-1 overflow-y-auto px-5 py-3">
+            {/* Add product row */}
+            <div className="flex items-center gap-2 mb-3">
               <select
                 value={selectedProduct}
                 onChange={(e) => setSelectedProduct(e.target.value)}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                className="flex-1 px-2.5 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-green-500 focus:border-transparent"
               >
                 <option value="">Select a product to add...</option>
                 {products.map(product => (
                   <option key={product.id} value={product.id}>
-                    {product.name} - {product.barcode}
+                    {product.name} {product.barcode ? `- ${product.barcode}` : ''}
                   </option>
                 ))}
               </select>
@@ -216,119 +224,119 @@ const ReceiveStockModal: React.FC<ReceiveStockModalProps> = ({ isOpen, onClose, 
                 type="button"
                 onClick={addProductToStock}
                 disabled={!selectedProduct}
-                className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+                className="flex items-center gap-1 px-3 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-40 shrink-0"
               >
-                <Plus className="w-4 h-4 mr-1" />
+                <Plus className="w-4 h-4" />
                 Add
               </button>
             </div>
-          </div>
 
-          {/* Stock Items */}
-          {stockItems.length > 0 && (
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Stock Items</h3>
-              <div className="space-y-3">
-                {stockItems.map((item, index) => (
-                  <div key={index} className="bg-white border border-gray-200 rounded-lg p-4">
-                    <div className="grid grid-cols-1 md:grid-cols-6 gap-4 items-center">
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Product</label>
-                        <div className="text-sm font-medium text-gray-900">{item.product_name}</div>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Quantity</label>
-                        <input
-                          type="number"
-                          value={item.quantity}
-                          onChange={(e) => updateStockItem(index, 'quantity', parseInt(e.target.value) || 0)}
-                          min="1"
-                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Batch Number</label>
-                        <input
-                          type="text"
-                          value={item.batch_number}
-                          onChange={(e) => updateStockItem(index, 'batch_number', e.target.value)}
-                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Expiry Date</label>
-                        <input
-                          type="date"
-                          value={item.expiry_date}
-                          onChange={(e) => updateStockItem(index, 'expiry_date', e.target.value)}
-                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Cost Price</label>
-                        <input
-                          type="number"
-                          value={item.cost_price}
-                          onChange={(e) => updateStockItem(index, 'cost_price', parseFloat(e.target.value) || 0)}
-                          min="0"
-                          step="0.01"
-                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                        />
-                      </div>
-
-                      <div>
-                        <button
-                          type="button"
-                          onClick={() => removeStockItem(index)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                        >
-                          <Minus className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+            {/* Line items table */}
+            {stockItems.length === 0 ? (
+              <div className="border-2 border-dashed border-gray-200 dark:border-gray-600 rounded-lg py-10 text-center text-sm text-gray-400 dark:text-gray-500">
+                No items added yet. Select a product above to begin.
               </div>
+            ) : (
+              <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                {/* Table header */}
+                <div className="grid grid-cols-[1fr_80px_120px_120px_100px_40px] gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-700 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                  <span>Product</span>
+                  <span>Qty</span>
+                  <span>Batch #</span>
+                  <span>Expiry</span>
+                  <span>Cost (₦)</span>
+                  <span></span>
+                </div>
 
-              {/* Summary */}
-              <div className="bg-gray-50 p-4 rounded-lg mt-4">
-                <div className="flex justify-between items-center">
-                  <div className="text-sm text-gray-600">
-                    Total Items: <span className="font-semibold">{totalItems}</span>
-                  </div>
-                  <div className="text-sm text-gray-600">
-                    Total Value: <span className="font-semibold">₦{totalValue.toLocaleString()}</span>
-                  </div>
+                {/* Table rows */}
+                <div className="divide-y divide-gray-100 dark:divide-gray-700">
+                  {stockItems.map((item, index) => (
+                    <div
+                      key={index}
+                      className="grid grid-cols-[1fr_80px_120px_120px_100px_40px] gap-2 px-3 py-2 items-center hover:bg-gray-50 dark:hover:bg-gray-750"
+                    >
+                      <div className="text-sm font-medium text-gray-900 dark:text-white truncate" title={item.product_name}>
+                        {item.product_name}
+                      </div>
+
+                      <input
+                        type="number"
+                        value={item.quantity}
+                        onChange={(e) => updateStockItem(index, 'quantity', parseInt(e.target.value) || 0)}
+                        min="1"
+                        className="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+
+                      <input
+                        type="text"
+                        value={item.batch_number}
+                        onChange={(e) => updateStockItem(index, 'batch_number', e.target.value)}
+                        className="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+
+                      <input
+                        type="date"
+                        value={item.expiry_date}
+                        onChange={(e) => updateStockItem(index, 'expiry_date', e.target.value)}
+                        className="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+
+                      <input
+                        type="number"
+                        value={item.cost_price}
+                        onChange={(e) => updateStockItem(index, 'cost_price', parseFloat(e.target.value) || 0)}
+                        min="0"
+                        step="0.01"
+                        className="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => removeStockItem(index)}
+                        className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                      >
+                        <Minus className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
-          {/* Submit Button */}
-          <div className="flex justify-end space-x-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isLoading || stockItems.length === 0}
-              className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
-            >
-              {isLoading ? (
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-              ) : (
-                <Truck className="w-4 h-4 mr-2" />
-              )}
-              Receive Stock ({stockItems.length} items)
-            </button>
+          {/* Footer: Summary + Buttons */}
+          <div className="border-t border-gray-200 dark:border-gray-700 px-5 py-3 bg-white dark:bg-gray-800 shrink-0">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400">
+                {stockItems.length > 0 && (
+                  <>
+                    <span>Items: <span className="font-semibold text-gray-900 dark:text-white">{totalItems}</span></span>
+                    <span>Total: <span className="font-semibold text-gray-900 dark:text-white">₦{totalValue.toLocaleString()}</span></span>
+                  </>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isLoading || stockItems.length === 0}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+                >
+                  {isLoading ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Truck className="w-4 h-4" />
+                  )}
+                  Receive Stock {stockItems.length > 0 && `(${stockItems.length})`}
+                </button>
+              </div>
+            </div>
           </div>
         </form>
       </div>
