@@ -547,7 +547,7 @@ const TransactionsPage: React.FC = () => {
         style: printStyle,
       });
       if (!printed.success) {
-        showError('Unable to open print flow. Allow pop-ups or configure native print bridge.');
+        showError('Receipt print failed. Configure native printer bridge (Compazz/QZ).');
         return;
       }
       success('Receipt print started.');
