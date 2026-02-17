@@ -131,6 +131,8 @@ export interface ProductCreateRequest {
   min_shelf_life_days?: number;
   batch_number?: string;
   expiry_date?: string;
+  markup_percentage?: number;
+  auto_pricing?: boolean;
 }
 
 export interface BulkImportProductsRequest {
@@ -174,6 +176,8 @@ export interface POSDepartment {
   code?: string;
   description?: string;
   sort_order?: number;
+  default_markup_percentage?: number;
+  auto_pricing_enabled?: boolean;
   is_active: boolean;
   source?: 'master' | 'product_category';
   created_at?: string;
@@ -186,6 +190,18 @@ export interface DepartmentCreateRequest {
   code?: string;
   description?: string;
   sort_order?: number;
+  default_markup_percentage?: number;
+  auto_pricing_enabled?: boolean;
+}
+
+export interface DepartmentUpdateRequest {
+  name?: string;
+  code?: string;
+  description?: string;
+  sort_order?: number;
+  default_markup_percentage?: number;
+  auto_pricing_enabled?: boolean;
+  is_active?: boolean;
 }
 
 export interface InventoryStats {
@@ -681,6 +697,19 @@ class POSService {
       return response.data;
     } catch (error) {
       logger.error('Error creating department:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  async updateDepartment(departmentId: string, payload: DepartmentUpdateRequest): Promise<POSDepartment> {
+    try {
+      const response = await apiClient.put<POSDepartment>(`${this.baseUrl}/departments/${departmentId}`, payload);
+      if (!response.data) {
+        throw new Error(response.error || 'Failed to update department');
+      }
+      return response.data;
+    } catch (error) {
+      logger.error('Error updating department:', error);
       throw this.handleError(error);
     }
   }

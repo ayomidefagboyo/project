@@ -100,8 +100,10 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent, staffRol
   const normalizedStaffRole = (staffRole || '').toLowerCase();
   const isCashier = normalizedStaffRole === 'cashier';
   const isManager = normalizedStaffRole === 'manager';
+  const isInventoryStaff = normalizedStaffRole === 'inventory_staff';
   const isPharmacist = normalizedStaffRole === 'pharmacist' || normalizedStaffRole === 'accountant';
   const canAccessSettings = normalizedStaffRole === 'manager';
+  const canAccessReceive = isManager || isPharmacist || isInventoryStaff;
 
   // Clock out handler – returns to staff auth (PIN entry), NOT main sign-in
   const handleClockOut = () => {
@@ -121,6 +123,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent, staffRol
   const visibleNavItems = navItems.filter((item) => {
     if (item.managerOnly && !isManager) return false;
     if (item.pharmacistOnly && !isPharmacist) return false;
+    if (item.path === '/receive' && !canAccessReceive) return false;
     if (isCashier && (item.path === '/receive' || item.path === '/eod')) return false;
     return true;
   });

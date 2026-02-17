@@ -10,6 +10,7 @@ from datetime import datetime, date
 from decimal import Decimal
 import uuid
 import logging
+import re
 
 from app.core.database import get_supabase_admin, Tables
 from app.core.security import CurrentUser, get_user_outlet_id
@@ -17,6 +18,74 @@ from pydantic import BaseModel, Field
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _extract_missing_column_name(exc: Exception) -> Optional[str]:
+    """Extract missing column names from PostgREST/Postgres errors."""
+    message = str(exc)
+    patterns = [
+        r"Could not find the '([^']+)' column",
+        r'column "([^"]+)" of relation "[^"]+" does not exist',
+        r'column "([^"]+)" does not exist',
+        r"column '([^']+)' does not exist",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, message, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _insert_pos_product_compat(supabase, product_data: Dict[str, Any]):
+    """Insert into pos_products, dropping unsupported columns when needed."""
+    payload = dict(product_data)
+    removed_columns: List[str] = []
+
+    for _ in range(20):
+        try:
+            return supabase.table(Tables.POS_PRODUCTS).insert(payload).execute()
+        except Exception as exc:
+            missing_column = _extract_missing_column_name(exc)
+            if missing_column and missing_column in payload:
+                payload.pop(missing_column, None)
+                removed_columns.append(missing_column)
+                logger.warning(
+                    "pos_products.%s missing in schema cache during insert; retrying without it",
+                    missing_column
+                )
+                continue
+            raise
+
+    raise Exception(
+        f"Failed to insert pos_products after compatibility retries; removed columns={removed_columns}"
+    )
+
+
+def _update_pos_product_compat(supabase, product_id: str, update_data: Dict[str, Any]):
+    """Update pos_products row, dropping unsupported columns when needed."""
+    payload = dict(update_data)
+    removed_columns: List[str] = []
+
+    for _ in range(20):
+        try:
+            return supabase.table(Tables.POS_PRODUCTS).update(payload).eq('id', product_id).execute()
+        except Exception as exc:
+            missing_column = _extract_missing_column_name(exc)
+            if missing_column and missing_column in payload:
+                payload.pop(missing_column, None)
+                removed_columns.append(missing_column)
+                logger.warning(
+                    "pos_products.%s missing in schema cache during update; retrying without it",
+                    missing_column
+                )
+                if not payload:
+                    break
+                continue
+            raise
+
+    raise Exception(
+        f"Failed to update pos_products after compatibility retries; removed columns={removed_columns}"
+    )
 
 
 # ===============================================
@@ -415,7 +484,10 @@ async def receive_invoice_goods(
 
         invoice = inv_result.data
 
-        if not invoice.get('vendor_id'):
+        invoice_type = str(invoice.get('invoice_type') or '').strip().lower()
+        customer_id = invoice.get('customer_id')
+        is_vendor_invoice = (invoice_type == 'vendor') or (not invoice_type and not customer_id)
+        if not is_vendor_invoice:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Only vendor invoices can be received into inventory"
@@ -438,20 +510,75 @@ async def receive_invoice_goods(
         products_updated = []
         stock_movements = []
         now = datetime.utcnow().isoformat()
+        override_by_item_id: Dict[str, Dict[str, Any]] = {}
+        if receive_req.items_received:
+            for row in receive_req.items_received:
+                item_id = str(row.get('item_id') or '').strip()
+                if item_id:
+                    override_by_item_id[item_id] = row
+
+        def _to_float(value: Any, default: float = 0.0) -> float:
+            try:
+                if value is None or value == '':
+                    return default
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        def _to_bool(value: Any, default: bool = True) -> bool:
+            if value is None:
+                return default
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, (int, float)):
+                return bool(value)
+            if isinstance(value, str):
+                normalized = value.strip().lower()
+                if normalized in ('true', '1', 'yes', 'on'):
+                    return True
+                if normalized in ('false', '0', 'no', 'off'):
+                    return False
+            return default
 
         for item in items:
-            qty = float(item.get('quantity', 0))
-            cost_price = float(item.get('unit_price', 0))
-            description = item.get('description', 'Unknown Item')
+            qty = _to_float(item.get('quantity'), 0)
+            cost_price = _to_float(item.get('unit_price'), 0)
+            description = str(item.get('description') or 'Unknown Item').strip() or 'Unknown Item'
+            category_value = str(item.get('category') or 'Uncategorized').strip() or 'Uncategorized'
+            markup_percentage = 30.0
+            auto_pricing_enabled = True
+            explicit_selling_price: Optional[float] = None
 
-            # Check if item has override from receive_req
-            if receive_req.items_received:
-                override = next((o for o in receive_req.items_received if o.get('item_id') == item['id']), None)
-                if override:
-                    qty = float(override.get('quantity', qty))
+            override = override_by_item_id.get(str(item.get('id') or ''))
+            if override:
+                qty = _to_float(override.get('quantity'), qty)
+                override_cost = override.get('cost_price', override.get('unit_price'))
+                if override_cost is not None:
+                    cost_price = _to_float(override_cost, cost_price)
+
+                if override.get('category') is not None:
+                    override_category = str(override.get('category') or '').strip()
+                    if override_category:
+                        category_value = override_category
+
+                if override.get('markup_percentage') is not None:
+                    markup_percentage = max(0.0, _to_float(override.get('markup_percentage'), markup_percentage))
+
+                if override.get('auto_pricing_enabled') is not None:
+                    auto_pricing_enabled = _to_bool(override.get('auto_pricing_enabled'), auto_pricing_enabled)
+
+                if override.get('selling_price') is not None:
+                    explicit_selling_price = max(0.0, _to_float(override.get('selling_price'), 0))
 
             if qty <= 0:
                 continue
+
+            if explicit_selling_price is not None:
+                final_selling_price = explicit_selling_price
+            elif auto_pricing_enabled and cost_price > 0:
+                final_selling_price = round(cost_price * (1 + (markup_percentage / 100)), 2)
+            else:
+                final_selling_price = max(0.0, cost_price)
 
             product_id = item.get('product_id')
 
@@ -465,23 +592,39 @@ async def receive_invoice_goods(
 
                 if prod_result.data:
                     product = prod_result.data
-                    new_qty = float(product.get('quantity', 0)) + qty
-                    update_fields = {
-                        'quantity': new_qty,
-                        'updated_at': now
+                    current_qty = _to_float(
+                        product.get('quantity_on_hand'),
+                        _to_float(product.get('quantity'), 0)
+                    )
+                    new_qty = current_qty + qty
+
+                    update_fields: Dict[str, Any] = {
+                        'quantity_on_hand': new_qty,
+                        'quantity': new_qty,  # legacy fallback if old schema still uses `quantity`
+                        'category': category_value,
+                        'updated_at': now,
+                        'last_received': now
                     }
 
                     if receive_req.update_cost_prices and cost_price > 0:
                         update_fields['cost_price'] = cost_price
 
-                    supabase.table(Tables.POS_PRODUCTS)\
-                        .update(update_fields)\
-                        .eq('id', product_id)\
-                        .execute()
+                    if explicit_selling_price is not None:
+                        update_fields['unit_price'] = final_selling_price
+                        update_fields['selling_price'] = final_selling_price  # legacy fallback
+
+                    if override and override.get('markup_percentage') is not None:
+                        update_fields['markup_percentage'] = markup_percentage
+
+                    if override and override.get('auto_pricing_enabled') is not None:
+                        update_fields['auto_pricing'] = auto_pricing_enabled
+
+                    update_result = _update_pos_product_compat(supabase, product_id, update_fields)
+                    updated_product = (update_result.data or [product])[0]
 
                     products_updated.append({
                         'product_id': product_id,
-                        'name': product.get('name'),
+                        'name': updated_product.get('name') or description,
                         'quantity_added': qty,
                         'new_total': new_qty
                     })
@@ -503,7 +646,9 @@ async def receive_invoice_goods(
             elif receive_req.add_to_inventory:
                 # ---- CREATE NEW PRODUCT from invoice item ----
                 new_product_id = str(uuid.uuid4())
-                sku = f"INV-{str(uuid.uuid4())[:8].upper()}"
+                generated_sku = f"INV-{str(uuid.uuid4())[:8].upper()}"
+                item_sku = str(item.get('sku') or '').strip()
+                sku = item_sku or generated_sku
 
                 new_product = {
                     'id': new_product_id,
@@ -511,17 +656,26 @@ async def receive_invoice_goods(
                     'name': description,
                     'sku': sku,
                     'barcode': item.get('barcode') or None,
-                    'category': item.get('category') or 'Uncategorized',
+                    'category': category_value,
                     'cost_price': cost_price,
-                    'selling_price': round(cost_price * 1.3, 2),  # Default 30% markup
-                    'quantity': qty,
-                    'min_stock_level': 5,
+                    'unit_price': final_selling_price,
+                    'selling_price': final_selling_price,  # legacy fallback
+                    'quantity_on_hand': qty,
+                    'quantity': qty,  # legacy fallback
+                    'reorder_level': 5,
+                    'min_stock_level': 5,  # legacy fallback
+                    'reorder_quantity': 0,
+                    'tax_rate': 0.075,
                     'is_active': True,
+                    'markup_percentage': markup_percentage,
+                    'auto_pricing': auto_pricing_enabled,
+                    'last_received': now,
                     'created_at': now,
                     'updated_at': now
                 }
 
-                supabase.table(Tables.POS_PRODUCTS).insert(new_product).execute()
+                create_result = _insert_pos_product_compat(supabase, new_product)
+                created_product = (create_result.data or [new_product])[0]
 
                 # Link the invoice item to the new product
                 supabase.table(Tables.INVOICE_ITEMS)\
@@ -531,10 +685,16 @@ async def receive_invoice_goods(
 
                 products_created.append({
                     'product_id': new_product_id,
-                    'name': description,
-                    'quantity': qty,
-                    'cost_price': cost_price,
-                    'selling_price': new_product['selling_price']
+                    'name': created_product.get('name') or description,
+                    'quantity': _to_float(
+                        created_product.get('quantity_on_hand'),
+                        _to_float(created_product.get('quantity'), qty)
+                    ),
+                    'cost_price': _to_float(created_product.get('cost_price'), cost_price),
+                    'selling_price': _to_float(
+                        created_product.get('unit_price'),
+                        _to_float(created_product.get('selling_price'), final_selling_price)
+                    )
                 })
 
                 # Stock movement
