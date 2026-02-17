@@ -60,6 +60,7 @@ function AppContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<POSProduct[]>([]);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const [highlightedSearchIndex, setHighlightedSearchIndex] = useState(-1);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const scannerBufferRef = useRef('');
   const scannerLastKeyAtRef = useRef(0);
@@ -134,6 +135,7 @@ function AppContent() {
     setSearchQuery('');
     setSearchResults([]);
     setShowSearchDropdown(false);
+    setHighlightedSearchIndex(-1);
   }, [location.pathname]);
 
   // Keep local outlet cache warm and sync queued offline sales while online.
@@ -296,6 +298,7 @@ function AppContent() {
     if (!currentOutlet?.id || query.trim().length < 1) {
       setSearchResults([]);
       setShowSearchDropdown(false);
+      setHighlightedSearchIndex(-1);
       return;
     }
 
@@ -326,11 +329,13 @@ function AppContent() {
       if (requestId !== searchRequestRef.current) return;
       setSearchResults(topResults);
       setShowSearchDropdown(topResults.length > 0);
+      setHighlightedSearchIndex(topResults.length > 0 ? 0 : -1);
     } catch (error) {
       if (requestId !== searchRequestRef.current) return;
       console.error('Local search error:', error);
       setSearchResults([]);
       setShowSearchDropdown(false);
+      setHighlightedSearchIndex(-1);
     }
   };
 
@@ -343,6 +348,7 @@ function AppContent() {
     setSearchQuery('');
     setShowSearchDropdown(false);
     setSearchResults([]);
+    setHighlightedSearchIndex(-1);
   };
 
   // Handle barcode scan
@@ -360,6 +366,7 @@ function AppContent() {
       setSearchQuery('');
       setShowSearchDropdown(false);
       setSearchResults([]);
+      setHighlightedSearchIndex(-1);
       return true;
     } catch (err) {
       console.error('Barcode scan error:', err);
@@ -456,14 +463,35 @@ function AppContent() {
           name="pos-search-ignore"
           placeholder="Scan barcode or search product name/SKU..."
           value={searchQuery}
-          onChange={(e) => handleSearchChange(e.target.value)}
-          onKeyDown={async (e) => {
-            if (e.key === 'Enter') {
-              const query = searchQuery.trim();
-              // Try barcode lookup first for scanner-like strings.
-              const scannerLikeQuery =
-                query.length >= 4 &&
-                !/\s/.test(query) &&
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  onKeyDown={async (e) => {
+                    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                      if (searchResults.length > 0) {
+                        e.preventDefault();
+                        setShowSearchDropdown(true);
+                        setHighlightedSearchIndex((prev) => {
+                          const safePrev = prev < 0 ? 0 : prev;
+                          if (e.key === 'ArrowDown') {
+                            return (safePrev + 1) % searchResults.length;
+                          }
+                          return (safePrev - 1 + searchResults.length) % searchResults.length;
+                        });
+                      }
+                      return;
+                    }
+
+                    if (e.key === 'Escape') {
+                      setShowSearchDropdown(false);
+                      return;
+                    }
+
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const query = searchQuery.trim();
+                      // Try barcode lookup first for scanner-like strings.
+                      const scannerLikeQuery =
+                        query.length >= 4 &&
+                        !/\s/.test(query) &&
                 /^[A-Z0-9._/-]+$/i.test(query) &&
                 /\d/.test(query);
               if (scannerLikeQuery) {
@@ -472,17 +500,23 @@ function AppContent() {
                   setSearchQuery('');
                   setShowSearchDropdown(false);
                   setSearchResults([]);
+                  setHighlightedSearchIndex(-1);
                   return;
                 }
               }
               // If Enter pressed and there are search results, add first result
               if (searchResults.length > 0) {
-                addProductFromSearch(searchResults[0]);
+                const index = highlightedSearchIndex >= 0 ? highlightedSearchIndex : 0;
+                const selectedProduct = searchResults[index] || searchResults[0];
+                if (selectedProduct) addProductFromSearch(selectedProduct);
               }
             }
           }}
           onFocus={() => {
-            if (searchResults.length > 0) setShowSearchDropdown(true);
+            if (searchResults.length > 0) {
+              setShowSearchDropdown(true);
+              setHighlightedSearchIndex((prev) => (prev >= 0 ? prev : 0));
+            }
           }}
           className="w-full h-12 px-4 text-[16px] border border-stone-300 rounded-xl bg-white focus:ring-2 focus:ring-slate-400 focus:border-transparent"
           autoComplete="off"
@@ -502,16 +536,22 @@ function AppContent() {
             {/* Overlay to close dropdown */}
             <div
               className="fixed inset-0 z-10"
-              onClick={() => setShowSearchDropdown(false)}
+              onClick={() => {
+                setShowSearchDropdown(false);
+                setHighlightedSearchIndex(-1);
+              }}
             />
 
             {/* Dropdown Results */}
             <div className="absolute top-full left-0 right-0 bg-white border border-stone-200 rounded-xl shadow-lg z-20 mt-1 max-h-80 overflow-y-auto">
-              {searchResults.map((product) => (
+              {searchResults.map((product, index) => (
                 <button
                   key={product.id}
                   onClick={() => addProductFromSearch(product)}
-                  className="w-full flex items-center px-3 py-2.5 hover:bg-stone-50 transition-colors text-left border-b border-stone-100 last:border-b-0"
+                  onMouseEnter={() => setHighlightedSearchIndex(index)}
+                  className={`w-full flex items-center px-3 py-2.5 transition-colors text-left border-b border-stone-100 last:border-b-0 ${
+                    index === highlightedSearchIndex ? 'bg-stone-100' : 'hover:bg-stone-50'
+                  }`}
                 >
                   <div className="flex items-center justify-between w-full space-x-3">
                     {/* Left: name + identifiers, single line with ellipsis */}
