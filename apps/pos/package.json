@@ -1,13 +1,18 @@
 {
   "name": "compazz-pos",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "main": "electron-dist/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron:compile": "tsc -p electron/tsconfig.json",
+    "electron:dev": "concurrently -k \"vite\" \"wait-on http://localhost:5174 && npm run electron:compile && electron .\"",
+    "electron:build": "vite build && npm run electron:compile && electron-builder --config electron-builder.json",
+    "electron:pack": "vite build && npm run electron:compile && electron-builder --config electron-builder.json --dir"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.93.2",
@@ -31,6 +36,9 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.23",
+    "concurrently": "^9.1.2",
+    "electron": "^33.3.1",
+    "electron-builder": "^25.1.8",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
@@ -38,6 +46,7 @@
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.1",
     "typescript": "~5.3.3",
-    "typescript-eslint": "^8.46.4"
+    "typescript-eslint": "^8.46.4",
+    "wait-on": "^8.0.3"
   }
 }

@@ -5,6 +5,9 @@ import path from 'path'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  // Use relative paths so the built app works in Electron's file:// protocol
+  // as well as normal HTTP serving (Vercel, dev server, etc.)
+  base: './',
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
