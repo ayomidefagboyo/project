@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { X, Save } from 'lucide-react';
-import { posService } from '@/lib/posService';
+import { posService, type POSDepartment } from '@/lib/posService';
 import { useOutlet } from '@/contexts/OutletContext';
 import { useToast } from '../../ui/Toast';
 
@@ -10,10 +10,25 @@ interface AddProductModalProps {
   onSuccess: () => void;
 }
 
+const DEFAULT_DEPARTMENTS = [
+  'Beverages',
+  'Food & Groceries',
+  'Household Items',
+  'Personal Care',
+  'Electronics',
+  'Clothing',
+  'Office Supplies',
+  'Pharmacy',
+  'Other',
+];
+
+const normalizeDepartmentName = (value?: string | null): string => String(value || '').trim();
+
 const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSuccess }) => {
   const { currentOutlet } = useOutlet();
-  const { success, error } = useToast();
+  const { success, error: showError } = useToast();
   const [isLoading, setIsLoading] = useState(false);
+  const [departments, setDepartments] = useState<POSDepartment[]>([]);
   const [formData, setFormData] = useState({
     name: '',
     barcode: '',
@@ -28,17 +43,27 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
     description: ''
   });
 
-  const categories = [
-    'Beverages',
-    'Food & Groceries',
-    'Household Items',
-    'Personal Care',
-    'Electronics',
-    'Clothing',
-    'Office Supplies',
-    'Pharmacy',
-    'Other'
-  ];
+  const departmentOptions = useMemo(() => {
+    const byKey = new Map<string, string>();
+    const add = (value?: string | null) => {
+      const normalized = normalizeDepartmentName(value);
+      if (!normalized) return;
+      const key = normalized.toLowerCase();
+      if (!byKey.has(key)) {
+        byKey.set(key, normalized);
+      }
+    };
+
+    departments
+      .filter((department) => department.is_active !== false)
+      .forEach((department) => add(department.name));
+
+    if (byKey.size === 0) {
+      DEFAULT_DEPARTMENTS.forEach((department) => add(department));
+    }
+
+    return Array.from(byKey.values()).sort((a, b) => a.localeCompare(b));
+  }, [departments]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
@@ -46,6 +71,51 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
       ...prev,
       [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : value
     }));
+  };
+
+  const loadDepartments = async () => {
+    if (!currentOutlet?.id) {
+      setDepartments([]);
+      return;
+    }
+    try {
+      const rows = await posService.getDepartments(currentOutlet.id);
+      setDepartments(rows || []);
+    } catch (err) {
+      console.error('Failed to load departments for Add Product modal:', err);
+      setDepartments([]);
+    }
+  };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    void loadDepartments();
+  }, [isOpen, currentOutlet?.id]);
+
+  const handleCreateDepartment = async () => {
+    if (!currentOutlet?.id) return;
+    const input = window.prompt('Enter new department name');
+    const name = normalizeDepartmentName(input);
+    if (!name) return;
+
+    try {
+      const created = await posService.createDepartment({
+        outlet_id: currentOutlet.id,
+        name,
+      });
+      setDepartments((prev) => {
+        const next = [...prev];
+        const key = created.name.trim().toLowerCase();
+        if (!next.some((item) => item.name.trim().toLowerCase() === key)) {
+          next.push(created);
+        }
+        return next;
+      });
+      setFormData((prev) => ({ ...prev, category: created.name }));
+    } catch (err) {
+      console.error('Failed to create department from Add Product modal:', err);
+      showError('Failed to create department. Ensure migration is applied and try again.');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -88,9 +158,9 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
         shelf_life_days: '',
         description: ''
       });
-    } catch (error) {
-      console.error('Error adding product:', error);
-      error('Failed to add product. Please try again.');
+    } catch (err) {
+      console.error('Error adding product:', err);
+      showError('Failed to add product. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -147,9 +217,18 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
 
             {/* Category */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Category *
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-gray-700">
+                  Department *
+                </label>
+                <button
+                  type="button"
+                  onClick={handleCreateDepartment}
+                  className="text-xs font-semibold text-blue-600 hover:text-blue-700"
+                >
+                  + New department
+                </button>
+              </div>
               <select
                 name="category"
                 value={formData.category}
@@ -157,8 +236,8 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
                 required
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <option value="">Select category</option>
-                {categories.map(cat => (
+                <option value="">Select department</option>
+                {departmentOptions.map((cat) => (
                   <option key={cat} value={cat}>{cat}</option>
                 ))}
               </select>

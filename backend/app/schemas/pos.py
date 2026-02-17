@@ -8,6 +8,7 @@ from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime, date
 from enum import Enum
 from decimal import Decimal
+import re
 
 
 # ===============================================
@@ -160,6 +161,75 @@ class POSProductResponse(POSProductBase):
     outlet_id: str = Field(..., description="Outlet identifier")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
+
+    class Config:
+        from_attributes = True
+
+
+class DepartmentBase(BaseModel):
+    """Base schema for department master records."""
+    name: str = Field(..., min_length=1, max_length=100, description="Department name")
+    code: Optional[str] = Field(None, max_length=30, description="Optional short code")
+    description: Optional[str] = Field(None, max_length=255, description="Optional description")
+    sort_order: int = Field(0, description="Display order")
+
+    @validator('name')
+    def validate_department_name(cls, v):
+        normalized = re.sub(r'\s+', ' ', v.strip())
+        if not normalized:
+            raise ValueError('Department name cannot be empty')
+        return normalized
+
+    @validator('code')
+    def validate_department_code(cls, v):
+        if v is None:
+            return v
+        normalized = re.sub(r'[^A-Z0-9-]', '', v.strip().upper())
+        return normalized[:30] or None
+
+
+class DepartmentCreate(DepartmentBase):
+    """Create department payload."""
+    outlet_id: str = Field(..., description="Outlet ID")
+
+
+class DepartmentUpdate(BaseModel):
+    """Update department payload."""
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    code: Optional[str] = Field(None, max_length=30)
+    description: Optional[str] = Field(None, max_length=255)
+    sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+    @validator('name')
+    def validate_department_name(cls, v):
+        if v is None:
+            return v
+        normalized = re.sub(r'\s+', ' ', v.strip())
+        if not normalized:
+            raise ValueError('Department name cannot be empty')
+        return normalized
+
+    @validator('code')
+    def validate_department_code(cls, v):
+        if v is None:
+            return v
+        normalized = re.sub(r'[^A-Z0-9-]', '', v.strip().upper())
+        return normalized[:30] or None
+
+
+class DepartmentResponse(BaseModel):
+    """Department response."""
+    id: str = Field(..., description="Department ID")
+    outlet_id: str = Field(..., description="Outlet ID")
+    name: str = Field(..., description="Department name")
+    code: Optional[str] = Field(None, description="Department short code")
+    description: Optional[str] = Field(None, description="Department description")
+    sort_order: int = Field(0, description="Display order")
+    is_active: bool = Field(True, description="Department active flag")
+    source: Optional[str] = Field(None, description="master or product_category")
+    created_at: Optional[datetime] = Field(None, description="Creation timestamp")
+    updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
 
     class Config:
         from_attributes = True
@@ -456,6 +526,12 @@ class ProductListResponse(BaseModel):
     total: int = Field(..., description="Total count")
     page: int = Field(..., description="Current page")
     size: int = Field(..., description="Page size")
+
+
+class DepartmentListResponse(BaseModel):
+    """Department list response."""
+    items: List[DepartmentResponse] = Field(..., description="Departments")
+    total: int = Field(..., description="Total count")
 
 
 class TransactionListResponse(BaseModel):

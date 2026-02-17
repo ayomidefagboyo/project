@@ -19,6 +19,7 @@ from app.schemas.pos import (
     # Products
     POSProductCreate, POSProductUpdate, POSProductResponse,
     ProductListResponse, ProductSearchRequest,
+    DepartmentCreate, DepartmentUpdate, DepartmentResponse, DepartmentListResponse,
     ProductBulkImportRequest, ProductBulkImportResponse, ProductBulkImportError,
     # Transactions
     POSTransactionCreate, POSTransactionResponse,
@@ -542,9 +543,313 @@ def _resolve_actor_user_id(current_user: Dict[str, Any]) -> str:
     return actor_user_id
 
 
+def _normalize_department_name(value: Any) -> Optional[str]:
+    raw = str(value or '').strip()
+    if not raw:
+        return None
+    normalized = re.sub(r'\s+', ' ', raw)
+    return normalized[:100]
+
+
+def _normalize_department_code(value: Any, fallback_name: str) -> str:
+    raw = str(value or '').strip().upper()
+    if raw:
+        cleaned = re.sub(r'[^A-Z0-9-]+', '', raw).strip('-')
+        if cleaned:
+            return cleaned[:30]
+
+    fallback = re.sub(r'[^A-Z0-9]+', '-', fallback_name.upper()).strip('-')
+    if fallback:
+        return fallback[:30]
+    return f"DEPT-{uuid.uuid4().hex[:6].upper()}"
+
+
+def _get_department_table_rows(
+    supabase,
+    outlet_id: str,
+    include_inactive: bool = False
+) -> List[Dict[str, Any]]:
+    query = supabase.table(Tables.POS_DEPARTMENTS).select('*').eq('outlet_id', outlet_id)
+    if not include_inactive:
+        query = query.eq('is_active', True)
+    result = query.order('sort_order').order('name').execute()
+    return result.data or []
+
+
+def _get_department_category_names_from_products(
+    supabase,
+    outlet_id: str
+) -> List[str]:
+    product_result = supabase.table(Tables.POS_PRODUCTS)\
+        .select('category')\
+        .eq('outlet_id', outlet_id)\
+        .execute()
+
+    names_by_key: Dict[str, str] = {}
+    for row in product_result.data or []:
+        normalized = _normalize_department_name(row.get('category'))
+        if not normalized:
+            continue
+        key = normalized.lower()
+        if key not in names_by_key:
+            names_by_key[key] = normalized
+
+    return sorted(names_by_key.values(), key=lambda value: value.lower())
+
+
+def _list_departments_with_product_categories(
+    supabase,
+    outlet_id: str,
+    include_inactive: bool = False
+) -> List[Dict[str, Any]]:
+    table_rows: List[Dict[str, Any]] = []
+    table_missing = False
+
+    try:
+        table_rows = _get_department_table_rows(supabase, outlet_id, include_inactive=include_inactive)
+    except Exception as exc:
+        if _is_missing_table_error(exc, Tables.POS_DEPARTMENTS):
+            table_missing = True
+            table_rows = []
+        else:
+            raise
+
+    merged_by_name: Dict[str, Dict[str, Any]] = {}
+    for row in table_rows:
+        normalized_name = _normalize_department_name(row.get('name'))
+        if not normalized_name:
+            continue
+        key = normalized_name.lower()
+        merged = dict(row)
+        merged['name'] = normalized_name
+        merged['source'] = merged.get('source') or 'master'
+        merged_by_name[key] = merged
+
+    category_names = _get_department_category_names_from_products(supabase, outlet_id)
+    for index, category_name in enumerate(category_names):
+        key = category_name.lower()
+        if key in merged_by_name:
+            continue
+        synthetic_id = f"category-{index + 1}-{re.sub(r'[^a-z0-9]+', '-', key).strip('-') or uuid.uuid4().hex[:8]}"
+        merged_by_name[key] = {
+            'id': synthetic_id,
+            'outlet_id': outlet_id,
+            'name': category_name,
+            'code': _normalize_department_code('', category_name),
+            'description': None,
+            'sort_order': 9999,
+            'is_active': True,
+            'source': 'product_category',
+            'created_at': None,
+            'updated_at': None
+        }
+
+    rows = list(merged_by_name.values())
+    if not include_inactive:
+        rows = [row for row in rows if row.get('is_active', True)]
+
+    rows.sort(key=lambda row: (row.get('sort_order', 0), str(row.get('name') or '').lower()))
+
+    if table_missing and not rows:
+        logger.info("Department table missing and no product categories yet for outlet %s", outlet_id)
+
+    return rows
+
+
+def _ensure_departments_exist(
+    supabase,
+    outlet_id: str,
+    category_values: List[Optional[str]]
+) -> None:
+    normalized_names: Dict[str, str] = {}
+    for value in category_values:
+        normalized = _normalize_department_name(value)
+        if not normalized:
+            continue
+        key = normalized.lower()
+        if key not in normalized_names:
+            normalized_names[key] = normalized
+
+    if not normalized_names:
+        return
+
+    try:
+        existing_rows = _get_department_table_rows(supabase, outlet_id, include_inactive=True)
+    except Exception as exc:
+        if _is_missing_table_error(exc, Tables.POS_DEPARTMENTS):
+            return
+        logger.warning("Unable to load departments for outlet %s: %s", outlet_id, exc)
+        return
+
+    existing_by_key: Dict[str, Dict[str, Any]] = {}
+    max_sort_order = 0
+    for row in existing_rows:
+        name = _normalize_department_name(row.get('name'))
+        if name:
+            existing_by_key[name.lower()] = row
+        sort_order = int(row.get('sort_order') or 0)
+        if sort_order > max_sort_order:
+            max_sort_order = sort_order
+
+    rows_to_insert: List[Dict[str, Any]] = []
+    rows_to_activate: List[str] = []
+    now_iso = datetime.utcnow().isoformat()
+
+    for key, name in normalized_names.items():
+        existing = existing_by_key.get(key)
+        if existing:
+            if existing.get('is_active') is False:
+                rows_to_activate.append(str(existing.get('id')))
+            continue
+
+        max_sort_order += 1
+        rows_to_insert.append({
+            'id': str(uuid.uuid4()),
+            'outlet_id': outlet_id,
+            'name': name,
+            'code': _normalize_department_code('', name),
+            'description': None,
+            'sort_order': max_sort_order,
+            'is_active': True,
+            'created_at': now_iso,
+            'updated_at': now_iso
+        })
+
+    for department_id in rows_to_activate:
+        try:
+            supabase.table(Tables.POS_DEPARTMENTS).update({
+                'is_active': True,
+                'updated_at': now_iso
+            }).eq('id', department_id).execute()
+        except Exception as exc:
+            logger.warning("Failed to reactivate department %s: %s", department_id, exc)
+
+    if not rows_to_insert:
+        return
+
+    try:
+        supabase.table(Tables.POS_DEPARTMENTS).insert(rows_to_insert).execute()
+    except Exception as exc:
+        logger.warning(
+            "Failed to create department records for outlet %s during product flow: %s",
+            outlet_id,
+            exc
+        )
+
+
 # ===============================================
 # PRODUCT MANAGEMENT ENDPOINTS
 # ===============================================
+
+@router.get("/departments", response_model=DepartmentListResponse)
+async def get_departments(
+    outlet_id: str,
+    include_inactive: bool = Query(False, description="Include inactive departments"),
+    current_user=Depends(CurrentUser())
+):
+    """List departments for an outlet, merged with existing product category values."""
+    try:
+        supabase = get_supabase_admin()
+        rows = _list_departments_with_product_categories(
+            supabase,
+            outlet_id=outlet_id,
+            include_inactive=include_inactive
+        )
+        return DepartmentListResponse(items=rows, total=len(rows))
+    except Exception as e:
+        logger.error(f"Error fetching departments: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch departments: {str(e)}"
+        )
+
+
+@router.post("/departments", response_model=DepartmentResponse)
+async def create_department(
+    department: DepartmentCreate,
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
+    current_user=Depends(CurrentUser())
+):
+    """Create a department for product categorization."""
+    try:
+        supabase = get_supabase_admin()
+        _require_manager_role(supabase, current_user, department.outlet_id, x_pos_staff_session)
+
+        try:
+            existing_rows = _get_department_table_rows(
+                supabase,
+                outlet_id=department.outlet_id,
+                include_inactive=True
+            )
+        except Exception as exc:
+            if _is_missing_table_error(exc, Tables.POS_DEPARTMENTS):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Department master is not available yet. Run the latest POS migration and retry."
+                )
+            raise
+
+        department_name = _normalize_department_name(department.name)
+        if not department_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Department name is required"
+            )
+
+        name_key = department_name.lower()
+        now_iso = datetime.utcnow().isoformat()
+
+        for row in existing_rows:
+            existing_name = _normalize_department_name(row.get('name'))
+            if not existing_name or existing_name.lower() != name_key:
+                continue
+
+            if row.get('is_active') is False:
+                reactivate = supabase.table(Tables.POS_DEPARTMENTS).update({
+                    'is_active': True,
+                    'sort_order': department.sort_order,
+                    'description': department.description,
+                    'code': _normalize_department_code(department.code, department_name),
+                    'updated_at': now_iso
+                }).eq('id', row.get('id')).execute()
+                if reactivate.data:
+                    row = reactivate.data[0]
+
+            result_row = dict(row)
+            result_row['name'] = existing_name
+            result_row['source'] = 'master'
+            return DepartmentResponse(**result_row)
+
+        payload = {
+            'id': str(uuid.uuid4()),
+            'outlet_id': department.outlet_id,
+            'name': department_name,
+            'code': _normalize_department_code(department.code, department_name),
+            'description': department.description,
+            'sort_order': department.sort_order,
+            'is_active': True,
+            'created_at': now_iso,
+            'updated_at': now_iso
+        }
+        result = supabase.table(Tables.POS_DEPARTMENTS).insert(payload).execute()
+        if not result.data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to create department"
+            )
+
+        created_row = dict(result.data[0])
+        created_row['name'] = _normalize_department_name(created_row.get('name')) or department_name
+        created_row['source'] = 'master'
+        return DepartmentResponse(**created_row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating department: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create department: {str(e)}"
+        )
 
 @router.get("/products", response_model=ProductListResponse)
 async def get_products(
@@ -631,6 +936,13 @@ async def create_product(
             'created_at': datetime.utcnow().isoformat(),
             'updated_at': datetime.utcnow().isoformat()
         }
+        product_data['category'] = _normalize_department_name(product_data.get('category'))
+
+        _ensure_departments_exist(
+            supabase,
+            outlet_id=product.outlet_id,
+            category_values=[product_data.get('category')]
+        )
 
         # Insert product
         result = _insert_pos_product_compat(supabase, product_data)
@@ -730,6 +1042,7 @@ async def bulk_import_products(
         errors: List[ProductBulkImportError] = []
         pending_upserts: List[Dict[str, Any]] = []
         pending_meta: List[Dict[str, Any]] = []
+        category_values_to_ensure: List[Optional[str]] = []
 
         for index, row in enumerate(rows, start=1):
             try:
@@ -738,6 +1051,8 @@ async def bulk_import_products(
                 row_data['sku'] = norm_sku(row_data.get('sku'))
                 if row_data.get('barcode') is not None:
                     row_data['barcode'] = norm_barcode(row_data.get('barcode')) or None
+                row_data['category'] = _normalize_department_name(row_data.get('category'))
+                category_values_to_ensure.append(row_data.get('category'))
 
                 sku_key = norm_sku(row_data.get('sku'))
                 barcode_key = norm_barcode(row_data.get('barcode'))
@@ -814,6 +1129,11 @@ async def bulk_import_products(
                 ))
 
         if not payload.dry_run and pending_upserts:
+            _ensure_departments_exist(
+                supabase,
+                outlet_id=payload.outlet_id,
+                category_values=category_values_to_ensure
+            )
             chunk_size = 250
 
             for start in range(0, len(pending_upserts), chunk_size):
@@ -928,6 +1248,13 @@ async def update_product(
 
         # Prepare update data (exclude None values)
         update_data = {k: v for k, v in product.dict().items() if v is not None}
+        if 'category' in update_data:
+            update_data['category'] = _normalize_department_name(update_data.get('category'))
+            _ensure_departments_exist(
+                supabase,
+                outlet_id=existing_product.data[0].get('outlet_id'),
+                category_values=[update_data.get('category')]
+            )
         update_data['updated_at'] = datetime.utcnow().isoformat()
 
         result = supabase.table('pos_products').update(update_data).eq('id', product_id).execute()
