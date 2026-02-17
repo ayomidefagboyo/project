@@ -62,6 +62,8 @@ function AppContent() {
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const [highlightedSearchIndex, setHighlightedSearchIndex] = useState(-1);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const searchDropdownListRef = useRef<HTMLDivElement | null>(null);
+  const searchResultItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const scannerBufferRef = useRef('');
   const scannerLastKeyAtRef = useRef(0);
   const searchRequestRef = useRef(0);
@@ -137,6 +139,14 @@ function AppContent() {
     setShowSearchDropdown(false);
     setHighlightedSearchIndex(-1);
   }, [location.pathname]);
+
+  // Keep keyboard-highlighted search row visible in dropdown while moving with arrows.
+  useEffect(() => {
+    if (!showSearchDropdown || highlightedSearchIndex < 0) return;
+    const activeRow = searchResultItemRefs.current[highlightedSearchIndex];
+    if (!activeRow) return;
+    activeRow.scrollIntoView({ block: 'nearest' });
+  }, [showSearchDropdown, highlightedSearchIndex, searchResults.length]);
 
   // Keep local outlet cache warm and sync queued offline sales while online.
   useEffect(() => {
@@ -543,10 +553,16 @@ function AppContent() {
             />
 
             {/* Dropdown Results */}
-            <div className="absolute top-full left-0 right-0 bg-white border border-stone-200 rounded-xl shadow-lg z-20 mt-1 max-h-80 overflow-y-auto">
+            <div
+              ref={searchDropdownListRef}
+              className="absolute top-full left-0 right-0 bg-white border border-stone-200 rounded-xl shadow-lg z-20 mt-1 max-h-80 overflow-y-auto"
+            >
               {searchResults.map((product, index) => (
                 <button
                   key={product.id}
+                  ref={(el) => {
+                    searchResultItemRefs.current[index] = el;
+                  }}
                   onClick={() => addProductFromSearch(product)}
                   onMouseEnter={() => setHighlightedSearchIndex(index)}
                   className={`w-full flex items-center px-3 py-2.5 transition-colors text-left border-b border-stone-100 last:border-b-0 ${
