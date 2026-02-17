@@ -126,6 +126,16 @@ function AppContent() {
     };
   }, []);
 
+  // Keep Register product search ephemeral.
+  // Leaving the register route should fully clear the search state.
+  useEffect(() => {
+    if (location.pathname === '/') return;
+    searchRequestRef.current += 1;
+    setSearchQuery('');
+    setSearchResults([]);
+    setShowSearchDropdown(false);
+  }, [location.pathname]);
+
   // Keep local outlet cache warm and sync queued offline sales while online.
   useEffect(() => {
     if (terminalPhase !== 'operational' || !terminalConfig?.outlet_id || !isOnline) return;
@@ -441,9 +451,9 @@ function AppContent() {
       {/* Search Bar with Dropdown */}
       <div className="relative w-full xl:w-[520px] 2xl:w-[640px] xl:flex-none">
         <input
-          type="search"
+          type="text"
           id="pos-product-search-input"
-          name="product-search-query"
+          name="pos-search-ignore"
           placeholder="Scan barcode or search product name/SKU..."
           value={searchQuery}
           onChange={(e) => handleSearchChange(e.target.value)}
@@ -475,7 +485,7 @@ function AppContent() {
             if (searchResults.length > 0) setShowSearchDropdown(true);
           }}
           className="w-full h-12 px-4 text-[16px] border border-stone-300 rounded-xl bg-white focus:ring-2 focus:ring-slate-400 focus:border-transparent"
-          autoComplete="chrome-off"
+          autoComplete="off"
           autoCorrect="off"
           autoCapitalize="off"
           spellCheck="false"
