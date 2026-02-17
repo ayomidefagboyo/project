@@ -117,6 +117,45 @@ const resolvePaperMaxWidth = (width?: ReceiptPrintStyle['paperWidth']): string =
   return '80mm';
 };
 
+const separatorPattern = /^[-_=*]{8,}$/;
+
+const renderReceiptLine = (line: string): string => {
+  const trimmed = line.trim();
+  if (!trimmed) return '<div class="line line-empty" aria-hidden="true"></div>';
+  if (separatorPattern.test(trimmed)) {
+    return '<div class="line-rule" aria-hidden="true"></div>';
+  }
+
+  const colonIndex = line.indexOf(':');
+  const hasKeyValue =
+    colonIndex > 0 &&
+    colonIndex < line.length - 1 &&
+    !line.includes('://') &&
+    !line.includes('=') &&
+    !line.includes(' x ');
+
+  if (hasKeyValue) {
+    const label = line.slice(0, colonIndex).trim();
+    const value = line.slice(colonIndex + 1).trim();
+    if (label && value) {
+      return `
+        <div class="line line-pair">
+          <span class="pair-label">${escapeHtml(label)}</span>
+          <span class="pair-value">${escapeHtml(value)}</span>
+        </div>
+      `;
+    }
+  }
+
+  return `<div class="line">${escapeHtml(line)}</div>`;
+};
+
+const buildReceiptMarkup = (content: string): string =>
+  content
+    .split('\n')
+    .map((line) => renderReceiptLine(line))
+    .join('');
+
 export const openReceiptPrintWindow = (
   receiptContent: string,
   options?: {
@@ -145,7 +184,7 @@ export const openReceiptPrintWindow = (
       return `
         <section class="copy">
           ${copyLabel}
-          <pre>${escapeHtml(normalizedContent)}</pre>
+          <div class="receipt-content">${buildReceiptMarkup(normalizedContent)}</div>
         </section>
       `;
     })
@@ -165,28 +204,79 @@ export const openReceiptPrintWindow = (
         margin: 0;
         padding: 0;
         width: ${maxWidth};
-        background: #fff;
+        background: #f3f4f6;
         color: #111827;
       }
       body {
         font-family: ${fontFamily};
         max-width: ${maxWidth};
+        padding: 8px 6px;
+        font-feature-settings: "tnum" 1;
       }
-      pre {
+      .copy {
+        margin: 0;
+        background: #ffffff;
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        padding: 10px 10px 8px;
+      }
+      .copy-label {
+        font-weight: 700;
+        margin-bottom: 6px;
+        text-transform: uppercase;
+        font-size: ${fontSize};
+        color: #111827;
+        letter-spacing: 0.02em;
+      }
+      .receipt-content {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        font-size: ${fontSize};
+        line-height: ${lineHeight};
+      }
+      .line {
         white-space: pre-wrap;
         word-break: break-word;
         font-family: inherit;
-        font-size: ${fontSize};
-        line-height: ${lineHeight};
-        margin: 0;
-        padding: 0;
       }
-      .copy { margin: 0; }
-      .copy-label { font-weight: 700; margin-bottom: 4px; text-transform: uppercase; font-size: ${fontSize}; }
-      .cut { border: 0; border-top: 1px dashed #9ca3af; margin: 4px 0; }
+      .line-empty { min-height: 6px; }
+      .line-rule {
+        border-top: 1px dashed #9ca3af;
+        margin: 4px 0;
+        width: 100%;
+      }
+      .line-pair {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .pair-label { color: #374151; }
+      .pair-value {
+        margin-left: auto;
+        text-align: right;
+        color: #111827;
+        font-weight: 600;
+      }
+      .cut {
+        border: 0;
+        border-top: 1px dashed #9ca3af;
+        margin: 6px 0;
+      }
       @media print {
-        html, body { padding: 0; margin: 0; width: ${maxWidth}; }
+        html, body {
+          padding: 0;
+          margin: 0;
+          width: ${maxWidth};
+          background: #fff;
+        }
         body { padding: 0; }
+        .copy {
+          border: 0;
+          border-radius: 0;
+          padding: 0;
+        }
         .copy { break-inside: avoid; page-break-inside: avoid; }
       }
     </style>
