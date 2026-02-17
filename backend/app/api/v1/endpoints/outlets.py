@@ -132,6 +132,26 @@ def _merge_unique_outlets(primary: List[Dict[str, Any]], secondary: Optional[Lis
     return ordered
 
 
+def _fetch_outlets_by_ids(
+    supabase: Any,
+    outlet_ids: List[str],
+) -> List[Dict[str, Any]]:
+    """Fetch outlets by ID list with chunking to avoid oversized IN filters."""
+    normalized_ids = [str(outlet_id).strip() for outlet_id in outlet_ids if str(outlet_id).strip()]
+    if not normalized_ids:
+        return []
+
+    unique_ids = list(dict.fromkeys(normalized_ids))
+    fetched: List[Dict[str, Any]] = []
+    chunk_size = 200
+    for index in range(0, len(unique_ids), chunk_size):
+        chunk = unique_ids[index:index + chunk_size]
+        response = supabase.table(Tables.OUTLETS).select("*").in_("id", chunk).execute()
+        fetched.extend(response.data or [])
+
+    return fetched
+
+
 @router.get("/")
 async def get_outlets(current_user: Dict[str, Any] = Depends(require_auth())):
     """Get outlets visible to the current manager-level account."""
@@ -156,7 +176,23 @@ async def get_outlets(current_user: Dict[str, Any] = Depends(require_auth())):
             assigned_result = supabase.table(Tables.OUTLETS).select("*").eq("id", outlet_id).execute()
             outlets_by_assignment = assigned_result.data or []
 
-        return _merge_unique_outlets(outlets_by_email, outlets_by_assignment)
+        # Include outlets linked to this owner via staff profiles. This keeps
+        # terminal setup consistent for multi-outlet businesses even when
+        # outlet email fields drift.
+        outlets_by_staff_scope: List[Dict[str, Any]] = []
+        user_id = _normalize_text(current_user.get("id"), "")
+        if user_id:
+            staff_rows = (
+                supabase.table(Tables.STAFF_PROFILES)
+                .select("outlet_id")
+                .eq("parent_account_id", user_id)
+                .execute()
+            )
+            staff_outlet_ids = [str(row.get("outlet_id") or "").strip() for row in (staff_rows.data or [])]
+            outlets_by_staff_scope = _fetch_outlets_by_ids(supabase, staff_outlet_ids)
+
+        merged_outlets = _merge_unique_outlets(outlets_by_email, outlets_by_assignment)
+        return _merge_unique_outlets(merged_outlets, outlets_by_staff_scope)
     except HTTPException:
         raise
     except Exception as exc:
@@ -248,4 +284,3 @@ async def update_outlet(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Outlet not found")
 
     return result.data[0]
-
