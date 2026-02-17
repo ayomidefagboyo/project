@@ -37,7 +37,7 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState('');
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const { success } = useToast();
 
@@ -47,8 +47,11 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
     enabled: !!outletId && isOpen,
     onTransactionChange: (action, data) => {
       console.log(`💰 Real-time: Transaction ${action}`, data);
-      if (action === 'INSERT' && selectedDate === new Date().toISOString().split('T')[0]) {
-        // Refresh transactions if viewing today's date
+      if (
+        action === 'INSERT' &&
+        (!selectedDate || selectedDate === new Date().toISOString().split('T')[0])
+      ) {
+        // Refresh transactions if viewing all dates or today's date
         loadTransactions();
         success(`New sale: ${formatCurrency(data.total_amount)}`);
       } else if (action === 'UPDATE') {
@@ -70,8 +73,8 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({
     setIsLoading(true);
     try {
       const result = await posService.getTransactions(outletId, {
-        date_from: selectedDate,
-        date_to: selectedDate,
+        date_from: selectedDate || undefined,
+        date_to: selectedDate || undefined,
         size: 100
       });
       setTransactions(result.items || []);

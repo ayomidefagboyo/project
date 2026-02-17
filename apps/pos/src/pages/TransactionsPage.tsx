@@ -33,7 +33,7 @@ const TransactionsPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState('');
   const [paymentFilter, setPaymentFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
@@ -350,7 +350,10 @@ const TransactionsPage: React.FC = () => {
     outletId: currentOutlet?.id || '',
     enabled: !!currentOutlet?.id,
     onTransactionChange: (action, data) => {
-      if (action === 'INSERT' && selectedDate === new Date().toISOString().split('T')[0]) {
+      if (
+        action === 'INSERT' &&
+        (!selectedDate || selectedDate === new Date().toISOString().split('T')[0])
+      ) {
         loadTransactions();
       } else if (action === 'UPDATE') {
         setTransactions(prev => prev.map(t => t.id === data.id ? { ...t, ...data } : t));

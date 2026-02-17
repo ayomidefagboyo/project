@@ -390,16 +390,57 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     const draft = departmentPolicyDrafts[departmentId];
     if (!draft) return;
     const markup = Math.max(0, Number(draft.default_markup_percentage || 0));
+    const department = departments.find((item) => item.id === departmentId);
+    if (!department) return;
 
     try {
       setDepartmentSavingId(departmentId);
-      const updated = await posService.updateDepartment(departmentId, {
-        default_markup_percentage: markup,
-        auto_pricing_enabled: draft.auto_pricing_enabled,
-      });
-      setDepartments((prev) =>
-        prev.map((department) => (department.id === departmentId ? { ...department, ...updated } : department))
-      );
+
+      if (department.source === 'product_category') {
+        if (!currentOutlet?.id) {
+          setDepartmentModalError('Select an outlet before saving department policy.');
+          return;
+        }
+
+        // Category-only entries do not yet have a master policy row.
+        // Promote to a real department record so margin/auto-pricing can be persisted.
+        const created = await posService.createDepartment({
+          outlet_id: currentOutlet.id,
+          name: department.name,
+          code: department.code || undefined,
+          description: department.description || undefined,
+          default_markup_percentage: markup,
+          auto_pricing_enabled: draft.auto_pricing_enabled,
+        });
+
+        setDepartments((prev) => {
+          const key = created.name.trim().toLowerCase();
+          return prev.map((item) =>
+            item.id === departmentId || item.name.trim().toLowerCase() === key
+              ? { ...item, ...created, source: 'master' }
+              : item
+          );
+        });
+
+        setDepartmentPolicyDrafts((prev) => {
+          const next = { ...prev };
+          delete next[departmentId];
+          next[created.id] = {
+            default_markup_percentage: String(Number(created.default_markup_percentage ?? markup)),
+            auto_pricing_enabled: created.auto_pricing_enabled !== false,
+          };
+          return next;
+        });
+      } else {
+        const updated = await posService.updateDepartment(departmentId, {
+          default_markup_percentage: markup,
+          auto_pricing_enabled: draft.auto_pricing_enabled,
+        });
+        setDepartments((prev) =>
+          prev.map((item) => (item.id === departmentId ? { ...item, ...updated } : item))
+        );
+      }
+
       setDepartmentModalError(null);
       setError(null);
     } catch (err) {
@@ -1049,7 +1090,8 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                     </thead>
                     <tbody className="divide-y divide-stone-100">
                       {departments
-                        .filter((department) => department.source !== 'product_category')
+                        .slice()
+                        .sort((a, b) => a.name.localeCompare(b.name))
                         .map((department) => {
                           const draft = departmentPolicyDrafts[department.id] || {
                             default_markup_percentage: String(Number(department.default_markup_percentage ?? 30)),
@@ -1057,7 +1099,12 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                           };
                           return (
                             <tr key={department.id}>
-                              <td className="px-3 py-2 font-medium text-slate-900">{department.name}</td>
+                              <td className="px-3 py-2">
+                                <div className="font-medium text-slate-900">{department.name}</div>
+                                {department.source === 'product_category' && (
+                                  <div className="text-[11px] text-stone-500">From existing items</div>
+                                )}
+                              </td>
                               <td className="px-3 py-2">
                                 <input
                                   type="number"
@@ -1099,7 +1146,11 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                                   disabled={departmentSavingId === department.id}
                                   className="px-3 py-2 rounded-lg border border-stone-300 bg-white hover:bg-stone-100 text-xs font-semibold text-slate-700 disabled:opacity-60"
                                 >
-                                  {departmentSavingId === department.id ? 'Saving...' : 'Save'}
+                                  {departmentSavingId === department.id
+                                    ? 'Saving...'
+                                    : department.source === 'product_category'
+                                      ? 'Create Policy'
+                                      : 'Save'}
                                 </button>
                               </td>
                             </tr>
