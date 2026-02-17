@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import POSDashboard, { type POSDashboardHandle } from './components/pos/POSDashboard';
 import ProductManagement, { type ProductManagementHandle } from './components/pos/ProductManagement';
 import POSEODDashboard from './pages/EODDashboard';
@@ -61,6 +61,10 @@ function AppContent() {
   const [searchResults, setSearchResults] = useState<POSProduct[]>([]);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const scannerBufferRef = useRef('');
+  const scannerLastKeyAtRef = useRef(0);
+  const onlineSyncInFlightRef = useRef(false);
+  const lastCatalogSyncAtRef = useRef(0);
 
   // Import/Export State
   const [showImportModal, setShowImportModal] = useState(false);
@@ -121,30 +125,50 @@ function AppContent() {
     };
   }, []);
 
-  // Keep syncing queued offline sales regardless of active terminal page.
+  // Keep local outlet cache warm and sync queued offline sales while online.
   useEffect(() => {
     if (terminalPhase !== 'operational' || !terminalConfig?.outlet_id || !isOnline) return;
 
     let disposed = false;
+    const outletId = terminalConfig.outlet_id;
 
-    const retryPendingSalesSync = async () => {
+    const runOnlineSync = async (forceCatalog = false) => {
+      if (onlineSyncInFlightRef.current) return;
+      onlineSyncInFlightRef.current = true;
+
       try {
-        const pendingCount = await posService.getOfflineTransactionCount();
-        if (pendingCount <= 0 || disposed) return;
+        const now = Date.now();
+        const shouldSyncCatalog = forceCatalog || now - lastCatalogSyncAtRef.current >= 30_000;
+        if (shouldSyncCatalog) {
+          try {
+            await posService.syncProductCatalog(outletId, { forceFull: false, maxPages: 300 });
+            lastCatalogSyncAtRef.current = now;
+            if (!disposed) {
+              window.dispatchEvent(new CustomEvent('pos-products-synced'));
+            }
+          } catch (catalogSyncError) {
+            console.warn('Background product catalog sync failed:', catalogSyncError);
+          }
+        }
 
-        const synced = await posService.syncOfflineTransactions();
-        if (synced > 0 && !disposed) {
-          window.dispatchEvent(new CustomEvent('pos-transactions-synced', { detail: { synced } }));
+        const pendingCount = await posService.getOfflineTransactionCount();
+        if (pendingCount > 0 && !disposed) {
+          const synced = await posService.syncOfflineTransactions();
+          if (synced > 0 && !disposed) {
+            window.dispatchEvent(new CustomEvent('pos-transactions-synced', { detail: { synced } }));
+          }
         }
       } catch (syncError) {
-        console.warn('Background offline transaction sync failed:', syncError);
+        console.warn('Background online sync failed:', syncError);
+      } finally {
+        onlineSyncInFlightRef.current = false;
       }
     };
 
-    void retryPendingSalesSync();
+    void runOnlineSync(true);
     const intervalId = window.setInterval(() => {
-      void retryPendingSalesSync();
-    }, 8000);
+      void runOnlineSync(false);
+    }, 10_000);
 
     return () => {
       disposed = true;
@@ -305,27 +329,100 @@ function AppContent() {
   };
 
   // Handle barcode scan
-  const handleBarcodeScan = async (barcode: string): Promise<boolean> => {
+  const handleBarcodeScan = useCallback(async (barcode: string): Promise<boolean> => {
     if (!currentOutlet?.id) return false;
+    const normalizedBarcode = barcode.trim();
+    if (!normalizedBarcode) return false;
 
     try {
-      const product = await posService.getProductByBarcode(barcode, currentOutlet.id);
+      const product = await posService.getProductByBarcode(normalizedBarcode, currentOutlet.id);
       if (posDashboardRef.current) {
         posDashboardRef.current.addToCart(product);
       }
       return true;
     } catch (err) {
       console.error('Barcode scan error:', err);
+      const message = err instanceof Error ? err.message.toLowerCase() : '';
+      const notFound = message.includes('not found') || message.includes('404');
+      if (!notFound) {
+        error('Could not verify barcode now. Check connection and try again.');
+        return false;
+      }
+
       setMissingProductIntent({
-        barcode,
+        barcode: normalizedBarcode,
         created_at: new Date().toISOString(),
         source: 'register_scan',
       });
-      navigate(`/products?auto_create=1&barcode=${encodeURIComponent(barcode)}`);
+      navigate(`/products?auto_create=1&barcode=${encodeURIComponent(normalizedBarcode)}`);
       error('Item not found. Opening product creation.');
       return false;
     }
-  };
+  }, [currentOutlet?.id, navigate, error]);
+
+  // Global barcode scanner capture for Register:
+  // scanners often type quickly and submit with Enter, even when search input isn't focused.
+  useEffect(() => {
+    if (terminalPhase !== 'operational') return;
+    if (location.pathname !== '/') return;
+
+    const handleGlobalScannerInput = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+
+      const target = event.target as HTMLElement | null;
+      const isInputTarget =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        !!target?.isContentEditable;
+
+      // Allow scanner capture while search input is focused, but avoid hijacking other form fields.
+      if (isInputTarget) {
+        const inputId = target instanceof HTMLInputElement ? target.id : '';
+        if (inputId !== 'pos-product-search-input') {
+          return;
+        }
+      }
+
+      const now = Date.now();
+      const interKeyMs = now - scannerLastKeyAtRef.current;
+
+      if (event.key === 'Enter') {
+        const scanned = scannerBufferRef.current.trim();
+        scannerBufferRef.current = '';
+        scannerLastKeyAtRef.current = 0;
+
+        const looksLikeBarcode =
+          scanned.length >= 4 &&
+          !/\s/.test(scanned) &&
+          /\d/.test(scanned);
+
+        if (!looksLikeBarcode) return;
+
+        event.preventDefault();
+        void handleBarcodeScan(scanned);
+        return;
+      }
+
+      if (event.key.length === 1 && !event.repeat) {
+        // Scanner keystrokes are rapid; if paused too long, start a fresh buffer.
+        if (interKeyMs > 120) {
+          scannerBufferRef.current = '';
+        }
+        scannerBufferRef.current += event.key;
+        scannerLastKeyAtRef.current = now;
+        return;
+      }
+
+      if (event.key !== 'Shift') {
+        scannerBufferRef.current = '';
+        scannerLastKeyAtRef.current = 0;
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalScannerInput);
+    return () => window.removeEventListener('keydown', handleGlobalScannerInput);
+  }, [terminalPhase, location.pathname, handleBarcodeScan]);
 
   // Header content for POS terminal page
   const posTerminalHeader = (
@@ -339,15 +436,21 @@ function AppContent() {
           placeholder="Scan barcode or search product name/SKU..."
           value={searchQuery}
           onChange={(e) => handleSearchChange(e.target.value)}
-          onKeyPress={async (e) => {
+          onKeyDown={async (e) => {
             if (e.key === 'Enter') {
               const query = searchQuery.trim();
-              // If it looks like a barcode (long numeric/alphanumeric string), try barcode scan first
-              if (query.length >= 8 && /^[A-Z0-9]+$/i.test(query)) {
+              // Try barcode lookup first for scanner-like strings.
+              const scannerLikeQuery =
+                query.length >= 4 &&
+                !/\s/.test(query) &&
+                /^[A-Z0-9._/-]+$/i.test(query) &&
+                /\d/.test(query);
+              if (scannerLikeQuery) {
                 const foundByScan = await handleBarcodeScan(query);
                 if (foundByScan) {
                   setSearchQuery('');
                   setShowSearchDropdown(false);
+                  setSearchResults([]);
                   return;
                 }
               }

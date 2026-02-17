@@ -171,20 +171,49 @@ class DexieOfflineDatabase implements OfflineDatabase {
 
   // Optimized Search Method
   async searchProducts(outletId: string, query: string): Promise<POSProduct[]> {
-    const q = query.toLowerCase();
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) return [];
+    const q = normalizedQuery.toLowerCase();
+    const looseQuery = q.replace(/[^a-z0-9]/g, '');
 
     // 1. Exact Barcode Match (Fastest)
     const barcodeMatch = await db.products
-      .where('barcode').equals(query)
+      .where('barcode').equals(normalizedQuery)
+      .and((product) => product.outlet_id === outletId && product.is_active)
       .first();
 
     if (barcodeMatch) return [barcodeMatch];
 
     // 2. Exact SKU Match
-    const skuMatch = await db.products.where('sku').equals(query).first();
+    const skuMatch = await db.products
+      .where('sku')
+      .equals(normalizedQuery)
+      .and((product) => product.outlet_id === outletId && product.is_active)
+      .first();
     if (skuMatch) return [skuMatch];
 
-    // 3. Name Search using Multi-Entry Index (Fast "StartsWith")
+    // 3. Normalized exact match fallback (scanner/barcode formatting differences).
+    if (looseQuery.length >= 4) {
+      const normalizedMatch = await db.products
+        .where('outlet_id')
+        .equals(outletId)
+        .filter((product) => {
+          if (!product.is_active) return false;
+          const barcodeLoose = String(product.barcode || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, '');
+          const skuLoose = String(product.sku || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, '');
+          return barcodeLoose === looseQuery || skuLoose === looseQuery;
+        })
+        .first();
+      if (normalizedMatch) return [normalizedMatch];
+    }
+
+    // 4. Name Search using Multi-Entry Index (Fast "StartsWith")
     // This finds any token that starts with query.
     // e.g. "coc" matches "coca cola" via "coca" token.
     let results = await db.products

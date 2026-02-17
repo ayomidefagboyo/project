@@ -155,6 +155,14 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
   }, [currentOutlet?.id, searchQuery, selectedCategory]);
 
   useEffect(() => {
+    const handleProductsSynced = () => {
+      void loadProducts();
+    };
+    window.addEventListener('pos-products-synced', handleProductsSynced);
+    return () => window.removeEventListener('pos-products-synced', handleProductsSynced);
+  }, [currentOutlet?.id, searchQuery, selectedCategory]);
+
+  useEffect(() => {
     void loadDepartments();
   }, [currentOutlet?.id]);
 
@@ -227,8 +235,27 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
       setIsLoading(false);
 
       const isOnlineNow = typeof navigator === 'undefined' ? true : navigator.onLine;
-      const shouldSyncFromBackend = !searchQuery.trim();
-      if (!isOnlineNow || !shouldSyncFromBackend) return;
+      const trimmedSearch = searchQuery.trim();
+      if (!isOnlineNow) return;
+
+      if (trimmedSearch) {
+        if (hasCached) return;
+        try {
+          const online = await posService.getProducts(outletId, {
+            search: trimmedSearch,
+            category: selectedCategory || undefined,
+            activeOnly: false,
+            page: 1,
+            size: 500,
+          });
+          if (requestId !== loadRequestRef.current) return;
+          setProducts(online.items || []);
+        } catch (onlineSearchErr) {
+          if (requestId !== loadRequestRef.current) return;
+          console.warn('Online product search fallback failed:', onlineSearchErr);
+        }
+        return;
+      }
 
       void (async () => {
         try {

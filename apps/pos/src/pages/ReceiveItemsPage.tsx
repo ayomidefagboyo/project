@@ -122,6 +122,33 @@ const looksLikeBarcode = (value: string): boolean => {
   return /\d/.test(normalized) || normalized.length >= 8;
 };
 
+const normalizeLookupStrict = (value?: string | null): string =>
+  String(value || '').trim().toLowerCase();
+
+const normalizeLookupLoose = (value?: string | null): string =>
+  normalizeLookupStrict(value).replace(/[^a-z0-9]/g, '');
+
+const productMatchesLookup = (product: POSProduct, query: string): boolean => {
+  const strictQuery = normalizeLookupStrict(query);
+  if (!strictQuery) return false;
+
+  if (
+    normalizeLookupStrict(product.barcode) === strictQuery ||
+    normalizeLookupStrict(product.sku) === strictQuery ||
+    normalizeLookupStrict(product.name) === strictQuery
+  ) {
+    return true;
+  }
+
+  const looseQuery = normalizeLookupLoose(query);
+  if (!looseQuery) return false;
+
+  return (
+    normalizeLookupLoose(product.barcode) === looseQuery ||
+    normalizeLookupLoose(product.sku) === looseQuery
+  );
+};
+
 const ReceiveItemsPage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -422,6 +449,27 @@ const ReceiveItemsPage: React.FC = () => {
     load();
   }, [currentOutlet?.id]);
 
+  useEffect(() => {
+    if (!currentOutlet?.id) return;
+
+    const outletId = currentOutlet.id;
+    const handleProductsSynced = async () => {
+      try {
+        const refreshed = await posService.getCachedProducts(outletId, {
+          activeOnly: false,
+          page: 1,
+          size: 20000,
+        });
+        setProducts(refreshed.items || []);
+      } catch (refreshError) {
+        console.warn('Failed to refresh Receive Items products after sync event:', refreshError);
+      }
+    };
+
+    window.addEventListener('pos-products-synced', handleProductsSynced);
+    return () => window.removeEventListener('pos-products-synced', handleProductsSynced);
+  }, [currentOutlet?.id]);
+
   const loadHistory = useCallback(async () => {
     if (!currentOutlet?.id) return;
 
@@ -631,7 +679,7 @@ const ReceiveItemsPage: React.FC = () => {
     });
   };
 
-  const addQuickEntryToken = useCallback((rawEntry: string) => {
+  const addQuickEntryToken = useCallback(async (rawEntry: string) => {
     const token = parseQuickToken(rawEntry);
     const query = token.identifier;
     if (!query) return;
@@ -647,7 +695,19 @@ const ReceiveItemsPage: React.FC = () => {
       return;
     }
 
-    const matches = quickMatches;
+    let matches = quickMatches;
+    if (matches.length === 0) {
+      matches = await searchProductsFast(query, 8);
+    }
+
+    const exactMatch = matches.find((product) => productMatchesLookup(product, query));
+    if (exactMatch) {
+      upsertLineFromProduct(exactMatch, qty, unitPrice);
+      setQuickEntry('');
+      focusQuickEntry();
+      return;
+    }
+
     if (matches.length === 1) {
       upsertLineFromProduct(matches[0], qty, unitPrice);
       setQuickEntry('');
@@ -676,10 +736,10 @@ const ReceiveItemsPage: React.FC = () => {
     ]);
     setQuickEntry('');
     focusQuickEntry();
-  }, [findProductExact, quickMatches, quickCost, quickQuantity, resolveDepartmentPricing]);
+  }, [findProductExact, quickMatches, quickCost, quickQuantity, resolveDepartmentPricing, searchProductsFast]);
 
-  const handleQuickAdd = () => {
-    addQuickEntryToken(quickEntry);
+  const handleQuickAdd = async () => {
+    await addQuickEntryToken(quickEntry);
   };
 
   useEffect(() => {
@@ -691,7 +751,7 @@ const ReceiveItemsPage: React.FC = () => {
 
     if (!barcode) return;
 
-    addQuickEntryToken(barcode);
+    void addQuickEntryToken(barcode);
     clearMissingProductIntent();
 
     if (autoCreate) {
@@ -1241,14 +1301,14 @@ const ReceiveItemsPage: React.FC = () => {
                           onKeyDown={(event) => {
                             if (event.key === 'Enter') {
                               event.preventDefault();
-                              handleQuickAdd();
+                              void handleQuickAdd();
                             }
                           }}
                           placeholder="Scan barcode/SKU or type name (optional xQty, e.g. 123456 x6)"
                           className="w-full px-2 py-3 bg-transparent text-sm text-slate-800 focus:outline-none"
                         />
                         <button
-                          onClick={handleQuickAdd}
+                          onClick={() => { void handleQuickAdd(); }}
                           className="px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-stone-100 text-xs font-semibold"
                         >
                           Add
@@ -1433,6 +1493,35 @@ const ReceiveItemsPage: React.FC = () => {
                                     <input
                                       value={lineProductSearch}
                                       onChange={(event) => setLineProductSearch(event.target.value)}
+                                      onKeyDown={(event) => {
+                                        if (event.key !== 'Enter') return;
+                                        event.preventDefault();
+
+                                        const exactCurrent = lineSearchMatches.find((product) =>
+                                          productMatchesLookup(product, lineProductSearch)
+                                        );
+                                        if (exactCurrent) {
+                                          linkProductToLine(line.lineId, exactCurrent);
+                                          return;
+                                        }
+
+                                        if (lineSearchMatches.length === 1) {
+                                          linkProductToLine(line.lineId, lineSearchMatches[0]);
+                                          return;
+                                        }
+
+                                        void (async () => {
+                                          const freshMatches = await searchProductsFast(lineProductSearch, 10);
+                                          const exactFresh = freshMatches.find((product) =>
+                                            productMatchesLookup(product, lineProductSearch)
+                                          );
+                                          const resolved =
+                                            exactFresh || (freshMatches.length === 1 ? freshMatches[0] : null);
+                                          if (resolved) {
+                                            linkProductToLine(line.lineId, resolved);
+                                          }
+                                        })();
+                                      }}
                                       placeholder="Search product by name, barcode, sku"
                                       className="w-full px-2.5 py-2 rounded-lg border border-stone-300 text-xs focus:outline-none focus:ring-2 focus:ring-slate-300"
                                       autoFocus
