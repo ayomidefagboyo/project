@@ -13,8 +13,16 @@
 
 import { app, BrowserWindow, ipcMain, Menu } from 'electron';
 import * as path from 'node:path';
-import { printReceipt, listPrinters, setMainWindow } from './printBridge';
-import { buildReceiptPayload } from './escpos';
+import { fileURLToPath } from 'node:url';
+import { printReceipt, listPrinters, setMainWindow } from './printBridge.js';
+import { buildReceiptPayload } from './escpos.js';
+
+// ---------------------------------------------------------------------------
+// ESM __dirname equivalent
+// ---------------------------------------------------------------------------
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -22,7 +30,7 @@ import { buildReceiptPayload } from './escpos';
 
 const isDev = !app.isPackaged;
 
-const PRELOAD_PATH = path.join(__dirname, 'preload.js');
+const PRELOAD_PATH = path.join(__dirname, 'preload.cjs');
 const DIST_PATH = path.join(__dirname, '..', 'dist');
 const DEV_URL = 'http://localhost:5174';
 
