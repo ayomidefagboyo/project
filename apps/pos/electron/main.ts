@@ -15,7 +15,6 @@ import { app, BrowserWindow, ipcMain, Menu } from 'electron';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { printReceipt, listPrinters, setMainWindow } from './printBridge.js';
-import { buildReceiptPayload } from './escpos.js';
 
 // ---------------------------------------------------------------------------
 // ESM __dirname equivalent
@@ -28,11 +27,11 @@ const __dirname = path.dirname(__filename);
 // Paths
 // ---------------------------------------------------------------------------
 
-const isDev = !app.isPackaged;
-
 const PRELOAD_PATH = path.join(__dirname, 'preload.cjs');
 const DIST_PATH = path.join(__dirname, '..', 'dist');
 const DEV_URL = 'http://localhost:5174';
+
+const isDev = !app.isPackaged;
 
 // ---------------------------------------------------------------------------
 // Single-instance lock — prevent launching multiple windows
@@ -72,9 +71,11 @@ const createWindow = (): void => {
   setMainWindow(mainWindow);
 
   if (isDev) {
-    mainWindow.loadURL(DEV_URL);
-    // Uncomment the next line to open DevTools by default in dev mode:
-    // mainWindow.webContents.openDevTools();
+    // In dev, try Vite dev server first; fall back to dist/ if server isn't running
+    mainWindow.loadURL(DEV_URL).catch(() => {
+      console.log('Vite dev server not available, loading production build...');
+      mainWindow!.loadFile(path.join(DIST_PATH, 'index.html'));
+    });
   } else {
     mainWindow.loadFile(path.join(DIST_PATH, 'index.html'));
   }
