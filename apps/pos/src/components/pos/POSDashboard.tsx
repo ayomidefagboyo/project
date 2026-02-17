@@ -1105,6 +1105,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     if (!currentOutlet?.id || cart.length === 0 || !currentUser) return;
 
     const totals = calculateCartTotals();
+    const holdCashierId = currentStaff?.id || currentUser.id;
+    const holdCashierName = currentStaff?.display_name || currentUser.name || 'Cashier';
 
     // Prepare items for backend - include full product data for restoration
     const items = cart.map(item => ({
@@ -1127,8 +1129,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       cart,
       saved_at: new Date().toISOString(),
       total: totals.total,
-      cashier_id: currentUser.id,
-      cashier_name: currentUser.name || 'Cashier',
+      cashier_id: holdCashierId,
+      cashier_name: holdCashierName,
       synced: false,
     };
 
@@ -1142,7 +1144,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
         try {
           const receipt = await posService.createHeldReceipt({
             outlet_id: currentOutlet.id,
-            cashier_id: currentUser.id,
+            cashier_id: holdCashierId,
             items,
             total: totals.total,
           });
