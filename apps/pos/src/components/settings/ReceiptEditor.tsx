@@ -256,9 +256,10 @@ const ReceiptEditor: React.FC = () => {
               ...source.header,
               businessName: receiptSettings.header_text ?? outletInfo.name ?? source.header.businessName,
               address: addressText,
-              phone: outletInfo.phone ?? source.header.phone,
-              email: outletInfo.email ?? source.header.email,
-              website: outletInfo.website ?? source.header.website,
+              // Respect explicit null/empty values from outlet profile; only fallback when truly undefined.
+              phone: outletInfo.phone !== undefined ? (outletInfo.phone ?? '') : source.header.phone,
+              email: outletInfo.email !== undefined ? (outletInfo.email ?? '') : source.header.email,
+              website: outletInfo.website !== undefined ? (outletInfo.website ?? '') : source.header.website,
               logoUrl: receiptSettings.logo_url ?? source.header.logoUrl,
               showQR: receiptSettings.show_qr_code ?? source.header.showQR
             },
