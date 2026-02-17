@@ -3,7 +3,7 @@ Authentication service for handling user authentication and authorization
 """
 
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import HTTPException, status
@@ -247,7 +247,7 @@ class AuthService:
                     "name": profile["name"],
                     "role": profile["role"],
                     "outlet_id": profile["outlet_id"],
-                    "permissions": profile["permissions"] or [],
+                    "permissions": self._effective_permissions(profile["role"], profile.get("permissions")),
                     "is_owner": profile["role"] == "outlet_admin",
                     "is_active": profile["is_active"],
                     "created_at": profile["created_at"],
@@ -299,6 +299,7 @@ class AuthService:
             }
         
         profile = user_response.data[0]
+        effective_permissions = self._effective_permissions(profile.get("role"), profile.get("permissions"))
         
         return {
             "id": profile["id"],
@@ -306,7 +307,7 @@ class AuthService:
             "name": profile["name"],
             "role": profile["role"],
             "outlet_id": profile["outlet_id"],
-            "permissions": profile["permissions"] or [],
+            "permissions": effective_permissions,
             "is_owner": profile["role"] == "outlet_admin",
             "is_active": profile["is_active"],
             "created_at": profile["created_at"],
@@ -358,21 +359,29 @@ class AuthService:
     def _get_default_permissions(self, role: str) -> list[str]:
         """Get default permissions based on role"""
         permissions_map = {
+            "business_owner": [
+                "view_dashboard", "view_sales", "create_sales", "edit_sales", "delete_sales",
+                "view_inventory", "manage_inventory", "view_expenses", "manage_expenses",
+                "view_reports", "generate_reports", "manage_users", "view_analytics",
+                "manage_settings", "view_vendors", "manage_vendors"
+            ],
             "super_admin": [
                 "view_dashboard", "view_sales", "create_sales", "edit_sales", "delete_sales",
                 "view_inventory", "manage_inventory", "view_expenses", "manage_expenses",
                 "view_reports", "generate_reports", "manage_users", "manage_outlets",
-                "view_analytics", "manage_settings"
+                "view_analytics", "manage_settings", "view_vendors", "manage_vendors"
             ],
             "outlet_admin": [
                 "view_dashboard", "view_sales", "create_sales", "edit_sales", "delete_sales",
                 "view_inventory", "manage_inventory", "view_expenses", "manage_expenses",
-                "view_reports", "generate_reports", "manage_users", "view_analytics", "manage_settings"
+                "view_reports", "generate_reports", "manage_users", "view_analytics",
+                "manage_settings", "view_vendors", "manage_vendors"
             ],
             "manager": [
                 "view_dashboard", "view_sales", "create_sales", "edit_sales",
                 "view_inventory", "view_expenses", "manage_expenses",
-                "view_reports", "generate_reports", "view_analytics"
+                "view_reports", "generate_reports", "view_analytics",
+                "view_vendors", "manage_vendors"
             ],
             "cashier": [
                 "view_dashboard", "view_sales", "create_sales",
@@ -385,16 +394,17 @@ class AuthService:
                 "view_dashboard", "view_inventory"
             ],
             "inventory_staff": [
-                "view_dashboard", "view_inventory", "manage_inventory"
+                "view_dashboard", "view_inventory", "manage_inventory",
+                "view_vendors"
             ],
             "pharmacist": [
                 "view_dashboard", "create_sales", "view_inventory", "manage_inventory",
-                "view_reports", "view_analytics"
+                "view_reports", "view_analytics", "view_vendors", "manage_vendors"
             ],
             # Backward compatibility for existing staff records
             "accountant": [
                 "view_dashboard", "create_sales", "view_inventory", "manage_inventory",
-                "view_reports", "view_analytics"
+                "view_reports", "view_analytics", "view_vendors", "manage_vendors"
             ],
             "viewer": [
                 "view_dashboard", "view_reports"
@@ -402,6 +412,21 @@ class AuthService:
         }
         
         return permissions_map.get(role, ["view_dashboard"])
+
+    def _effective_permissions(self, role: Optional[str], stored_permissions: Optional[List[str]]) -> List[str]:
+        """
+        Merge stored profile permissions with role defaults so new permission keys
+        (for example vendor permissions) apply immediately without manual DB patching.
+        """
+        default_permissions = self._get_default_permissions(str(role or "").strip().lower())
+        merged_permissions: List[str] = []
+
+        for permission in (stored_permissions or []) + default_permissions:
+            normalized = str(permission or "").strip()
+            if normalized and normalized not in merged_permissions:
+                merged_permissions.append(normalized)
+
+        return merged_permissions
 
 
 # Create service instance
