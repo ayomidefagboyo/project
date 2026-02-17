@@ -10,6 +10,8 @@ import { useOutlet } from '../contexts/OutletContext';
 import { useToast } from '../components/ui/Toast';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
 import { printReceiptContent } from '../lib/receiptPrinter';
+import type { ReceiptPrintStyle } from '../lib/receiptPrinter';
+import type { ReceiptTemplate } from '../components/settings/ReceiptEditor';
 
 // Extend base transaction type with UI-specific fields returned by API
 interface ExtendedTransaction extends POSTransaction {
@@ -519,9 +521,30 @@ const TransactionsPage: React.FC = () => {
         return;
       }
 
+      // Read template styling for the print window
+      let printStyle: ReceiptPrintStyle | undefined;
+      if (currentOutlet?.id) {
+        try {
+          const scopedRaw = localStorage.getItem(`pos-receipt-template:${currentOutlet.id}`);
+          const raw = scopedRaw || localStorage.getItem('pos-receipt-template');
+          if (raw) {
+            const tpl = JSON.parse(raw) as ReceiptTemplate;
+            if (tpl?.styling) {
+              printStyle = {
+                fontSize: tpl.styling.fontSize,
+                fontFamily: tpl.styling.fontFamily,
+                lineSpacing: tpl.styling.lineSpacing,
+                paperWidth: tpl.styling.paperWidth,
+              };
+            }
+          }
+        } catch { /* ignore parse errors */ }
+      }
+
       const printed = await printReceiptContent(printResult.receipt_content, {
         title: `Receipt ${selectedTransaction.transaction_number}`,
         copies: 1,
+        style: printStyle,
       });
       if (!printed.success) {
         showError('Unable to open print flow. Allow pop-ups or configure native print bridge.');
