@@ -63,6 +63,7 @@ function AppContent() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const scannerBufferRef = useRef('');
   const scannerLastKeyAtRef = useRef(0);
+  const searchRequestRef = useRef(0);
   const onlineSyncInFlightRef = useRef(false);
   const lastCatalogSyncAtRef = useRef(0);
 
@@ -278,6 +279,7 @@ function AppContent() {
 
   // Search function - use local Dexie + in-memory for instant results
   const handleSearchChange = async (query: string) => {
+    const requestId = ++searchRequestRef.current;
     setSearchQuery(query);
 
     // Minimum characters before searching (start after 1 character)
@@ -290,6 +292,7 @@ function AppContent() {
     try {
       // Use optimized local search (IndexedDB via Dexie)
       const localResults = await posService.searchLocalProducts(currentOutlet.id, query.trim());
+      if (requestId !== searchRequestRef.current) return;
 
       // Limit dropdown size for UX
       let topResults = localResults.slice(0, 25);
@@ -303,15 +306,18 @@ function AppContent() {
             page: 1,
             size: 25,
           });
+          if (requestId !== searchRequestRef.current) return;
           topResults = (onlineResult.items || []).slice(0, 25);
         } catch (onlineErr) {
           console.warn('Online search fallback failed:', onlineErr);
         }
       }
 
+      if (requestId !== searchRequestRef.current) return;
       setSearchResults(topResults);
       setShowSearchDropdown(topResults.length > 0);
     } catch (error) {
+      if (requestId !== searchRequestRef.current) return;
       console.error('Local search error:', error);
       setSearchResults([]);
       setShowSearchDropdown(false);
@@ -323,6 +329,7 @@ function AppContent() {
     if (posDashboardRef.current) {
       posDashboardRef.current.addToCart(product);
     }
+    searchRequestRef.current += 1;
     setSearchQuery('');
     setShowSearchDropdown(false);
     setSearchResults([]);
@@ -339,6 +346,10 @@ function AppContent() {
       if (posDashboardRef.current) {
         posDashboardRef.current.addToCart(product);
       }
+      searchRequestRef.current += 1;
+      setSearchQuery('');
+      setShowSearchDropdown(false);
+      setSearchResults([]);
       return true;
     } catch (err) {
       console.error('Barcode scan error:', err);
