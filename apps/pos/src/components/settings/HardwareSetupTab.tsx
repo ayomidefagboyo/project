@@ -649,7 +649,7 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
       printerName: printer.name,
     });
     if (!printResult.success) {
-      error('Test print failed. Configure a native printer bridge (Compazz/QZ) for this terminal.');
+      error('Test print failed. Allow pop-ups or configure a native printer bridge (Compazz/QZ) for this terminal.');
       return;
     }
 
