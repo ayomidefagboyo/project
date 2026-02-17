@@ -89,6 +89,7 @@ class Tables:
     FILES = "files"
     OCR_PROCESSING = "ocr_processing"
     POS_PRODUCTS = "pos_products"
+    POS_DEPARTMENTS = "pos_departments"
     POS_TRANSACTIONS = "pos_transactions"
     POS_TRANSACTION_ITEMS = "pos_transaction_items"
     STOCK_MOVEMENTS = "stock_movements"

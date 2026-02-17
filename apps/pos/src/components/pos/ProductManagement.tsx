@@ -3,7 +3,7 @@
  * Swiss Premium Design with touch optimization
  */
 
-import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
+import React, { useState, useEffect, useRef, useMemo, forwardRef, useImperativeHandle } from 'react';
 import {
   Plus,
   Save,
@@ -18,7 +18,7 @@ import {
   MoreHorizontal,
   ArrowLeft
 } from 'lucide-react';
-import { posService, type POSProduct } from '../../lib/posService';
+import { posService, type POSProduct, type POSDepartment } from '../../lib/posService';
 import { clearMissingProductIntent, peekMissingProductIntent } from '../../lib/missingProductIntent';
 import { useOutlet } from '../../contexts/OutletContext';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -32,11 +32,29 @@ export interface ProductManagementHandle {
   refresh: () => void;
 }
 
+const DEFAULT_DEPARTMENTS = [
+  'Beverages',
+  'Food & Groceries',
+  'Household Items',
+  'Personal Care',
+  'Electronics',
+  'Clothing',
+  'Office Supplies',
+  'Pharmacy',
+  'Other',
+];
+
+const normalizeDepartmentName = (value?: string | null): string => {
+  const normalized = String(value || '').trim();
+  return normalized;
+};
+
 const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementProps>(({ onShowNewRow }, ref) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { currentOutlet } = useOutlet();
   const [products, setProducts] = useState<POSProduct[]>([]);
+  const [departments, setDepartments] = useState<POSDepartment[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -48,21 +66,57 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
   const loadRequestRef = useRef(0);
   const newBarcodeInputRef = useRef<HTMLInputElement | null>(null);
 
-  const categories = [
-    'Beverages',
-    'Food & Groceries',
-    'Household Items',
-    'Personal Care',
-    'Electronics',
-    'Clothing',
-    'Office Supplies',
-    'Pharmacy',
-    'Other'
-  ];
+  const categoryOptions = useMemo(() => {
+    const byKey = new Map<string, string>();
+    const addValue = (value?: string | null) => {
+      const normalized = normalizeDepartmentName(value);
+      if (!normalized) return;
+      const key = normalized.toLowerCase();
+      if (!byKey.has(key)) {
+        byKey.set(key, normalized);
+      }
+    };
+
+    departments
+      .filter((department) => department.is_active !== false)
+      .forEach((department) => addValue(department.name));
+    products.forEach((product) => addValue(product.category));
+
+    if (byKey.size === 0) {
+      DEFAULT_DEPARTMENTS.forEach((department) => addValue(department));
+    }
+
+    return Array.from(byKey.values()).sort((a, b) => a.localeCompare(b));
+  }, [departments, products]);
+
+  const loadDepartments = async () => {
+    if (!currentOutlet?.id) {
+      setDepartments([]);
+      return;
+    }
+
+    try {
+      const rows = await posService.getDepartments(currentOutlet.id);
+      setDepartments(rows || []);
+    } catch (err) {
+      console.error('Failed to load departments:', err);
+      setDepartments([]);
+    }
+  };
 
   useEffect(() => {
     loadProducts();
   }, [currentOutlet?.id, searchQuery, selectedCategory]);
+
+  useEffect(() => {
+    void loadDepartments();
+  }, [currentOutlet?.id]);
+
+  useEffect(() => {
+    if (!selectedCategory) return;
+    if (categoryOptions.includes(selectedCategory)) return;
+    setSelectedCategory('');
+  }, [categoryOptions, selectedCategory]);
 
   const openNewRowForScannedBarcode = (rawBarcode: string) => {
     const barcode = rawBarcode.trim();
@@ -175,6 +229,34 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     setNewProduct(prev => ({ ...prev, [field]: value }));
   };
 
+  const handleCreateDepartment = async () => {
+    if (!currentOutlet?.id) return;
+
+    const input = window.prompt('Enter new department name');
+    const name = normalizeDepartmentName(input);
+    if (!name) return;
+
+    try {
+      const created = await posService.createDepartment({
+        outlet_id: currentOutlet.id,
+        name,
+      });
+      setDepartments((prev) => {
+        const next = [...prev];
+        const key = created.name.trim().toLowerCase();
+        if (!next.some((item) => item.name.trim().toLowerCase() === key)) {
+          next.push(created);
+        }
+        return next;
+      });
+      setSelectedCategory(created.name);
+      setError(null);
+    } catch (err) {
+      console.error('Failed to create department:', err);
+      setError('Failed to create department. Ensure migration is applied and try again.');
+    }
+  };
+
   const saveProduct = async (productId: string) => {
     const product = products.find(p => p.id === productId);
     if (!product) return;
@@ -281,11 +363,19 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
               onChange={(e) => setSelectedCategory(e.target.value)}
               className="min-w-[200px] max-w-full px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             >
-              <option value="">All Categories</option>
-              {categories.map(cat => (
+              <option value="">All Departments</option>
+              {categoryOptions.map((cat) => (
                 <option key={cat} value={cat}>{cat}</option>
               ))}
             </select>
+
+            <button
+              type="button"
+              onClick={handleCreateDepartment}
+              className="touch-target-sm px-3 py-2.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-sm font-medium"
+            >
+              + Department
+            </button>
 
             <button
               onClick={loadProducts}
@@ -320,7 +410,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                   <th className="text-left p-4 font-semibold text-slate-900">SKU</th>
                   <th className="text-left p-4 font-semibold text-slate-900">Barcode</th>
                   <th className="text-left p-4 font-semibold text-slate-900">Product Name</th>
-                  <th className="text-left p-4 font-semibold text-slate-900">Category</th>
+                  <th className="text-left p-4 font-semibold text-slate-900">Department</th>
                   <th className="text-right p-4 font-semibold text-slate-900">Cost Price</th>
                   <th className="text-right p-4 font-semibold text-slate-900">Selling Price</th>
                   <th className="text-right p-4 font-semibold text-slate-900">Stock</th>
@@ -371,8 +461,8 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                         onChange={(e) => handleNewProductChange('category', e.target.value)}
                         className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 text-sm"
                       >
-                        <option value="">Select Category</option>
-                        {categories.map(cat => (
+                        <option value="">Select Department</option>
+                        {categoryOptions.map((cat) => (
                           <option key={cat} value={cat}>{cat}</option>
                         ))}
                       </select>
@@ -494,7 +584,8 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                             onChange={(e) => handleCellEdit(product.id, 'category', e.target.value)}
                             className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500"
                           >
-                            {categories.map(cat => (
+                            <option value="">Uncategorized</option>
+                            {categoryOptions.map((cat) => (
                               <option key={cat} value={cat}>{cat}</option>
                             ))}
                           </select>

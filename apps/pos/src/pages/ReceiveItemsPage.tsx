@@ -33,7 +33,7 @@ import {
   type ReceiveGoodsResponse,
 } from '../lib/invoiceService';
 import { vendorService, type CreateVendorData } from '../lib/vendorService';
-import { posService, type POSProduct } from '../lib/posService';
+import { posService, type POSProduct, type POSDepartment } from '../lib/posService';
 import { useTerminalId } from '../hooks/useTerminalId';
 import { printProductLabels, type ProductLabelData } from '../lib/labelPrinter';
 import { loadHardwareState, resolveLabelPrinter } from '../lib/hardwareProfiles';
@@ -79,6 +79,9 @@ const parseNumber = (value: string, fallback = 0): number => {
   return next;
 };
 
+const normalizeDepartmentName = (value?: string | null): string =>
+  String(value || '').trim();
+
 const parseQuickToken = (value: string): { identifier: string; quantity: number | null } => {
   const raw = value.trim();
   if (!raw) return { identifier: '', quantity: null };
@@ -119,6 +122,7 @@ const ReceiveItemsPage: React.FC = () => {
   const [items, setItems] = useState<ReceiveLine[]>([]);
 
   const [products, setProducts] = useState<POSProduct[]>([]);
+  const [departments, setDepartments] = useState<POSDepartment[]>([]);
   const [lineSearchTargetId, setLineSearchTargetId] = useState<string | null>(null);
   const [lineProductSearch, setLineProductSearch] = useState('');
 
@@ -218,6 +222,25 @@ const ReceiveItemsPage: React.FC = () => {
       .slice(0, 10);
   }, [lineProductSearch, products]);
 
+  const departmentOptions = useMemo(() => {
+    const byKey = new Map<string, string>();
+    const addValue = (value?: string | null) => {
+      const normalized = normalizeDepartmentName(value);
+      if (!normalized) return;
+      const key = normalized.toLowerCase();
+      if (!byKey.has(key)) {
+        byKey.set(key, normalized);
+      }
+    };
+
+    departments
+      .filter((department) => department.is_active !== false)
+      .forEach((department) => addValue(department.name));
+    products.forEach((product) => addValue(product.category));
+
+    return Array.from(byKey.values()).sort((a, b) => a.localeCompare(b));
+  }, [departments, products]);
+
   const subtotal = useMemo(
     () => items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0),
     [items]
@@ -298,9 +321,10 @@ const ReceiveItemsPage: React.FC = () => {
 
     const load = async () => {
       try {
-        const [vendorRes, productRes] = await Promise.all([
+        const [vendorRes, productRes, departmentRes] = await Promise.all([
           vendorService.getVendors(currentOutlet.id),
           posService.getAllProducts(currentOutlet.id, { activeOnly: false }),
+          posService.getDepartments(currentOutlet.id).catch(() => []),
         ]);
 
         if (vendorRes.data) {
@@ -311,6 +335,7 @@ const ReceiveItemsPage: React.FC = () => {
         }
 
         setProducts(productRes || []);
+        setDepartments((departmentRes as POSDepartment[]) || []);
       } catch (loadError) {
         console.error('Failed to load receiving data:', loadError);
         setError('Unable to load vendors/products. Please refresh.');
@@ -1165,11 +1190,12 @@ const ReceiveItemsPage: React.FC = () => {
 
                             <td className="px-3 py-2">
                               <input
+                                list="receive-department-options"
                                 value={line.category || ''}
                                 onChange={(event) =>
                                   updateLine(line.lineId, 'category', event.target.value)
                                 }
-                                placeholder="Category"
+                                placeholder="Department"
                                 className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
                               />
                             </td>
@@ -1224,6 +1250,11 @@ const ReceiveItemsPage: React.FC = () => {
                         ))}
                       </tbody>
                     </table>
+                    <datalist id="receive-department-options">
+                      {departmentOptions.map((department) => (
+                        <option key={department} value={department} />
+                      ))}
+                    </datalist>
                   </div>
                 )}
 

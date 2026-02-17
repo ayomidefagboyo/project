@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, RefreshCw, Search } from 'lucide-react';
 import { useOutlet } from '@/contexts/OutletContext';
-import { posService, type POSProduct } from '@/lib/posService';
+import { posService, type POSProduct, type POSDepartment } from '@/lib/posService';
 import { useToast } from '@/components/ui/Toast';
 
 interface StocktakeEdit {
@@ -19,12 +19,21 @@ const stocktakeReasons = [
   'Other',
 ];
 
+const ALL_DEPARTMENTS = '__all__';
+
+const getDepartmentName = (category?: string | null) => {
+  const normalized = String(category || '').trim();
+  return normalized || 'Uncategorized';
+};
+
 const StocktakingPage: React.FC = () => {
   const { currentOutlet, currentUser } = useOutlet();
   const { success, error: showError, warning } = useToast();
 
   const [products, setProducts] = useState<POSProduct[]>([]);
+  const [departmentMaster, setDepartmentMaster] = useState<POSDepartment[]>([]);
   const [edits, setEdits] = useState<Record<string, StocktakeEdit>>({});
+  const [selectedDepartment, setSelectedDepartment] = useState(ALL_DEPARTMENTS);
   const [search, setSearch] = useState('');
   const [onlyChanged, setOnlyChanged] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -54,12 +63,16 @@ const StocktakingPage: React.FC = () => {
 
     setIsLoading(true);
     try {
-      const cached = await posService.getCachedProducts(outletId, {
-        activeOnly: true,
-        page: 1,
-        size: 20000,
-      });
+      const [cached, loadedDepartments] = await Promise.all([
+        posService.getCachedProducts(outletId, {
+          activeOnly: true,
+          page: 1,
+          size: 20000,
+        }),
+        posService.getDepartments(outletId).catch(() => []),
+      ]);
       if (requestId !== loadRequestRef.current) return;
+      setDepartmentMaster(loadedDepartments || []);
       const hasCached = (cached.items || []).length > 0;
       setProducts(cached.items || []);
       setIsLoading(false);
@@ -105,10 +118,39 @@ const StocktakingPage: React.FC = () => {
     void loadProducts();
   }, [currentOutlet?.id]);
 
+  const departments = useMemo(() => {
+    const unique = new Set<string>();
+    for (const department of departmentMaster) {
+      if (department.is_active === false) continue;
+      unique.add(getDepartmentName(department.name));
+    }
+    for (const product of products) {
+      unique.add(getDepartmentName(product.category));
+    }
+    return Array.from(unique).sort((a, b) => a.localeCompare(b));
+  }, [departmentMaster, products]);
+
+  useEffect(() => {
+    if (selectedDepartment === ALL_DEPARTMENTS) return;
+    if (!departments.includes(selectedDepartment)) {
+      setSelectedDepartment(ALL_DEPARTMENTS);
+    }
+  }, [departments, selectedDepartment]);
+
+  const scopedProducts = useMemo(() => {
+    if (selectedDepartment === ALL_DEPARTMENTS) {
+      return products;
+    }
+
+    return products.filter(
+      (product) => getDepartmentName(product.category) === selectedDepartment
+    );
+  }, [products, selectedDepartment]);
+
   const visibleProducts = useMemo(() => {
     const query = search.trim().toLowerCase();
 
-    return products.filter((product) => {
+    return scopedProducts.filter((product) => {
       const edit = edits[product.id];
       const countedQty = edit?.counted_quantity ?? product.quantity_on_hand;
       const hasChange = countedQty !== product.quantity_on_hand;
@@ -121,10 +163,10 @@ const StocktakingPage: React.FC = () => {
       const barcode = product.barcode?.toLowerCase() || '';
       return name.includes(query) || sku.includes(query) || barcode.includes(query);
     });
-  }, [products, edits, onlyChanged, search]);
+  }, [scopedProducts, edits, onlyChanged, search]);
 
   const changedRows = useMemo(() => {
-    return products
+    return scopedProducts
       .map((product) => {
         const edit = edits[product.id];
         const counted = edit?.counted_quantity ?? product.quantity_on_hand;
@@ -139,7 +181,7 @@ const StocktakingPage: React.FC = () => {
         };
       })
       .filter((row) => row.delta !== 0);
-  }, [products, edits]);
+  }, [scopedProducts, edits]);
 
   const netVariance = changedRows.reduce((sum, row) => sum + row.delta, 0);
 
@@ -168,7 +210,7 @@ const StocktakingPage: React.FC = () => {
     if (!currentOutlet?.id) return;
 
     if (changedRows.length === 0) {
-      warning('No stock differences to reconcile.');
+      warning('No stock differences to reconcile in this department scope.');
       return;
     }
 
@@ -196,7 +238,13 @@ const StocktakingPage: React.FC = () => {
       success(
         `Stocktake completed: ${result.adjusted_count} adjusted, ${result.unchanged_count} unchanged.`
       );
-      setEdits({});
+      setEdits((prev) => {
+        const next = { ...prev };
+        for (const row of changedRows) {
+          delete next[row.product.id];
+        }
+        return next;
+      });
       await loadProducts();
     } catch (err) {
       console.error('Stocktake failed:', err);
@@ -213,6 +261,18 @@ const StocktakingPage: React.FC = () => {
         <div className="rounded-2xl border border-stone-200 bg-white p-5 lg:p-6">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={selectedDepartment}
+                onChange={(event) => setSelectedDepartment(event.target.value)}
+                className="h-12 min-w-[220px] rounded-xl border border-stone-300 bg-white px-3 text-base font-semibold text-slate-700 focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+              >
+                <option value={ALL_DEPARTMENTS}>All Departments</option>
+                {departments.map((department) => (
+                  <option key={department} value={department}>
+                    {department}
+                  </option>
+                ))}
+              </select>
               <button
                 type="button"
                 onClick={() => setOnlyChanged((prev) => !prev)}
@@ -235,8 +295,8 @@ const StocktakingPage: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-5">
             <div className="rounded-xl border border-stone-200 bg-stone-50 p-4">
-              <div className="text-sm text-stone-500">Products in Outlet</div>
-              <div className="text-3xl font-semibold text-slate-900 mt-1">{products.length}</div>
+              <div className="text-sm text-stone-500">Products in Scope</div>
+              <div className="text-3xl font-semibold text-slate-900 mt-1">{scopedProducts.length}</div>
             </div>
             <div className="rounded-xl border border-stone-200 bg-stone-50 p-4">
               <div className="text-sm text-stone-500">Items with Variance</div>
@@ -287,7 +347,11 @@ const StocktakingPage: React.FC = () => {
                   {!isLoading && visibleProducts.length === 0 && (
                     <tr>
                       <td colSpan={7} className="px-4 py-8 text-center text-stone-500">
-                        {products.length === 0 ? 'No products found for this outlet.' : 'No products match your filter.'}
+                        {products.length === 0
+                          ? 'No products found for this outlet.'
+                          : scopedProducts.length === 0
+                            ? 'No products found in this department.'
+                            : 'No products match your filter.'}
                       </td>
                     </tr>
                   )}
@@ -359,7 +423,7 @@ const StocktakingPage: React.FC = () => {
               {changedRows.length === 0 ? (
                 <>
                   <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                  <span className="text-stone-600">No stock differences pending.</span>
+                  <span className="text-stone-600">No stock differences pending in this scope.</span>
                 </>
               ) : (
                 <>

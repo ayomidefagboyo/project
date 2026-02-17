@@ -167,6 +167,27 @@ export interface ProductListResult {
   offline?: boolean;
 }
 
+export interface POSDepartment {
+  id: string;
+  outlet_id: string;
+  name: string;
+  code?: string;
+  description?: string;
+  sort_order?: number;
+  is_active: boolean;
+  source?: 'master' | 'product_category';
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface DepartmentCreateRequest {
+  outlet_id: string;
+  name: string;
+  code?: string;
+  description?: string;
+  sort_order?: number;
+}
+
 export interface InventoryStats {
   total_products: number;
   active_products: number;
@@ -542,6 +563,41 @@ class POSService {
   // ===============================================
   // PRODUCT MANAGEMENT
   // ===============================================
+
+  async getDepartments(
+    outletId: string,
+    options: { includeInactive?: boolean } = {}
+  ): Promise<POSDepartment[]> {
+    try {
+      const params = new URLSearchParams({
+        outlet_id: outletId,
+        include_inactive: (options.includeInactive === true).toString(),
+      });
+      const response = await apiClient.get<{ items: POSDepartment[]; total: number }>(
+        `${this.baseUrl}/departments?${params.toString()}`
+      );
+      if (!response.data) {
+        throw new Error(response.error || 'Failed to fetch departments');
+      }
+      return response.data.items || [];
+    } catch (error) {
+      logger.error('Error fetching departments:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  async createDepartment(payload: DepartmentCreateRequest): Promise<POSDepartment> {
+    try {
+      const response = await apiClient.post<POSDepartment>(`${this.baseUrl}/departments`, payload);
+      if (!response.data) {
+        throw new Error(response.error || 'Failed to create department');
+      }
+      return response.data;
+    } catch (error) {
+      logger.error('Error creating department:', error);
+      throw this.handleError(error);
+    }
+  }
 
   /**
    * Get all products for a specific outlet
