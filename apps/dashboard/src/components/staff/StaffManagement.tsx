@@ -89,6 +89,11 @@ const StaffManagement: React.FC = () => {
     }));
   };
 
+  const getRoleLabel = (role: string): string => {
+    if (role === 'accountant' || role === 'pharmacist') return 'Pharmacist';
+    return role.replace(/_/g, ' ');
+  };
+
   const createStaffProfile = async () => {
     if (!currentOutlet?.id) {
       showToast('No outlet selected', 'warning');
@@ -259,7 +264,7 @@ const StaffManagement: React.FC = () => {
                 <option value="manager">Manager</option>
                 <option value="waiter">Waiter</option>
                 <option value="inventory_staff">Inventory Staff</option>
-                <option value="accountant">Accountant</option>
+                <option value="pharmacist">Pharmacist</option>
               </select>
             </div>
 
@@ -357,7 +362,7 @@ const StaffManagement: React.FC = () => {
                       <div className="flex items-center gap-1">
                         <Shield className="w-4 h-4 text-gray-400" />
                         <span className="text-sm font-medium capitalize">
-                          {staff.role.replace(/_/g, ' ')}
+                          {getRoleLabel(staff.role)}
                         </span>
                       </div>
                       <p className="text-xs text-gray-500">

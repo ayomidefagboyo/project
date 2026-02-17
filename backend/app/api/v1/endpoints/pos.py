@@ -37,6 +37,9 @@ from app.schemas.pos import (
     # Staff Profiles
     StaffProfileCreate, StaffProfileUpdate, StaffProfileResponse,
     StaffProfileListResponse, StaffPinAuth, StaffAuthResponse,
+    # Pharmacy patients
+    PatientProfileCreate, PatientProfileUpdate, PatientProfileResponse, PatientProfileListResponse,
+    PatientVitalCreate, PatientVitalResponse, PatientVitalListResponse,
     # Receipt Settings
     ReceiptSettingsUpdate, ReceiptSettingsResponse,
     # Base types
@@ -448,6 +451,7 @@ def _normalize_optional_uuid(value: Optional[str], field_name: str) -> Optional[
 
 
 MANAGER_LEVEL_ROLES = {'manager', 'admin', 'business_owner', 'outlet_admin', 'super_admin'}
+PHARMACY_ONLY_ROLES = {'pharmacist', 'accountant'}
 
 
 def _normalize_role(role: Any) -> str:
@@ -529,6 +533,21 @@ def _require_manager_role(
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Manager authorization required for this action"
+    )
+
+
+def _require_pharmacist_role(
+    supabase,
+    current_user: Dict[str, Any],
+    outlet_id: Optional[str],
+    staff_session_token: Optional[str]
+) -> Dict[str, Any]:
+    context = _resolve_staff_context(supabase, current_user, outlet_id, staff_session_token)
+    if context['role'] in PHARMACY_ONLY_ROLES:
+        return context
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Pharmacist authorization required for this action"
     )
 
 
@@ -3908,6 +3927,308 @@ async def create_customer(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create customer: {str(e)}"
+        )
+
+
+# ===============================================
+# PHARMACY PATIENT RECORDS ENDPOINTS
+# ===============================================
+
+def _normalize_patient_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize patient profile row shape for API responses."""
+    normalized = dict(row or {})
+    now_iso = datetime.utcnow().isoformat()
+    normalized['full_name'] = str(normalized.get('full_name') or '').strip()
+    normalized['patient_code'] = str(normalized.get('patient_code') or '').strip() or f"PT-{str(normalized.get('id') or '')[:8].upper()}"
+    normalized['gender'] = normalized.get('gender') or 'unspecified'
+    normalized['is_active'] = True if normalized.get('is_active') is None else bool(normalized.get('is_active'))
+    normalized['created_at'] = normalized.get('created_at') or now_iso
+    normalized['updated_at'] = normalized.get('updated_at') or now_iso
+    return normalized
+
+
+def _normalize_patient_vital_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize patient vital row shape for API responses."""
+    normalized = dict(row or {})
+    now_iso = datetime.utcnow().isoformat()
+    normalized['recorded_at'] = normalized.get('recorded_at') or normalized.get('created_at') or now_iso
+    normalized['created_at'] = normalized.get('created_at') or normalized['recorded_at']
+    normalized['updated_at'] = normalized.get('updated_at') or normalized['created_at']
+    return normalized
+
+
+@router.get("/patients", response_model=PatientProfileListResponse)
+async def get_pharmacy_patients(
+    outlet_id: str,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(50, ge=1, le=200, description="Page size"),
+    search: Optional[str] = Query(None, description="Search patient name, code, or phone"),
+    active_only: bool = Query(True, description="Filter to active patients only"),
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
+    current_user=Depends(CurrentUser())
+):
+    """List pharmacy patient profiles for an outlet (pharmacist-only)."""
+    try:
+        supabase = get_supabase_admin()
+        _require_pharmacist_role(supabase, current_user, outlet_id, x_pos_staff_session)
+
+        offset = (page - 1) * size
+        query = supabase.table(Tables.POS_PATIENT_PROFILES).select('*', count='exact').eq('outlet_id', outlet_id)
+        if active_only:
+            query = query.eq('is_active', True)
+        if search and search.strip():
+            term = search.strip()
+            query = query.or_(
+                f"full_name.ilike.%{term}%,"
+                f"patient_code.ilike.%{term}%,"
+                f"phone.ilike.%{term}%"
+            )
+
+        result = query.range(offset, offset + size - 1).order('full_name').execute()
+        total = int(getattr(result, 'count', 0) or len(result.data or []))
+        items = [PatientProfileResponse(**_normalize_patient_row(row)) for row in (result.data or [])]
+        return PatientProfileListResponse(items=items, total=total, page=page, size=size)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching pharmacy patients: {e}")
+        if _is_missing_table_error(e, Tables.POS_PATIENT_PROFILES):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Pharmacy patient records are not available yet. Run the latest POS migration and retry."
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch pharmacy patients: {str(e)}"
+        )
+
+
+@router.post("/patients", response_model=PatientProfileResponse)
+async def create_pharmacy_patient(
+    patient: PatientProfileCreate,
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
+    current_user=Depends(CurrentUser())
+):
+    """Create a pharmacy patient profile (pharmacist-only)."""
+    try:
+        supabase = get_supabase_admin()
+        _require_pharmacist_role(supabase, current_user, patient.outlet_id, x_pos_staff_session)
+        actor_id = _resolve_actor_user_id(current_user)
+        now_iso = datetime.utcnow().isoformat()
+
+        patient_id = str(uuid.uuid4())
+        patient_code = f"PT-{patient_id[:8].upper()}"
+        payload = {
+            'id': patient_id,
+            'patient_code': patient_code,
+            **patient.model_dump(mode='json', exclude_none=True, exclude_unset=True),
+            'full_name': str(patient.full_name).strip(),
+            'created_by': actor_id,
+            'created_at': now_iso,
+            'updated_at': now_iso
+        }
+
+        result = supabase.table(Tables.POS_PATIENT_PROFILES).insert(payload).execute()
+        if not result.data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to create patient profile"
+            )
+
+        return PatientProfileResponse(**_normalize_patient_row(result.data[0]))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating pharmacy patient: {e}")
+        if _is_missing_table_error(e, Tables.POS_PATIENT_PROFILES):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Pharmacy patient records are not available yet. Run the latest POS migration and retry."
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create pharmacy patient: {str(e)}"
+        )
+
+
+@router.get("/patients/{patient_id}", response_model=PatientProfileResponse)
+async def get_pharmacy_patient(
+    patient_id: str,
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
+    current_user=Depends(CurrentUser())
+):
+    """Get one pharmacy patient profile (pharmacist-only)."""
+    try:
+        supabase = get_supabase_admin()
+        result = supabase.table(Tables.POS_PATIENT_PROFILES).select('*').eq('id', patient_id).limit(1).execute()
+        if not result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Patient profile not found"
+            )
+
+        row = result.data[0]
+        _require_pharmacist_role(supabase, current_user, row.get('outlet_id'), x_pos_staff_session)
+        return PatientProfileResponse(**_normalize_patient_row(row))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching pharmacy patient {patient_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch pharmacy patient: {str(e)}"
+        )
+
+
+@router.put("/patients/{patient_id}", response_model=PatientProfileResponse)
+async def update_pharmacy_patient(
+    patient_id: str,
+    patient: PatientProfileUpdate,
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
+    current_user=Depends(CurrentUser())
+):
+    """Update a pharmacy patient profile (pharmacist-only)."""
+    try:
+        supabase = get_supabase_admin()
+        existing = supabase.table(Tables.POS_PATIENT_PROFILES).select('id,outlet_id').eq('id', patient_id).limit(1).execute()
+        if not existing.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Patient profile not found"
+            )
+
+        outlet_id = existing.data[0].get('outlet_id')
+        _require_pharmacist_role(supabase, current_user, outlet_id, x_pos_staff_session)
+
+        update_data = patient.model_dump(mode='json', exclude_none=True, exclude_unset=True)
+        if 'full_name' in update_data:
+            update_data['full_name'] = str(update_data.get('full_name') or '').strip()
+        update_data['updated_at'] = datetime.utcnow().isoformat()
+
+        result = supabase.table(Tables.POS_PATIENT_PROFILES).update(update_data).eq('id', patient_id).execute()
+        if not result.data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to update patient profile"
+            )
+
+        return PatientProfileResponse(**_normalize_patient_row(result.data[0]))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating pharmacy patient {patient_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update pharmacy patient: {str(e)}"
+        )
+
+
+@router.get("/patients/{patient_id}/vitals", response_model=PatientVitalListResponse)
+async def get_patient_vitals(
+    patient_id: str,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(50, ge=1, le=200, description="Page size"),
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
+    current_user=Depends(CurrentUser())
+):
+    """List vitals history for a patient (pharmacist-only)."""
+    try:
+        supabase = get_supabase_admin()
+        patient_result = supabase.table(Tables.POS_PATIENT_PROFILES).select('id,outlet_id').eq('id', patient_id).limit(1).execute()
+        if not patient_result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Patient profile not found"
+            )
+
+        outlet_id = patient_result.data[0].get('outlet_id')
+        _require_pharmacist_role(supabase, current_user, outlet_id, x_pos_staff_session)
+
+        offset = (page - 1) * size
+        result = supabase.table(Tables.POS_PATIENT_VITALS)\
+            .select('*', count='exact')\
+            .eq('patient_id', patient_id)\
+            .eq('outlet_id', outlet_id)\
+            .range(offset, offset + size - 1)\
+            .order('recorded_at', desc=True)\
+            .execute()
+
+        total = int(getattr(result, 'count', 0) or len(result.data or []))
+        items = [PatientVitalResponse(**_normalize_patient_vital_row(row)) for row in (result.data or [])]
+        return PatientVitalListResponse(items=items, total=total, page=page, size=size)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching patient vitals for {patient_id}: {e}")
+        if _is_missing_table_error(e, Tables.POS_PATIENT_VITALS):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Patient vitals records are not available yet. Run the latest POS migration and retry."
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch patient vitals: {str(e)}"
+        )
+
+
+@router.post("/patients/{patient_id}/vitals", response_model=PatientVitalResponse)
+async def create_patient_vital(
+    patient_id: str,
+    vital: PatientVitalCreate,
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
+    current_user=Depends(CurrentUser())
+):
+    """Record patient vitals (pharmacist-only)."""
+    try:
+        supabase = get_supabase_admin()
+        patient_result = supabase.table(Tables.POS_PATIENT_PROFILES).select('id,outlet_id').eq('id', patient_id).limit(1).execute()
+        if not patient_result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Patient profile not found"
+            )
+
+        outlet_id = patient_result.data[0].get('outlet_id')
+        _require_pharmacist_role(supabase, current_user, outlet_id, x_pos_staff_session)
+        actor_id = _resolve_actor_user_id(current_user)
+        now_iso = datetime.utcnow().isoformat()
+
+        payload = {
+            'id': str(uuid.uuid4()),
+            'patient_id': patient_id,
+            'outlet_id': outlet_id,
+            **vital.model_dump(mode='json', exclude_none=True, exclude_unset=True),
+            'recorded_by': actor_id,
+            'recorded_at': (vital.recorded_at.isoformat() if vital.recorded_at else now_iso),
+            'created_at': now_iso,
+            'updated_at': now_iso
+        }
+
+        result = supabase.table(Tables.POS_PATIENT_VITALS).insert(payload).execute()
+        if not result.data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to record patient vitals"
+            )
+
+        supabase.table(Tables.POS_PATIENT_PROFILES).update({
+            'last_visit_at': payload['recorded_at'],
+            'updated_at': now_iso
+        }).eq('id', patient_id).execute()
+
+        return PatientVitalResponse(**_normalize_patient_vital_row(result.data[0]))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error recording patient vitals for {patient_id}: {e}")
+        if _is_missing_table_error(e, Tables.POS_PATIENT_VITALS):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Patient vitals records are not available yet. Run the latest POS migration and retry."
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to record patient vitals: {str(e)}"
         )
 
 

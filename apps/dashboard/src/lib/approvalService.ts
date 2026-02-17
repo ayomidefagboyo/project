@@ -461,7 +461,7 @@ export class ApprovalService {
       })
       .sort((a, b) => {
         // Sort by role hierarchy (outlet_admin > manager > others)
-        const roleOrder = { outlet_admin: 3, manager: 2, accountant: 1 };
+        const roleOrder = { outlet_admin: 3, manager: 2, pharmacist: 1, accountant: 1 };
         return (roleOrder[b.approverRole as keyof typeof roleOrder] || 0) - 
                (roleOrder[a.approverRole as keyof typeof roleOrder] || 0);
       });

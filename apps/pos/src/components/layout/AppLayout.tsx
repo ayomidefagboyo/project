@@ -17,6 +17,7 @@ import {
   Truck,
   ClipboardCheck,
   ArrowLeftRight,
+  HeartPulse,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useOutlet } from '../../contexts/OutletContext';
@@ -34,6 +35,7 @@ interface NavItem {
   sublabel: string;
   icon: React.ComponentType<{ className?: string }>;
   managerOnly?: boolean;
+  pharmacistOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -76,6 +78,13 @@ const navItems: NavItem[] = [
     managerOnly: true,
   },
   {
+    path: '/patients',
+    label: 'Pharmacy Patients',
+    sublabel: 'Vitals & Records',
+    icon: HeartPulse,
+    pharmacistOnly: true,
+  },
+  {
     path: '/eod',
     label: 'End of Day',
     sublabel: 'Close & Reconcile',
@@ -91,6 +100,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent, staffRol
   const normalizedStaffRole = (staffRole || '').toLowerCase();
   const isCashier = normalizedStaffRole === 'cashier';
   const isManager = normalizedStaffRole === 'manager';
+  const isPharmacist = normalizedStaffRole === 'pharmacist' || normalizedStaffRole === 'accountant';
   const canAccessSettings = normalizedStaffRole === 'manager';
 
   // Clock out handler – returns to staff auth (PIN entry), NOT main sign-in
@@ -110,6 +120,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent, staffRol
   const isActive = (path: string) => location.pathname === path;
   const visibleNavItems = navItems.filter((item) => {
     if (item.managerOnly && !isManager) return false;
+    if (item.pharmacistOnly && !isPharmacist) return false;
     if (isCashier && (item.path === '/receive' || item.path === '/eod')) return false;
     return true;
   });

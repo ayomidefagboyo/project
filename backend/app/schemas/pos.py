@@ -83,6 +83,14 @@ class LoyaltyTransactionType(str, Enum):
     ADJUSTMENT = "adjustment"
 
 
+class PatientGender(str, Enum):
+    """Patient gender values for pharmacy records."""
+    MALE = "male"
+    FEMALE = "female"
+    OTHER = "other"
+    UNSPECIFIED = "unspecified"
+
+
 # ===============================================
 # PRODUCT SCHEMAS
 # ===============================================
@@ -641,6 +649,115 @@ class CustomerListResponse(BaseModel):
     """Paginated customer list response."""
     items: List[CustomerResponse] = Field(default_factory=list, description="Customer rows")
     total: int = Field(..., description="Total matched customers")
+    page: int = Field(..., description="Current page")
+    size: int = Field(..., description="Requested page size")
+
+
+class PatientProfileBase(BaseModel):
+    """Base patient profile payload for pharmacy operations."""
+    full_name: str = Field(..., min_length=1, max_length=255, description="Patient full name")
+    phone: Optional[str] = Field(None, max_length=30, description="Primary contact phone")
+    gender: Optional[PatientGender] = Field(PatientGender.UNSPECIFIED, description="Patient gender")
+    date_of_birth: Optional[date] = Field(None, description="Patient date of birth")
+    address: Optional[str] = Field(None, max_length=500, description="Patient address")
+    emergency_contact_name: Optional[str] = Field(None, max_length=255, description="Emergency contact name")
+    emergency_contact_phone: Optional[str] = Field(None, max_length=30, description="Emergency contact phone")
+    allergies: Optional[str] = Field(None, description="Known allergies")
+    chronic_conditions: Optional[str] = Field(None, description="Chronic conditions / diagnosis history")
+    current_medications: Optional[str] = Field(None, description="Current medication list")
+    notes: Optional[str] = Field(None, description="Clinical notes")
+    is_active: bool = Field(True, description="Whether patient record is active")
+
+    @validator('full_name')
+    def validate_patient_name(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Patient name cannot be empty')
+        return v.strip()
+
+
+class PatientProfileCreate(PatientProfileBase):
+    """Create patient profile payload."""
+    outlet_id: str = Field(..., description="Outlet ID")
+
+
+class PatientProfileUpdate(BaseModel):
+    """Update patient profile payload."""
+    full_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    phone: Optional[str] = Field(None, max_length=30)
+    gender: Optional[PatientGender] = Field(None, description="Patient gender")
+    date_of_birth: Optional[date] = Field(None, description="Patient date of birth")
+    address: Optional[str] = Field(None, max_length=500)
+    emergency_contact_name: Optional[str] = Field(None, max_length=255)
+    emergency_contact_phone: Optional[str] = Field(None, max_length=30)
+    allergies: Optional[str] = Field(None)
+    chronic_conditions: Optional[str] = Field(None)
+    current_medications: Optional[str] = Field(None)
+    notes: Optional[str] = Field(None)
+    is_active: Optional[bool] = Field(None)
+
+    @validator('full_name')
+    def validate_patient_name(cls, v):
+        if v is None:
+            return v
+        if not v.strip():
+            raise ValueError('Patient name cannot be empty')
+        return v.strip()
+
+
+class PatientProfileResponse(PatientProfileBase):
+    """Patient profile response."""
+    id: str = Field(..., description="Patient ID")
+    outlet_id: str = Field(..., description="Outlet ID")
+    patient_code: str = Field(..., description="Human-friendly patient code")
+    created_by: Optional[str] = Field(None, description="User ID that created the record")
+    last_visit_at: Optional[datetime] = Field(None, description="Last recorded vitals timestamp")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Last update timestamp")
+
+    class Config:
+        from_attributes = True
+
+
+class PatientProfileListResponse(BaseModel):
+    """Paginated patient profile list response."""
+    items: List[PatientProfileResponse] = Field(default_factory=list, description="Patient rows")
+    total: int = Field(..., description="Total matched patients")
+    page: int = Field(..., description="Current page")
+    size: int = Field(..., description="Requested page size")
+
+
+class PatientVitalCreate(BaseModel):
+    """Create patient vitals payload."""
+    recorded_at: Optional[datetime] = Field(None, description="When vitals were taken")
+    systolic_bp: Optional[int] = Field(None, ge=40, le=300, description="Systolic BP (mmHg)")
+    diastolic_bp: Optional[int] = Field(None, ge=20, le=200, description="Diastolic BP (mmHg)")
+    pulse_bpm: Optional[int] = Field(None, ge=20, le=250, description="Pulse (beats per minute)")
+    temperature_c: Optional[Decimal] = Field(None, ge=25, le=45, description="Body temperature in Celsius")
+    respiratory_rate: Optional[int] = Field(None, ge=5, le=80, description="Respiratory rate")
+    oxygen_saturation: Optional[int] = Field(None, ge=50, le=100, description="SpO2 percentage")
+    blood_glucose_mmol: Optional[Decimal] = Field(None, ge=1, le=40, description="Blood glucose (mmol/L)")
+    weight_kg: Optional[Decimal] = Field(None, ge=1, le=500, description="Weight in kg")
+    height_cm: Optional[Decimal] = Field(None, ge=20, le=260, description="Height in cm")
+    notes: Optional[str] = Field(None, description="Clinical notes")
+
+
+class PatientVitalResponse(PatientVitalCreate):
+    """Patient vital record response."""
+    id: str = Field(..., description="Vitals ID")
+    patient_id: str = Field(..., description="Patient ID")
+    outlet_id: str = Field(..., description="Outlet ID")
+    recorded_by: Optional[str] = Field(None, description="User ID who captured the vitals")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Last update timestamp")
+
+    class Config:
+        from_attributes = True
+
+
+class PatientVitalListResponse(BaseModel):
+    """Paginated vitals list response."""
+    items: List[PatientVitalResponse] = Field(default_factory=list, description="Vitals rows")
+    total: int = Field(..., description="Total matched vitals records")
     page: int = Field(..., description="Current page")
     size: int = Field(..., description="Requested page size")
 

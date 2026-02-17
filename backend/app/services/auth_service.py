@@ -387,9 +387,14 @@ class AuthService:
             "inventory_staff": [
                 "view_dashboard", "view_inventory", "manage_inventory"
             ],
+            "pharmacist": [
+                "view_dashboard", "create_sales", "view_inventory", "manage_inventory",
+                "view_reports", "view_analytics"
+            ],
+            # Backward compatibility for existing staff records
             "accountant": [
-                "view_dashboard", "view_expenses", "manage_expenses",
-                "view_reports", "generate_reports", "view_analytics"
+                "view_dashboard", "create_sales", "view_inventory", "manage_inventory",
+                "view_reports", "view_analytics"
             ],
             "viewer": [
                 "view_dashboard", "view_reports"

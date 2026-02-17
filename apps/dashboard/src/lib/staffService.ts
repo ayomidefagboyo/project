@@ -104,7 +104,9 @@ export const rolePermissions = {
   manager: ['view_dashboard', 'create_sales', 'edit_sales', 'view_inventory', 'manage_inventory', 'view_reports', 'manage_users'],
   waiter: ['view_dashboard', 'create_sales', 'view_reports'],
   inventory_staff: ['view_dashboard', 'view_inventory', 'manage_inventory', 'view_reports'],
-  accountant: ['view_dashboard', 'view_reports', 'generate_reports', 'view_analytics']
+  pharmacist: ['view_dashboard', 'create_sales', 'view_inventory', 'manage_inventory', 'view_reports', 'view_analytics'],
+  // Backward compatibility for legacy records still carrying accountant role
+  accountant: ['view_dashboard', 'create_sales', 'view_inventory', 'manage_inventory', 'view_reports', 'view_analytics']
 };
 
 export default staffService;

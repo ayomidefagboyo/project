@@ -287,7 +287,8 @@ class EmailService {
       'waiter': 'Waiter',
       'kitchen_staff': 'Kitchen Staff',
       'inventory_staff': 'Inventory Staff',
-      'accountant': 'Accountant',
+      'pharmacist': 'Pharmacist',
+      'accountant': 'Pharmacist',
       'viewer': 'Viewer'
     };
     return roleMap[role] || role;

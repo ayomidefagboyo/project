@@ -92,6 +92,8 @@ class Tables:
     POS_DEPARTMENTS = "pos_departments"
     POS_TRANSACTIONS = "pos_transactions"
     POS_TRANSACTION_ITEMS = "pos_transaction_items"
+    POS_PATIENT_PROFILES = "pos_patient_profiles"
+    POS_PATIENT_VITALS = "pos_patient_vitals"
     STOCK_MOVEMENTS = "stock_movements"
     CASH_DRAWER_SESSIONS = "pos_cash_drawer_sessions"
     LOYALTY_TRANSACTIONS = "loyalty_transactions"

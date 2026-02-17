@@ -318,6 +318,92 @@ export interface CustomerCreateRequest {
   address?: string;
 }
 
+export interface PharmacyPatient {
+  id: string;
+  outlet_id: string;
+  patient_code: string;
+  full_name: string;
+  phone?: string;
+  gender?: 'male' | 'female' | 'other' | 'unspecified';
+  date_of_birth?: string;
+  address?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  allergies?: string;
+  chronic_conditions?: string;
+  current_medications?: string;
+  notes?: string;
+  is_active: boolean;
+  created_by?: string;
+  last_visit_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PharmacyPatientCreateRequest {
+  outlet_id: string;
+  full_name: string;
+  phone?: string;
+  gender?: 'male' | 'female' | 'other' | 'unspecified';
+  date_of_birth?: string;
+  address?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  allergies?: string;
+  chronic_conditions?: string;
+  current_medications?: string;
+  notes?: string;
+}
+
+export interface PharmacyPatientUpdateRequest {
+  full_name?: string;
+  phone?: string;
+  gender?: 'male' | 'female' | 'other' | 'unspecified';
+  date_of_birth?: string;
+  address?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  allergies?: string;
+  chronic_conditions?: string;
+  current_medications?: string;
+  notes?: string;
+  is_active?: boolean;
+}
+
+export interface PatientVital {
+  id: string;
+  patient_id: string;
+  outlet_id: string;
+  recorded_at: string;
+  systolic_bp?: number;
+  diastolic_bp?: number;
+  pulse_bpm?: number;
+  temperature_c?: number;
+  respiratory_rate?: number;
+  oxygen_saturation?: number;
+  blood_glucose_mmol?: number;
+  weight_kg?: number;
+  height_cm?: number;
+  notes?: string;
+  recorded_by?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PatientVitalCreateRequest {
+  recorded_at?: string;
+  systolic_bp?: number;
+  diastolic_bp?: number;
+  pulse_bpm?: number;
+  temperature_c?: number;
+  respiratory_rate?: number;
+  oxygen_saturation?: number;
+  blood_glucose_mmol?: number;
+  weight_kg?: number;
+  height_cm?: number;
+  notes?: string;
+}
+
 export interface LoyaltyTransaction {
   id: string;
   customer_id: string;
@@ -1494,6 +1580,123 @@ class POSService {
       return response.data;
     } catch (error) {
       logger.error('Error fetching customer:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Get pharmacy patients for an outlet.
+   */
+  async getPharmacyPatients(
+    outletId: string,
+    options: {
+      search?: string;
+      activeOnly?: boolean;
+      page?: number;
+      size?: number;
+    } = {}
+  ): Promise<{ items: PharmacyPatient[]; total: number; page: number; size: number }> {
+    try {
+      const page = options.page || 1;
+      const size = options.size || 50;
+      const params = new URLSearchParams({
+        outlet_id: outletId,
+        page: page.toString(),
+        size: size.toString(),
+        active_only: (options.activeOnly !== false).toString(),
+      });
+      if (options.search?.trim()) {
+        params.append('search', options.search.trim());
+      }
+
+      const response = await apiClient.get<{ items: PharmacyPatient[]; total: number; page: number; size: number }>(
+        `${this.baseUrl}/patients?${params.toString()}`
+      );
+      if (!response.data) throw new Error(response.error || 'Failed to fetch pharmacy patients');
+      return response.data;
+    } catch (error) {
+      logger.error('Error fetching pharmacy patients:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Create a pharmacy patient profile.
+   */
+  async createPharmacyPatient(patient: PharmacyPatientCreateRequest): Promise<PharmacyPatient> {
+    try {
+      const response = await apiClient.post<PharmacyPatient>(`${this.baseUrl}/patients`, patient);
+      if (!response.data) throw new Error(response.error || 'Failed to create pharmacy patient');
+      return response.data;
+    } catch (error) {
+      logger.error('Error creating pharmacy patient:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Get one pharmacy patient profile.
+   */
+  async getPharmacyPatient(patientId: string): Promise<PharmacyPatient> {
+    try {
+      const response = await apiClient.get<PharmacyPatient>(`${this.baseUrl}/patients/${patientId}`);
+      if (!response.data) throw new Error(response.error || 'Pharmacy patient not found');
+      return response.data;
+    } catch (error) {
+      logger.error('Error fetching pharmacy patient:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Update a pharmacy patient profile.
+   */
+  async updatePharmacyPatient(patientId: string, updates: PharmacyPatientUpdateRequest): Promise<PharmacyPatient> {
+    try {
+      const response = await apiClient.put<PharmacyPatient>(`${this.baseUrl}/patients/${patientId}`, updates);
+      if (!response.data) throw new Error(response.error || 'Failed to update pharmacy patient');
+      return response.data;
+    } catch (error) {
+      logger.error('Error updating pharmacy patient:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Get vitals history for a pharmacy patient.
+   */
+  async getPharmacyPatientVitals(
+    patientId: string,
+    options: { page?: number; size?: number } = {}
+  ): Promise<{ items: PatientVital[]; total: number; page: number; size: number }> {
+    try {
+      const page = options.page || 1;
+      const size = options.size || 50;
+      const params = new URLSearchParams({
+        page: page.toString(),
+        size: size.toString(),
+      });
+      const response = await apiClient.get<{ items: PatientVital[]; total: number; page: number; size: number }>(
+        `${this.baseUrl}/patients/${patientId}/vitals?${params.toString()}`
+      );
+      if (!response.data) throw new Error(response.error || 'Failed to fetch patient vitals');
+      return response.data;
+    } catch (error) {
+      logger.error('Error fetching pharmacy patient vitals:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Record vitals for a pharmacy patient.
+   */
+  async createPharmacyPatientVital(patientId: string, vital: PatientVitalCreateRequest): Promise<PatientVital> {
+    try {
+      const response = await apiClient.post<PatientVital>(`${this.baseUrl}/patients/${patientId}/vitals`, vital);
+      if (!response.data) throw new Error(response.error || 'Failed to record patient vitals');
+      return response.data;
+    } catch (error) {
+      logger.error('Error recording pharmacy patient vitals:', error);
       throw this.handleError(error);
     }
   }
