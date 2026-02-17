@@ -208,7 +208,7 @@ export const printReceiptContent = async (
   const copies = Math.max(1, Math.min(5, Math.floor(options?.copies || 1)));
   const printerName = options?.printerName;
 
-  // Attempt native bridge only (Compazz bridge / QZ Tray).
+  // Attempt native bridge first (Compazz bridge / QZ Tray), then fallback to browser print.
   const nativeCompazz = await tryCompazzNativePrint(receiptContent, copies, printerName);
   if (nativeCompazz) {
     return { success: true, mode: 'native' };
@@ -218,6 +218,13 @@ export const printReceiptContent = async (
   if (nativeQz) {
     return { success: true, mode: 'native' };
   }
+
+  const opened = openReceiptPrintWindow(receiptContent, {
+    title: options?.title,
+    copies,
+    style: options?.style,
+  });
+  if (opened) return { success: true, mode: 'browser' };
 
   return { success: false, mode: 'none' };
 };

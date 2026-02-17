@@ -449,7 +449,7 @@ const ReceiptEditor: React.FC = () => {
       if (!result.success) {
         setUiMessage({
           type: 'error',
-          text: 'Test print failed. Configure native printer bridge (Compazz/QZ) in terminal settings.',
+          text: 'Test print failed. Allow pop-ups or configure native printer bridge (Compazz/QZ) in terminal settings.',
         });
         return;
       }

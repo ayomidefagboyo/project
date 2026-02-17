@@ -50,6 +50,7 @@ const DEFAULT_DEPARTMENTS = [
   'Pharmacy',
   'Other',
 ];
+const PRODUCT_PAGE_SIZE = 120;
 
 const normalizeDepartmentName = (value?: string | null): string => {
   const normalized = String(value || '').trim();
@@ -66,6 +67,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
   const [editingRows, setEditingRows] = useState<Set<string>>(new Set());
   const [editDrafts, setEditDrafts] = useState<Record<string, Partial<POSProduct>>>({});
   const [newProduct, setNewProduct] = useState<Partial<POSProduct>>({});
@@ -152,16 +154,16 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
   };
 
   useEffect(() => {
-    loadProducts();
-  }, [currentOutlet?.id, searchQuery, selectedCategory]);
+    void loadProducts('background');
+  }, [currentOutlet?.id]);
 
   useEffect(() => {
     const handleProductsSynced = () => {
-      void loadProducts();
+      void loadProducts('cache-only');
     };
     window.addEventListener('pos-products-synced', handleProductsSynced);
     return () => window.removeEventListener('pos-products-synced', handleProductsSynced);
-  }, [currentOutlet?.id, searchQuery, selectedCategory]);
+  }, [currentOutlet?.id]);
 
   useEffect(() => {
     void loadDepartments();
@@ -172,6 +174,10 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     if (categoryOptions.includes(selectedCategory)) return;
     setSelectedCategory('');
   }, [categoryOptions, selectedCategory]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedCategory, currentOutlet?.id]);
 
   const openNewRowForScannedBarcode = (rawBarcode: string) => {
     const barcode = rawBarcode.trim();
@@ -209,7 +215,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     clearMissingProductIntent();
   }, [location.search]);
 
-  const loadProducts = async () => {
+  const loadProducts = async (mode: 'background' | 'cache-only' = 'background') => {
     if (!currentOutlet?.id) {
       setProducts([]);
       setIsLoading(false);
@@ -222,8 +228,6 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     try {
       setIsLoading(true);
       const cached = await posService.getCachedProducts(outletId, {
-        search: searchQuery || undefined,
-        category: selectedCategory || undefined,
         activeOnly: false, // Show all products including inactive
         page: 1,
         size: 20000
@@ -235,35 +239,17 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
       setError(null);
       setIsLoading(false);
 
-      const isOnlineNow = typeof navigator === 'undefined' ? true : navigator.onLine;
-      const trimmedSearch = searchQuery.trim();
-      if (!isOnlineNow) return;
-
-      if (trimmedSearch) {
-        if (hasCached) return;
-        try {
-          const online = await posService.getProducts(outletId, {
-            search: trimmedSearch,
-            category: selectedCategory || undefined,
-            activeOnly: false,
-            page: 1,
-            size: 500,
-          });
-          if (requestId !== loadRequestRef.current) return;
-          setProducts(online.items || []);
-        } catch (onlineSearchErr) {
-          if (requestId !== loadRequestRef.current) return;
-          console.warn('Online product search fallback failed:', onlineSearchErr);
-        }
+      if (mode === 'cache-only') {
         return;
       }
+
+      const isOnlineNow = typeof navigator === 'undefined' ? true : navigator.onLine;
+      if (!isOnlineNow) return;
 
       void (async () => {
         try {
           await posService.syncProductCatalog(outletId, { forceFull: !hasCached });
           const refreshed = await posService.getCachedProducts(outletId, {
-            search: searchQuery || undefined,
-            category: selectedCategory || undefined,
             activeOnly: false,
             page: 1,
             size: 20000
@@ -293,6 +279,54 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
       minimumFractionDigits: 2
     }).format(amount);
   }, []);
+
+  const filteredProducts = useMemo(() => {
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+    const normalizedCategory = selectedCategory.trim().toLowerCase();
+
+    return products.filter((product) => {
+      if (
+        normalizedCategory &&
+        String(product.category || '').trim().toLowerCase() !== normalizedCategory
+      ) {
+        return false;
+      }
+
+      if (!normalizedSearch) return true;
+
+      const name = String(product.name || '').toLowerCase();
+      const sku = String(product.sku || '').toLowerCase();
+      const barcode = String(product.barcode || '').toLowerCase();
+      const category = String(product.category || '').toLowerCase();
+      return (
+        name.includes(normalizedSearch) ||
+        sku.includes(normalizedSearch) ||
+        barcode.includes(normalizedSearch) ||
+        category.includes(normalizedSearch)
+      );
+    });
+  }, [products, searchQuery, selectedCategory]);
+
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(filteredProducts.length / PRODUCT_PAGE_SIZE)),
+    [filteredProducts.length]
+  );
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  const paginatedProducts = useMemo(() => {
+    const start = (currentPage - 1) * PRODUCT_PAGE_SIZE;
+    return filteredProducts.slice(start, start + PRODUCT_PAGE_SIZE);
+  }, [filteredProducts, currentPage]);
+
+  const selectedOnPageCount = useMemo(
+    () => paginatedProducts.reduce((count, product) => (selectedProducts.has(product.id) ? count + 1 : count), 0),
+    [paginatedProducts, selectedProducts]
+  );
 
   const handleCellEdit = useCallback((productId: string, field: keyof POSProduct, value: any) => {
     setEditDrafts((prev) => ({
@@ -557,28 +591,16 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
       };
 
       const createdProduct = await posService.createProduct(productToCreate);
-
-      const normalizedSearch = searchQuery.trim().toLowerCase();
-      const matchesSearch =
-        !normalizedSearch ||
-        createdProduct.name.toLowerCase().includes(normalizedSearch) ||
-        createdProduct.sku.toLowerCase().includes(normalizedSearch) ||
-        (createdProduct.barcode || '').toLowerCase().includes(normalizedSearch);
-      const matchesCategory =
-        !selectedCategory ||
-        String(createdProduct.category || '').trim() === selectedCategory;
-
-      if (matchesSearch && matchesCategory) {
-        setProducts((prev) => {
-          const existingIndex = prev.findIndex((row) => row.id === createdProduct.id);
-          if (existingIndex >= 0) {
-            const next = [...prev];
-            next[existingIndex] = { ...prev[existingIndex], ...createdProduct };
-            return next;
-          }
-          return [createdProduct, ...prev];
-        });
-      }
+      setProducts((prev) => {
+        const existingIndex = prev.findIndex((row) => row.id === createdProduct.id);
+        if (existingIndex >= 0) {
+          const next = [...prev];
+          next[existingIndex] = { ...prev[existingIndex], ...createdProduct };
+          return next;
+        }
+        return [createdProduct, ...prev];
+      });
+      setCurrentPage(1);
 
       setNewProduct({});
       setNewProductSellingPriceManuallyEdited(false);
@@ -603,12 +625,21 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
   }, []);
 
   const selectAllProducts = useCallback(() => {
-    if (selectedProducts.size === products.length) {
-      setSelectedProducts(new Set());
-    } else {
-      setSelectedProducts(new Set(products.map((p) => p.id)));
-    }
-  }, [products, selectedProducts]);
+    if (paginatedProducts.length === 0) return;
+    setSelectedProducts((prev) => {
+      const next = new Set(prev);
+      const pageIds = paginatedProducts.map((product) => product.id);
+      const allOnPageSelected = pageIds.every((id) => next.has(id));
+
+      if (allOnPageSelected) {
+        pageIds.forEach((id) => next.delete(id));
+      } else {
+        pageIds.forEach((id) => next.add(id));
+      }
+
+      return next;
+    });
+  }, [paginatedProducts]);
 
   // Handle add product via prop or internal state
   const handleShowNewRow = () => {
@@ -622,12 +653,14 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
   // Expose methods to parent component
   useImperativeHandle(ref, () => ({
     handleShowNewRow,
-    refresh: loadProducts
+    refresh: () => {
+      void loadProducts('background');
+    },
   }));
 
   const productRows = useMemo(
     () =>
-      products.map((product) => {
+      paginatedProducts.map((product) => {
         const isEditing = editingRows.has(product.id);
         const isSelected = selectedProducts.has(product.id);
         const draft = editDrafts[product.id] || {};
@@ -813,7 +846,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
         );
       }),
     [
-      products,
+      paginatedProducts,
       editingRows,
       selectedProducts,
       editDrafts,
@@ -869,7 +902,9 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
             </button>
 
             <button
-              onClick={loadProducts}
+              onClick={() => {
+                void loadProducts('background');
+              }}
               className="touch-target-sm bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
             >
               <RefreshCw className={`w-5 h-5 text-slate-600 ${isLoading ? 'animate-spin' : ''}`} />
@@ -893,7 +928,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                   <th className="w-12 p-4">
                     <input
                       type="checkbox"
-                      checked={selectedProducts.size === products.length && products.length > 0}
+                      checked={selectedOnPageCount === paginatedProducts.length && paginatedProducts.length > 0}
                       onChange={selectAllProducts}
                       className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                     />
@@ -1030,6 +1065,38 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
             </table>
           </div>
 
+          {filteredProducts.length > 0 && (
+            <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <div className="text-sm text-slate-600">
+                Showing {(currentPage - 1) * PRODUCT_PAGE_SIZE + 1}
+                {' '}to{' '}
+                {Math.min(currentPage * PRODUCT_PAGE_SIZE, filteredProducts.length)}
+                {' '}of {filteredProducts.length} products
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                  disabled={currentPage <= 1}
+                  className="px-3 py-1.5 rounded-md border border-slate-300 text-sm font-medium text-slate-700 bg-white disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Prev
+                </button>
+                <span className="text-sm font-medium text-slate-700">
+                  Page {currentPage} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage >= totalPages}
+                  className="px-3 py-1.5 rounded-md border border-slate-300 text-sm font-medium text-slate-700 bg-white disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Empty State */}
           {products.length === 0 && !isLoading && (
             <div className="p-12 text-center">
@@ -1042,6 +1109,14 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
               >
                 Add First Product
               </button>
+            </div>
+          )}
+
+          {products.length > 0 && filteredProducts.length === 0 && !isLoading && (
+            <div className="p-12 text-center">
+              <Search className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+              <h3 className="text-lg font-semibold text-slate-900 mb-1">No matching products</h3>
+              <p className="text-slate-600">Try a different search or clear department filter.</p>
             </div>
           )}
 
