@@ -525,6 +525,7 @@ def _normalize_optional_uuid(value: Optional[str], field_name: str) -> Optional[
 
 MANAGER_LEVEL_ROLES = {'manager', 'admin', 'business_owner', 'outlet_admin', 'super_admin'}
 PHARMACY_ONLY_ROLES = {'pharmacist', 'accountant'}
+INVENTORY_EDITOR_ROLES = MANAGER_LEVEL_ROLES | {'pharmacist', 'accountant', 'inventory_staff'}
 
 
 def _normalize_role(role: Any) -> str:
@@ -621,6 +622,21 @@ def _require_pharmacist_role(
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Pharmacist authorization required for this action"
+    )
+
+
+def _require_inventory_editor_role(
+    supabase,
+    current_user: Dict[str, Any],
+    outlet_id: Optional[str],
+    staff_session_token: Optional[str]
+) -> Dict[str, Any]:
+    context = _resolve_staff_context(supabase, current_user, outlet_id, staff_session_token)
+    if context['role'] in INVENTORY_EDITOR_ROLES:
+        return context
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Inventory edit authorization required for this action"
     )
 
 
@@ -1139,7 +1155,7 @@ async def create_product(
     """Create a new product"""
     try:
         supabase = get_supabase_admin()
-        _require_manager_role(supabase, current_user, product.outlet_id, x_pos_staff_session)
+        _require_inventory_editor_role(supabase, current_user, product.outlet_id, x_pos_staff_session)
 
         # Generate product ID
         product_id = str(uuid.uuid4())
@@ -1454,15 +1470,16 @@ async def update_product(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Product not found"
             )
-        _require_manager_role(
+        _require_inventory_editor_role(
             supabase,
             current_user,
             existing_product.data[0].get('outlet_id'),
             x_pos_staff_session
         )
 
-        # Prepare update data (exclude None values)
-        update_data = {k: v for k, v in product.dict().items() if v is not None}
+        # Prepare JSON-safe update data (exclude None/unset values).
+        # Using mode='json' avoids Decimal serialization errors.
+        update_data = product.model_dump(mode='json', exclude_none=True, exclude_unset=True)
         if 'category' in update_data:
             update_data['category'] = _normalize_department_name(update_data.get('category'))
             _ensure_departments_exist(
