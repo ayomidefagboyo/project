@@ -631,6 +631,49 @@ class POSService {
     return latest;
   }
 
+  private normalizeLookupValue(value?: string | null): string {
+    return String(value || '').trim();
+  }
+
+  private normalizeLookupValueLoose(value?: string | null): string {
+    return this.normalizeLookupValue(value).toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  private isProductLookupMatch(product: POSProduct, needle: string): boolean {
+    const strictNeedle = this.normalizeLookupValue(needle);
+    if (!strictNeedle) return false;
+
+    const strictBarcode = this.normalizeLookupValue(product.barcode);
+    const strictSku = this.normalizeLookupValue(product.sku);
+    if (strictBarcode === strictNeedle || strictSku === strictNeedle) {
+      return true;
+    }
+
+    const looseNeedle = this.normalizeLookupValueLoose(strictNeedle);
+    if (!looseNeedle) return false;
+
+    return (
+      this.normalizeLookupValueLoose(product.barcode) === looseNeedle ||
+      this.normalizeLookupValueLoose(product.sku) === looseNeedle
+    );
+  }
+
+  private pickBarcodeMatch(products: POSProduct[], outletId: string, barcode: string): POSProduct | null {
+    return (
+      products.find(
+        (product) =>
+          product.outlet_id === outletId &&
+          product.is_active !== false &&
+          this.isProductLookupMatch(product, barcode)
+      ) || null
+    );
+  }
+
+  private isNotFoundLookupMessage(message?: string | null): boolean {
+    const normalized = String(message || '').toLowerCase();
+    return normalized.includes('not found') || normalized.includes('404');
+  }
+
   private async fetchProductsPageFromApi(
     outletId: string,
     options: {
@@ -1027,16 +1070,75 @@ class POSService {
    * Get product by barcode scan
    */
   async getProductByBarcode(barcode: string, outletId: string): Promise<POSProduct> {
+    const normalizedBarcode = this.normalizeLookupValue(barcode);
+    if (!normalizedBarcode) {
+      throw new Error('Invalid barcode');
+    }
+
+    const offlineReady = await this.ensureOfflineInitialized();
+    if (offlineReady) {
+      try {
+        const localMatches = await offlineDatabase.searchProducts(outletId, normalizedBarcode);
+        const localMatch = this.pickBarcodeMatch(localMatches, outletId, normalizedBarcode);
+        if (localMatch) {
+          return localMatch;
+        }
+      } catch (localError) {
+        logger.warn('Local barcode lookup failed:', localError);
+      }
+    }
+
+    let notFound = false;
+    let lookupError: Error | null = null;
+
     try {
       const response = await apiClient.get<POSProduct>(
-        `${this.baseUrl}/products/search/barcode/${encodeURIComponent(barcode)}?outlet_id=${outletId}`
+        `${this.baseUrl}/products/search/barcode/${encodeURIComponent(normalizedBarcode)}?outlet_id=${outletId}`
       );
-      if (response.error || !response.data) throw new Error(response.error || 'Product not found');
-      return response.data;
+
+      if (response.data) {
+        return response.data;
+      }
+
+      if (this.isNotFoundLookupMessage(response.error)) {
+        notFound = true;
+      } else if (response.error) {
+        lookupError = new Error(response.error);
+      }
     } catch (error) {
-      logger.error('Error fetching product by barcode:', error);
-      throw this.handleError(error);
+      lookupError = this.handleError(error);
     }
+
+    try {
+      const searchResult = await this.getProducts(outletId, {
+        page: 1,
+        size: 100,
+        search: normalizedBarcode,
+        activeOnly: true,
+      });
+      const matched = this.pickBarcodeMatch(searchResult.items || [], outletId, normalizedBarcode);
+      if (matched) {
+        return matched;
+      }
+      if ((searchResult.items || []).length === 1) {
+        return searchResult.items[0];
+      }
+      notFound = true;
+    } catch (error) {
+      if (!lookupError) {
+        lookupError = this.handleError(error);
+      }
+    }
+
+    if (notFound) {
+      throw new Error('Product not found for this barcode');
+    }
+
+    if (lookupError) {
+      throw lookupError;
+    }
+
+    throw new Error('Product not found for this barcode');
   }
 
   /**
