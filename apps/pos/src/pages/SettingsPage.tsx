@@ -823,7 +823,7 @@ const StaffSecurityTab: React.FC = () => {
                   <span className="text-sm text-gray-700 dark:text-gray-300">Void transactions</span>
                 </label>
                 <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
-                  Receive Items, End of Day, and Settings are manager-only and hidden for cashiers.
+                  Receive Items is available to managers, pharmacists, and inventory staff. End of Day and Settings stay manager-only.
                 </p>
               </div>
             </div>

@@ -16,7 +16,9 @@ import {
   Edit3,
   Package,
   MoreHorizontal,
-  ArrowLeft
+  ArrowLeft,
+  X,
+  Building2
 } from 'lucide-react';
 import { posService, type POSProduct, type POSDepartment } from '../../lib/posService';
 import { clearMissingProductIntent, peekMissingProductIntent } from '../../lib/missingProductIntent';
@@ -25,6 +27,11 @@ import { useLocation, useNavigate } from 'react-router-dom';
 
 interface ProductManagementProps {
   onShowNewRow?: () => void;
+}
+
+interface DepartmentPolicyDraft {
+  default_markup_percentage: string;
+  auto_pricing_enabled: boolean;
 }
 
 export interface ProductManagementHandle {
@@ -61,8 +68,20 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
   const [selectedCategory, setSelectedCategory] = useState('');
   const [editingRows, setEditingRows] = useState<Set<string>>(new Set());
   const [newProduct, setNewProduct] = useState<Partial<POSProduct>>({});
+  const [newProductSellingPriceManuallyEdited, setNewProductSellingPriceManuallyEdited] = useState(false);
   const [showNewRow, setShowNewRow] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
+  const [showDepartmentModal, setShowDepartmentModal] = useState(false);
+  const [departmentModalError, setDepartmentModalError] = useState<string | null>(null);
+  const [departmentCreateForm, setDepartmentCreateForm] = useState({
+    name: '',
+    code: '',
+    description: '',
+    default_markup_percentage: '30',
+    auto_pricing_enabled: true,
+  });
+  const [departmentPolicyDrafts, setDepartmentPolicyDrafts] = useState<Record<string, DepartmentPolicyDraft>>({});
+  const [departmentSavingId, setDepartmentSavingId] = useState<string | null>(null);
   const loadRequestRef = useRef(0);
   const newBarcodeInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -88,6 +107,33 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
 
     return Array.from(byKey.values()).sort((a, b) => a.localeCompare(b));
   }, [departments, products]);
+
+  const departmentPolicyByName = useMemo(() => {
+    const map = new Map<string, POSDepartment>();
+    departments.forEach((department) => {
+      const key = normalizeDepartmentName(department.name).toLowerCase();
+      if (!key) return;
+      map.set(key, department);
+    });
+    return map;
+  }, [departments]);
+
+  const calculateAutoSellingPrice = useCallback(
+    (costPrice: number, category?: string): number => {
+      const normalizedCost = Number.isFinite(costPrice) ? Math.max(0, costPrice) : 0;
+      if (normalizedCost <= 0) return 0;
+      const key = normalizeDepartmentName(category).toLowerCase();
+      const policy = key ? departmentPolicyByName.get(key) : undefined;
+      const autoEnabled = policy?.auto_pricing_enabled !== false;
+      const markup = Number(policy?.default_markup_percentage ?? 30);
+      if (!autoEnabled) {
+        return Number(normalizedCost.toFixed(2));
+      }
+      const factor = 1 + Math.max(0, markup) / 100;
+      return Number((normalizedCost * factor).toFixed(2));
+    },
+    [departmentPolicyByName]
+  );
 
   const loadDepartments = async () => {
     if (!currentOutlet?.id) {
@@ -122,6 +168,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     const barcode = rawBarcode.trim();
     if (!barcode) return;
     setShowNewRow(true);
+    setNewProductSellingPriceManuallyEdited(false);
     setNewProduct((prev) => ({
       ...prev,
       barcode,
@@ -226,34 +273,113 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
   };
 
   const handleNewProductChange = (field: keyof POSProduct, value: any) => {
-    setNewProduct(prev => ({ ...prev, [field]: value }));
+    setNewProduct((prev) => {
+      const next = { ...prev, [field]: value };
+
+      if (field === 'unit_price') {
+        setNewProductSellingPriceManuallyEdited(true);
+      }
+
+      if ((field === 'cost_price' || field === 'category') && !newProductSellingPriceManuallyEdited) {
+        const costPrice = Number(next.cost_price || 0);
+        const category = String(next.category || '');
+        next.unit_price = calculateAutoSellingPrice(costPrice, category);
+      }
+
+      return next;
+    });
+  };
+
+  const openDepartmentModal = () => {
+    const drafts: Record<string, DepartmentPolicyDraft> = {};
+    departments.forEach((department) => {
+      drafts[department.id] = {
+        default_markup_percentage: String(Number(department.default_markup_percentage ?? 30)),
+        auto_pricing_enabled: department.auto_pricing_enabled !== false,
+      };
+    });
+    setDepartmentPolicyDrafts(drafts);
+    setDepartmentModalError(null);
+    setShowDepartmentModal(true);
   };
 
   const handleCreateDepartment = async () => {
     if (!currentOutlet?.id) return;
 
-    const input = window.prompt('Enter new department name');
-    const name = normalizeDepartmentName(input);
-    if (!name) return;
+    const name = normalizeDepartmentName(departmentCreateForm.name);
+    if (!name) {
+      setDepartmentModalError('Department name is required.');
+      return;
+    }
+
+    const markup = Math.max(0, Number(departmentCreateForm.default_markup_percentage || 0));
 
     try {
       const created = await posService.createDepartment({
         outlet_id: currentOutlet.id,
         name,
+        code: departmentCreateForm.code.trim() || undefined,
+        description: departmentCreateForm.description.trim() || undefined,
+        default_markup_percentage: markup,
+        auto_pricing_enabled: departmentCreateForm.auto_pricing_enabled,
       });
       setDepartments((prev) => {
         const next = [...prev];
         const key = created.name.trim().toLowerCase();
-        if (!next.some((item) => item.name.trim().toLowerCase() === key)) {
+        const existingIndex = next.findIndex((item) => item.name.trim().toLowerCase() === key);
+        if (existingIndex >= 0) {
+          next[existingIndex] = created;
+        } else {
           next.push(created);
         }
         return next;
       });
       setSelectedCategory(created.name);
+      setDepartmentPolicyDrafts((prev) => ({
+        ...prev,
+        [created.id]: {
+          default_markup_percentage: String(
+            Number(created.default_markup_percentage ?? (markup || 30))
+          ),
+          auto_pricing_enabled: created.auto_pricing_enabled !== false,
+        },
+      }));
+      setDepartmentCreateForm({
+        name: '',
+        code: '',
+        description: '',
+        default_markup_percentage: '30',
+        auto_pricing_enabled: true,
+      });
+      setDepartmentModalError(null);
       setError(null);
     } catch (err) {
       console.error('Failed to create department:', err);
-      setError('Failed to create department. Ensure migration is applied and try again.');
+      setDepartmentModalError('Failed to create department. Ensure migration is applied and try again.');
+    }
+  };
+
+  const handleSaveDepartmentPolicy = async (departmentId: string) => {
+    const draft = departmentPolicyDrafts[departmentId];
+    if (!draft) return;
+    const markup = Math.max(0, Number(draft.default_markup_percentage || 0));
+
+    try {
+      setDepartmentSavingId(departmentId);
+      const updated = await posService.updateDepartment(departmentId, {
+        default_markup_percentage: markup,
+        auto_pricing_enabled: draft.auto_pricing_enabled,
+      });
+      setDepartments((prev) =>
+        prev.map((department) => (department.id === departmentId ? { ...department, ...updated } : department))
+      );
+      setDepartmentModalError(null);
+      setError(null);
+    } catch (err) {
+      console.error('Failed to save department policy:', err);
+      setDepartmentModalError('Could not save department margin policy. Please retry.');
+    } finally {
+      setDepartmentSavingId(null);
     }
   };
 
@@ -279,23 +405,38 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     if (!currentOutlet?.id || !newProduct.name) return;
 
     try {
+      const category = normalizeDepartmentName(newProduct.category) || 'Other';
+      const departmentPolicy = departmentPolicyByName.get(category.toLowerCase());
+      const defaultMarkup = Number(departmentPolicy?.default_markup_percentage ?? 30);
+      const autoPricingEnabled = departmentPolicy?.auto_pricing_enabled !== false;
+      const costPrice = Number(newProduct.cost_price || 0);
+      const typedUnitPrice = Number(newProduct.unit_price || 0);
+      const calculatedUnitPrice = calculateAutoSellingPrice(costPrice, category);
+      const finalUnitPrice = Math.max(
+        0,
+        typedUnitPrice > 0 ? typedUnitPrice : calculatedUnitPrice
+      );
+
       const productToCreate = {
         outlet_id: currentOutlet.id,
         sku: newProduct.sku || `SKU-${Date.now()}`,
         name: newProduct.name!,
         description: newProduct.description,
-        category: newProduct.category || 'Other',
-        unit_price: newProduct.unit_price || 0,
-        cost_price: newProduct.cost_price || 0,
+        category,
+        unit_price: finalUnitPrice,
+        cost_price: costPrice,
         quantity_on_hand: newProduct.quantity_on_hand || 0,
         reorder_level: newProduct.reorder_level || 0,
         reorder_quantity: newProduct.reorder_quantity || 0,
         tax_rate: 0.075,
-        barcode: newProduct.barcode
+        barcode: newProduct.barcode,
+        markup_percentage: defaultMarkup,
+        auto_pricing: autoPricingEnabled,
       };
 
       await posService.createProduct(productToCreate);
       setNewProduct({});
+      setNewProductSellingPriceManuallyEdited(false);
       setShowNewRow(false);
       setError(null);
       await loadProducts();
@@ -330,6 +471,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     if (onShowNewRow) {
       onShowNewRow();
     }
+    setNewProductSellingPriceManuallyEdited(false);
     setShowNewRow(true);
   };
 
@@ -371,10 +513,13 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
 
             <button
               type="button"
-              onClick={handleCreateDepartment}
+              onClick={openDepartmentModal}
               className="touch-target-sm px-3 py-2.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-sm font-medium"
             >
-              + Department
+              <span className="inline-flex items-center gap-1.5">
+                <Building2 className="w-4 h-4" />
+                Departments
+              </span>
             </button>
 
             <button
@@ -521,6 +666,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                           onClick={() => {
                             setShowNewRow(false);
                             setNewProduct({});
+                            setNewProductSellingPriceManuallyEdited(false);
                           }}
                           className="p-1 text-red-600 hover:bg-red-100 rounded transition-colors"
                           title="Cancel"
@@ -715,7 +861,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
               <h3 className="text-xl font-semibold text-slate-900 mb-2">No products found</h3>
               <p className="text-slate-600 mb-6">Start by adding your first product to the inventory</p>
               <button
-                onClick={() => setShowNewRow(true)}
+                onClick={handleShowNewRow}
                 className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg font-semibold"
               >
                 Add First Product
@@ -746,6 +892,176 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                 <button className="px-4 py-2 text-sm font-medium text-red-700 bg-red-100 hover:bg-red-200 rounded-lg transition-colors">
                   Delete Selected
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showDepartmentModal && (
+          <div className="fixed inset-0 z-50 bg-black/45 flex items-center justify-center p-4">
+            <div className="w-full max-w-4xl max-h-[90vh] overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl flex flex-col">
+              <div className="px-5 py-4 border-b border-stone-200 flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900">Department Setup</h3>
+                  <p className="text-xs text-stone-500 mt-0.5">
+                    Create departments and set default margin for auto sale pricing.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowDepartmentModal(false)}
+                  className="p-2 rounded-lg text-stone-500 hover:text-slate-900 hover:bg-stone-100"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-5 overflow-y-auto flex-1 min-h-0 space-y-4">
+                {departmentModalError && (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                    {departmentModalError}
+                  </div>
+                )}
+
+                <div className="rounded-xl border border-stone-200 p-4 bg-stone-50">
+                  <h4 className="text-sm font-semibold text-slate-900 mb-3">Add Department</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <input
+                      value={departmentCreateForm.name}
+                      onChange={(e) =>
+                        setDepartmentCreateForm((prev) => ({ ...prev, name: e.target.value }))
+                      }
+                      placeholder="Department name"
+                      className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm"
+                    />
+                    <input
+                      value={departmentCreateForm.code}
+                      onChange={(e) =>
+                        setDepartmentCreateForm((prev) => ({ ...prev, code: e.target.value }))
+                      }
+                      placeholder="Code (optional)"
+                      className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={departmentCreateForm.default_markup_percentage}
+                      onChange={(e) =>
+                        setDepartmentCreateForm((prev) => ({
+                          ...prev,
+                          default_markup_percentage: e.target.value,
+                        }))
+                      }
+                      placeholder="Default margin %"
+                      className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm"
+                    />
+                    <label className="inline-flex items-center gap-2 px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={departmentCreateForm.auto_pricing_enabled}
+                        onChange={(e) =>
+                          setDepartmentCreateForm((prev) => ({
+                            ...prev,
+                            auto_pricing_enabled: e.target.checked,
+                          }))
+                        }
+                        className="rounded border-stone-300"
+                      />
+                      Auto pricing enabled
+                    </label>
+                  </div>
+                  <textarea
+                    value={departmentCreateForm.description}
+                    onChange={(e) =>
+                      setDepartmentCreateForm((prev) => ({ ...prev, description: e.target.value }))
+                    }
+                    placeholder="Description (optional)"
+                    rows={2}
+                    className="w-full mt-3 px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm"
+                  />
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleCreateDepartment}
+                      className="px-4 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-stone-100 text-sm font-semibold"
+                    >
+                      Create Department
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-stone-200 overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-stone-100 text-stone-600 text-[11px] uppercase tracking-wide">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Department</th>
+                        <th className="px-3 py-2 text-right w-44">Default Margin %</th>
+                        <th className="px-3 py-2 text-center w-44">Auto Pricing</th>
+                        <th className="px-3 py-2 text-right w-28">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {departments
+                        .filter((department) => department.source !== 'product_category')
+                        .map((department) => {
+                          const draft = departmentPolicyDrafts[department.id] || {
+                            default_markup_percentage: String(Number(department.default_markup_percentage ?? 30)),
+                            auto_pricing_enabled: department.auto_pricing_enabled !== false,
+                          };
+                          return (
+                            <tr key={department.id}>
+                              <td className="px-3 py-2 font-medium text-slate-900">{department.name}</td>
+                              <td className="px-3 py-2">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={draft.default_markup_percentage}
+                                  onChange={(e) =>
+                                    setDepartmentPolicyDrafts((prev) => ({
+                                      ...prev,
+                                      [department.id]: {
+                                        ...draft,
+                                        default_markup_percentage: e.target.value,
+                                      },
+                                    }))
+                                  }
+                                  className="w-full px-2.5 py-2 rounded-lg border border-stone-300 bg-white text-right"
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={draft.auto_pricing_enabled}
+                                  onChange={(e) =>
+                                    setDepartmentPolicyDrafts((prev) => ({
+                                      ...prev,
+                                      [department.id]: {
+                                        ...draft,
+                                        auto_pricing_enabled: e.target.checked,
+                                      },
+                                    }))
+                                  }
+                                  className="rounded border-stone-300"
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveDepartmentPolicy(department.id)}
+                                  disabled={departmentSavingId === department.id}
+                                  className="px-3 py-2 rounded-lg border border-stone-300 bg-white hover:bg-stone-100 text-xs font-semibold text-slate-700 disabled:opacity-60"
+                                >
+                                  {departmentSavingId === department.id ? 'Saving...' : 'Save'}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>

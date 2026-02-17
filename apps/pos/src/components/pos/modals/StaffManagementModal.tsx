@@ -51,7 +51,7 @@ const StaffManagementModal: React.FC<StaffManagementModalProps> = ({ isOpen, onC
     { value: 'waiter', label: 'Waiter', description: 'Take orders and serve customers' },
     { value: 'kitchen_staff', label: 'Kitchen Staff', description: 'Prepare food and beverages' },
     { value: 'inventory_staff', label: 'Inventory Staff', description: 'Manage stock and inventory' },
-    { value: 'pharmacist', label: 'Pharmacist', description: 'Manage patient records and pharmacy care notes' },
+    { value: 'pharmacist', label: 'Pharmacist', description: 'Manage patient records, receive stock, and pharmacy care notes' },
   ];
 
   const normalizeRole = (role: string): UserRole =>

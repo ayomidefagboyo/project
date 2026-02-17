@@ -180,6 +180,16 @@ class DepartmentBase(BaseModel):
     code: Optional[str] = Field(None, max_length=30, description="Optional short code")
     description: Optional[str] = Field(None, max_length=255, description="Optional description")
     sort_order: int = Field(0, description="Display order")
+    default_markup_percentage: Decimal = Field(
+        30.00,
+        ge=0,
+        le=1000,
+        description="Default markup percentage used for auto sale price"
+    )
+    auto_pricing_enabled: bool = Field(
+        True,
+        description="Whether auto pricing is enabled for this department"
+    )
 
     @validator('name')
     def validate_department_name(cls, v):
@@ -207,6 +217,16 @@ class DepartmentUpdate(BaseModel):
     code: Optional[str] = Field(None, max_length=30)
     description: Optional[str] = Field(None, max_length=255)
     sort_order: Optional[int] = None
+    default_markup_percentage: Optional[Decimal] = Field(
+        None,
+        ge=0,
+        le=1000,
+        description="Default markup percentage for auto sale price"
+    )
+    auto_pricing_enabled: Optional[bool] = Field(
+        None,
+        description="Whether auto pricing is enabled for this department"
+    )
     is_active: Optional[bool] = None
 
     @validator('name')
@@ -234,6 +254,14 @@ class DepartmentResponse(BaseModel):
     code: Optional[str] = Field(None, description="Department short code")
     description: Optional[str] = Field(None, description="Department description")
     sort_order: int = Field(0, description="Display order")
+    default_markup_percentage: Decimal = Field(
+        30.00,
+        description="Default markup percentage for auto pricing"
+    )
+    auto_pricing_enabled: bool = Field(
+        True,
+        description="Whether auto pricing is enabled for this department"
+    )
     is_active: bool = Field(True, description="Department active flag")
     source: Optional[str] = Field(None, description="master or product_category")
     created_at: Optional[datetime] = Field(None, description="Creation timestamp")

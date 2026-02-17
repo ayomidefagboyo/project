@@ -29,6 +29,16 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
   const { success, error: showError } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [departments, setDepartments] = useState<POSDepartment[]>([]);
+  const [unitPriceManuallyEdited, setUnitPriceManuallyEdited] = useState(false);
+  const [showDepartmentForm, setShowDepartmentForm] = useState(false);
+  const [isCreatingDepartment, setIsCreatingDepartment] = useState(false);
+  const [departmentForm, setDepartmentForm] = useState({
+    name: '',
+    code: '',
+    description: '',
+    default_markup_percentage: '30',
+    auto_pricing_enabled: true,
+  });
   const [formData, setFormData] = useState({
     name: '',
     barcode: '',
@@ -65,12 +75,53 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
     return Array.from(byKey.values()).sort((a, b) => a.localeCompare(b));
   }, [departments]);
 
+  const departmentByName = useMemo(() => {
+    const map = new Map<string, POSDepartment>();
+    departments.forEach((department) => {
+      const key = normalizeDepartmentName(department.name).toLowerCase();
+      if (!key) return;
+      map.set(key, department);
+    });
+    return map;
+  }, [departments]);
+
+  const calculateAutoUnitPrice = (costPriceRaw: string | number, categoryRaw: string): string => {
+    const costPrice = Math.max(0, Number(costPriceRaw || 0));
+    if (costPrice <= 0) return '0';
+    const key = normalizeDepartmentName(categoryRaw).toLowerCase();
+    const policy = key ? departmentByName.get(key) : undefined;
+    const autoPricingEnabled = policy?.auto_pricing_enabled !== false;
+    if (!autoPricingEnabled) {
+      return costPrice.toFixed(2);
+    }
+    const markup = Math.max(0, Number(policy?.default_markup_percentage ?? 30));
+    const calculated = costPrice * (1 + markup / 100);
+    return calculated.toFixed(2);
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : value
-    }));
+    const nextValue = type === 'checkbox' ? (e.target as HTMLInputElement).checked : value;
+
+    setFormData(prev => {
+      const next = {
+        ...prev,
+        [name]: nextValue
+      } as typeof prev;
+
+      if (name === 'unit_price') {
+        setUnitPriceManuallyEdited(true);
+      }
+
+      if ((name === 'cost_price' || name === 'category') && !unitPriceManuallyEdited) {
+        next.unit_price = calculateAutoUnitPrice(
+          name === 'cost_price' ? String(nextValue) : prev.cost_price,
+          name === 'category' ? String(nextValue) : prev.category
+        );
+      }
+
+      return next;
+    });
   };
 
   const loadDepartments = async () => {
@@ -94,14 +145,22 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
 
   const handleCreateDepartment = async () => {
     if (!currentOutlet?.id) return;
-    const input = window.prompt('Enter new department name');
-    const name = normalizeDepartmentName(input);
-    if (!name) return;
+    const name = normalizeDepartmentName(departmentForm.name);
+    if (!name) {
+      showError('Department name is required.');
+      return;
+    }
 
     try {
+      setIsCreatingDepartment(true);
+      const markup = Math.max(0, Number(departmentForm.default_markup_percentage || 0));
       const created = await posService.createDepartment({
         outlet_id: currentOutlet.id,
         name,
+        code: departmentForm.code.trim() || undefined,
+        description: departmentForm.description.trim() || undefined,
+        default_markup_percentage: markup,
+        auto_pricing_enabled: departmentForm.auto_pricing_enabled,
       });
       setDepartments((prev) => {
         const next = [...prev];
@@ -112,9 +171,25 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
         return next;
       });
       setFormData((prev) => ({ ...prev, category: created.name }));
+      if (!unitPriceManuallyEdited && Number(formData.cost_price || 0) > 0) {
+        setFormData((prev) => ({
+          ...prev,
+          unit_price: calculateAutoUnitPrice(prev.cost_price, created.name),
+        }));
+      }
+      setDepartmentForm({
+        name: '',
+        code: '',
+        description: '',
+        default_markup_percentage: '30',
+        auto_pricing_enabled: true,
+      });
+      setShowDepartmentForm(false);
     } catch (err) {
       console.error('Failed to create department from Add Product modal:', err);
       showError('Failed to create department. Ensure migration is applied and try again.');
+    } finally {
+      setIsCreatingDepartment(false);
     }
   };
 
@@ -124,11 +199,16 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
 
     setIsLoading(true);
     try {
+      const category = normalizeDepartmentName(formData.category);
+      const policy = departmentByName.get(category.toLowerCase());
+      const markup = Math.max(0, Number(policy?.default_markup_percentage ?? 30));
+      const autoPricingEnabled = policy?.auto_pricing_enabled !== false;
+
       await posService.createProduct({
         outlet_id: currentOutlet.id,
         name: formData.name,
         description: formData.description || undefined,
-        category: formData.category,
+        category,
         unit_price: parseFloat(formData.unit_price) || 0,
         cost_price: parseFloat(formData.cost_price) || 0,
         quantity_on_hand: parseInt(formData.stock_quantity) || 0,
@@ -137,7 +217,9 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
         tax_rate: 0.075, // 7.5% VAT for Nigeria
         min_shelf_life_days: formData.has_expiry && formData.shelf_life_days ? parseInt(formData.shelf_life_days) : undefined,
         sku: formData.barcode || `SKU-${Date.now()}`, // Generate SKU if not provided
-        barcode: formData.barcode || undefined
+        barcode: formData.barcode || undefined,
+        markup_percentage: markup,
+        auto_pricing: autoPricingEnabled,
       });
 
       success('Product added successfully!');
@@ -158,6 +240,8 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
         shelf_life_days: '',
         description: ''
       });
+      setUnitPriceManuallyEdited(false);
+      setShowDepartmentForm(false);
     } catch (err) {
       console.error('Error adding product:', err);
       showError('Failed to add product. Please try again.');
@@ -223,10 +307,10 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
                 </label>
                 <button
                   type="button"
-                  onClick={handleCreateDepartment}
+                  onClick={() => setShowDepartmentForm((prev) => !prev)}
                   className="text-xs font-semibold text-blue-600 hover:text-blue-700"
                 >
-                  + New department
+                  {showDepartmentForm ? 'Hide' : '+ New department'}
                 </button>
               </div>
               <select
@@ -241,6 +325,71 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
                   <option key={cat} value={cat}>{cat}</option>
                 ))}
               </select>
+              {showDepartmentForm && (
+                <div className="mt-2 p-3 rounded-lg border border-gray-200 bg-gray-50 space-y-2">
+                  <input
+                    type="text"
+                    value={departmentForm.name}
+                    onChange={(e) => setDepartmentForm((prev) => ({ ...prev, name: e.target.value }))}
+                    placeholder="Department name"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      value={departmentForm.code}
+                      onChange={(e) => setDepartmentForm((prev) => ({ ...prev, code: e.target.value }))}
+                      placeholder="Code (optional)"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={departmentForm.default_markup_percentage}
+                      onChange={(e) =>
+                        setDepartmentForm((prev) => ({
+                          ...prev,
+                          default_markup_percentage: e.target.value,
+                        }))
+                      }
+                      placeholder="Default margin %"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={departmentForm.auto_pricing_enabled}
+                      onChange={(e) =>
+                        setDepartmentForm((prev) => ({
+                          ...prev,
+                          auto_pricing_enabled: e.target.checked,
+                        }))
+                      }
+                      className="rounded border-gray-300"
+                    />
+                    Auto pricing enabled
+                  </label>
+                  <textarea
+                    value={departmentForm.description}
+                    onChange={(e) => setDepartmentForm((prev) => ({ ...prev, description: e.target.value }))}
+                    rows={2}
+                    placeholder="Description (optional)"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleCreateDepartment}
+                      disabled={isCreatingDepartment}
+                      className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-60"
+                    >
+                      {isCreatingDepartment ? 'Saving...' : 'Create Department'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Unit Price */}

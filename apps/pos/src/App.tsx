@@ -580,8 +580,9 @@ function AppContent() {
   const normalizedStaffRole = (currentStaff?.role || '').toLowerCase();
   const isManager = normalizedStaffRole === 'manager';
   const isPharmacist = normalizedStaffRole === 'pharmacist' || normalizedStaffRole === 'accountant';
+  const isInventoryStaff = normalizedStaffRole === 'inventory_staff';
   const canAccessSettings = isManager;
-  const canAccessReceive = normalizedStaffRole !== 'cashier';
+  const canAccessReceive = isManager || isPharmacist || isInventoryStaff;
   const canAccessEod = normalizedStaffRole !== 'cashier';
 
   const headerContent =

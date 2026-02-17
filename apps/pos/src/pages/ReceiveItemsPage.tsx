@@ -51,6 +51,10 @@ type Step = 'entry' | 'receiving' | 'done';
 
 interface ReceiveLine extends InvoiceItem {
   lineId: string;
+  line_total?: number;
+  selling_price?: number;
+  auto_pricing_enabled?: boolean;
+  markup_percentage?: number;
 }
 
 const createLineId = (): string =>
@@ -61,6 +65,10 @@ const makeLine = (seed: Partial<ReceiveLine> = {}): ReceiveLine => ({
   description: '',
   quantity: 1,
   unit_price: 0,
+  line_total: 0,
+  selling_price: 0,
+  auto_pricing_enabled: true,
+  markup_percentage: 30,
   product_id: null,
   category: '',
   ...seed,
@@ -77,6 +85,15 @@ const parseNumber = (value: string, fallback = 0): number => {
   const next = Number(value);
   if (Number.isNaN(next)) return fallback;
   return next;
+};
+
+const roundMoney = (value: number): number => Number(Math.max(0, value).toFixed(2));
+
+const computeSellingFromMargin = (costPrice: number, markupPercentage: number): number => {
+  const safeCost = Math.max(0, Number(costPrice || 0));
+  if (safeCost <= 0) return 0;
+  const safeMarkup = Math.max(0, Number(markupPercentage || 0));
+  return roundMoney(safeCost * (1 + safeMarkup / 100));
 };
 
 const normalizeDepartmentName = (value?: string | null): string =>
@@ -125,10 +142,14 @@ const ReceiveItemsPage: React.FC = () => {
   const [departments, setDepartments] = useState<POSDepartment[]>([]);
   const [lineSearchTargetId, setLineSearchTargetId] = useState<string | null>(null);
   const [lineProductSearch, setLineProductSearch] = useState('');
+  const [lineSearchMatches, setLineSearchMatches] = useState<POSProduct[]>([]);
+  const [lineSearchLoading, setLineSearchLoading] = useState(false);
 
   const [quickEntry, setQuickEntry] = useState('');
   const [quickQuantity, setQuickQuantity] = useState('1');
   const [quickCost, setQuickCost] = useState('');
+  const [quickMatches, setQuickMatches] = useState<POSProduct[]>([]);
+  const [quickMatchLoading, setQuickMatchLoading] = useState(false);
   const [bulkText, setBulkText] = useState('');
   const [showBulkModal, setShowBulkModal] = useState(false);
   const quickEntryInputRef = useRef<HTMLInputElement | null>(null);
@@ -163,64 +184,70 @@ const ReceiveItemsPage: React.FC = () => {
       minimumFractionDigits: 2,
     }).format(amount);
 
+  const quickToken = useMemo(() => parseQuickToken(quickEntry), [quickEntry]);
+  const showQuickSuggestions = quickToken.identifier.trim().length > 0 && (
+    quickMatchLoading || quickMatches.length > 0 || quickToken.identifier.trim().length >= 3
+  );
+
+  const exactProductIndex = useMemo(() => {
+    const barcodeMap = new Map<string, POSProduct>();
+    const skuMap = new Map<string, POSProduct>();
+    const nameMap = new Map<string, POSProduct>();
+    products.forEach((product) => {
+      const barcode = (product.barcode || '').trim().toLowerCase();
+      const sku = (product.sku || '').trim().toLowerCase();
+      const name = (product.name || '').trim().toLowerCase();
+      if (barcode && !barcodeMap.has(barcode)) barcodeMap.set(barcode, product);
+      if (sku && !skuMap.has(sku)) skuMap.set(sku, product);
+      if (name && !nameMap.has(name)) nameMap.set(name, product);
+    });
+    return { barcodeMap, skuMap, nameMap };
+  }, [products]);
+
   const findProductExact = useCallback(
     (query: string): POSProduct | undefined => {
       const needle = query.trim().toLowerCase();
       if (!needle) return undefined;
-
-      return products.find((product) => {
-        const barcode = product.barcode?.trim().toLowerCase() || '';
-        const sku = product.sku?.trim().toLowerCase() || '';
-        const name = product.name.trim().toLowerCase();
-        return barcode === needle || sku === needle || name === needle;
-      });
+      return (
+        exactProductIndex.barcodeMap.get(needle) ||
+        exactProductIndex.skuMap.get(needle) ||
+        exactProductIndex.nameMap.get(needle)
+      );
     },
-    [products]
+    [exactProductIndex]
   );
 
-  const quickToken = useMemo(() => parseQuickToken(quickEntry), [quickEntry]);
+  const searchProductsFast = useCallback(
+    async (query: string, limit: number): Promise<POSProduct[]> => {
+      const trimmed = query.trim();
+      if (!trimmed || !currentOutlet?.id) return [];
 
-  const findQuickMatches = useCallback(
-    (identifier: string): POSProduct[] => {
-      const q = identifier.trim().toLowerCase();
-      if (!q) return [];
+      const exact = findProductExact(trimmed);
+      if (exact) {
+        return [exact];
+      }
 
-      return products
-        .filter((product) => {
-          const barcode = product.barcode?.toLowerCase() || '';
-          const sku = product.sku?.toLowerCase() || '';
-          return (
-            product.name.toLowerCase().includes(q) ||
-            barcode.includes(q) ||
-            sku.includes(q)
-          );
-        })
-        .slice(0, 8);
+      const local = await posService.searchLocalProducts(currentOutlet.id, trimmed);
+      let rows = local;
+
+      if (rows.length === 0 && navigator.onLine) {
+        try {
+          const online = await posService.getProducts(currentOutlet.id, {
+            page: 1,
+            size: Math.max(10, limit),
+            search: trimmed,
+            activeOnly: false,
+          });
+          rows = online.items || [];
+        } catch {
+          rows = [];
+        }
+      }
+
+      return rows.slice(0, limit);
     },
-    [products]
+    [currentOutlet?.id, findProductExact]
   );
-
-  const quickMatches = useMemo(
-    () => findQuickMatches(quickToken.identifier),
-    [quickToken.identifier, findQuickMatches]
-  );
-
-  const lineSearchMatches = useMemo(() => {
-    const q = lineProductSearch.trim().toLowerCase();
-    if (!q) return [];
-
-    return products
-      .filter((product) => {
-        const barcode = product.barcode?.toLowerCase() || '';
-        const sku = product.sku?.toLowerCase() || '';
-        return (
-          product.name.toLowerCase().includes(q) ||
-          barcode.includes(q) ||
-          sku.includes(q)
-        );
-      })
-      .slice(0, 10);
-  }, [lineProductSearch, products]);
 
   const departmentOptions = useMemo(() => {
     const byKey = new Map<string, string>();
@@ -241,9 +268,38 @@ const ReceiveItemsPage: React.FC = () => {
     return Array.from(byKey.values()).sort((a, b) => a.localeCompare(b));
   }, [departments, products]);
 
+  const departmentPolicyByName = useMemo(() => {
+    const map = new Map<string, POSDepartment>();
+    departments.forEach((department) => {
+      const key = normalizeDepartmentName(department.name).toLowerCase();
+      if (!key) return;
+      map.set(key, department);
+    });
+    return map;
+  }, [departments]);
+
+  const resolveDepartmentPricing = useCallback(
+    (category?: string | null): { markup: number; autoPricingEnabled: boolean } => {
+      const key = normalizeDepartmentName(category).toLowerCase();
+      const policy = key ? departmentPolicyByName.get(key) : undefined;
+      return {
+        markup: Math.max(0, Number(policy?.default_markup_percentage ?? 30)),
+        autoPricingEnabled: policy?.auto_pricing_enabled !== false,
+      };
+    },
+    [departmentPolicyByName]
+  );
+
+  const getLineTotal = useCallback((line: ReceiveLine): number => {
+    if (line.line_total !== undefined && line.line_total !== null && line.line_total > 0) {
+      return roundMoney(line.line_total);
+    }
+    return roundMoney(line.quantity * line.unit_price);
+  }, []);
+
   const subtotal = useMemo(
-    () => items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0),
-    [items]
+    () => items.reduce((sum, item) => sum + getLineTotal(item), 0),
+    [items, getLineTotal]
   );
 
   const totalUnits = useMemo(
@@ -321,9 +377,13 @@ const ReceiveItemsPage: React.FC = () => {
 
     const load = async () => {
       try {
-        const [vendorRes, productRes, departmentRes] = await Promise.all([
+        const [vendorRes, cachedProducts, departmentRes] = await Promise.all([
           vendorService.getVendors(currentOutlet.id),
-          posService.getAllProducts(currentOutlet.id, { activeOnly: false }),
+          posService.getCachedProducts(currentOutlet.id, {
+            activeOnly: false,
+            page: 1,
+            size: 20000,
+          }),
           posService.getDepartments(currentOutlet.id).catch(() => []),
         ]);
 
@@ -334,8 +394,25 @@ const ReceiveItemsPage: React.FC = () => {
           setVendors(normalized);
         }
 
-        setProducts(productRes || []);
+        const localProducts = cachedProducts.items || [];
+        setProducts(localProducts);
         setDepartments((departmentRes as POSDepartment[]) || []);
+
+        if (navigator.onLine) {
+          void (async () => {
+            try {
+              await posService.syncProductCatalog(currentOutlet.id, { forceFull: localProducts.length === 0 });
+              const refreshed = await posService.getCachedProducts(currentOutlet.id, {
+                activeOnly: false,
+                page: 1,
+                size: 20000,
+              });
+              setProducts(refreshed.items || []);
+            } catch (syncError) {
+              console.warn('Background product sync failed for Receive Items:', syncError);
+            }
+          })();
+        }
       } catch (loadError) {
         console.error('Failed to load receiving data:', loadError);
         setError('Unable to load vendors/products. Please refresh.');
@@ -363,15 +440,74 @@ const ReceiveItemsPage: React.FC = () => {
     loadHistory();
   }, [loadHistory]);
 
+  useEffect(() => {
+    const query = quickToken.identifier.trim();
+    if (!query) {
+      setQuickMatches([]);
+      setQuickMatchLoading(false);
+      return;
+    }
+
+    let active = true;
+    setQuickMatchLoading(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const results = await searchProductsFast(query, 8);
+        if (active) {
+          setQuickMatches(results);
+        }
+      } finally {
+        if (active) setQuickMatchLoading(false);
+      }
+    }, 80);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [quickToken.identifier, searchProductsFast]);
+
+  useEffect(() => {
+    const query = lineProductSearch.trim();
+    if (!query || !lineSearchTargetId) {
+      setLineSearchMatches([]);
+      setLineSearchLoading(false);
+      return;
+    }
+
+    let active = true;
+    setLineSearchLoading(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const results = await searchProductsFast(query, 10);
+        if (active) {
+          setLineSearchMatches(results);
+        }
+      } finally {
+        if (active) setLineSearchLoading(false);
+      }
+    }, 80);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [lineProductSearch, lineSearchTargetId, searchProductsFast]);
+
   const upsertLineFromProduct = (product: POSProduct, quantity = 1, unitPrice?: number) => {
     const normalizedQty = Math.max(1, quantity);
+    const costPrice = Math.max(0, unitPrice ?? product.cost_price ?? 0);
+    const sellingPrice = Math.max(0, product.unit_price || costPrice);
     setItems((prev) => {
       const existingIndex = prev.findIndex((item) => item.product_id === product.id);
       if (existingIndex >= 0) {
         const next = [...prev];
+        const updatedQty = next[existingIndex].quantity + normalizedQty;
+        const lineTotal = roundMoney(updatedQty * (next[existingIndex].unit_price || costPrice));
         next[existingIndex] = {
           ...next[existingIndex],
-          quantity: next[existingIndex].quantity + normalizedQty,
+          quantity: updatedQty,
+          line_total: lineTotal,
         };
         return next;
       }
@@ -381,7 +517,11 @@ const ReceiveItemsPage: React.FC = () => {
         makeLine({
           description: product.name,
           quantity: normalizedQty,
-          unit_price: unitPrice ?? product.cost_price ?? 0,
+          unit_price: costPrice,
+          line_total: roundMoney(normalizedQty * costPrice),
+          selling_price: sellingPrice,
+          auto_pricing_enabled: false,
+          markup_percentage: product.markup_percentage ?? 0,
           product_id: product.id,
           sku: product.sku || undefined,
           barcode: product.barcode || undefined,
@@ -397,7 +537,52 @@ const ReceiveItemsPage: React.FC = () => {
 
   const updateLine = <K extends keyof ReceiveLine>(lineId: string, field: K, value: ReceiveLine[K]) => {
     setItems((prev) =>
-      prev.map((line) => (line.lineId === lineId ? { ...line, [field]: value } : line))
+      prev.map((line) => {
+        if (line.lineId !== lineId) return line;
+        const next = { ...line, [field]: value } as ReceiveLine;
+
+        if (field === 'quantity' || field === 'unit_price') {
+          const quantity = Math.max(0, Number(next.quantity || 0));
+          const unitPrice = Math.max(0, Number(next.unit_price || 0));
+          next.line_total = roundMoney(quantity * unitPrice);
+          if (next.auto_pricing_enabled) {
+            next.selling_price = computeSellingFromMargin(unitPrice, Number(next.markup_percentage || 30));
+          }
+        }
+
+        if (field === 'line_total') {
+          const quantity = Math.max(0, Number(next.quantity || 0));
+          const lineTotal = Math.max(0, Number(next.line_total || 0));
+          next.unit_price = quantity > 0 ? roundMoney(lineTotal / quantity) : 0;
+          if (next.auto_pricing_enabled) {
+            next.selling_price = computeSellingFromMargin(next.unit_price, Number(next.markup_percentage || 30));
+          }
+        }
+
+        if (field === 'category') {
+          const pricing = resolveDepartmentPricing(String(next.category || ''));
+          next.markup_percentage = pricing.markup;
+          next.auto_pricing_enabled = pricing.autoPricingEnabled;
+          if (pricing.autoPricingEnabled) {
+            next.selling_price = computeSellingFromMargin(
+              Number(next.unit_price || 0),
+              pricing.markup
+            );
+          }
+        }
+
+        if (field === 'auto_pricing_enabled' || field === 'markup_percentage') {
+          const auto = Boolean(next.auto_pricing_enabled);
+          if (auto) {
+            next.selling_price = computeSellingFromMargin(
+              Number(next.unit_price || 0),
+              Number(next.markup_percentage || 30)
+            );
+          }
+        }
+
+        return next;
+      })
     );
   };
 
@@ -414,6 +599,10 @@ const ReceiveItemsPage: React.FC = () => {
               description: product.name,
               product_id: product.id,
               unit_price: line.unit_price || product.cost_price || 0,
+              line_total: roundMoney((line.quantity || 0) * (line.unit_price || product.cost_price || 0)),
+              selling_price: product.unit_price || line.selling_price || 0,
+              auto_pricing_enabled: false,
+              markup_percentage: product.markup_percentage ?? line.markup_percentage ?? 0,
               sku: product.sku || undefined,
               barcode: product.barcode || undefined,
               category: line.category || product.category || '',
@@ -458,7 +647,7 @@ const ReceiveItemsPage: React.FC = () => {
       return;
     }
 
-    const matches = findQuickMatches(query);
+    const matches = quickMatches;
     if (matches.length === 1) {
       upsertLineFromProduct(matches[0], qty, unitPrice);
       setQuickEntry('');
@@ -467,19 +656,27 @@ const ReceiveItemsPage: React.FC = () => {
     }
 
     const inferredBarcode = looksLikeBarcode(query) ? query : undefined;
+    const pricing = resolveDepartmentPricing('');
+    const cost = unitPrice ?? 0;
     setItems((prev) => [
       ...prev,
       makeLine({
         description: query,
         quantity: qty,
-        unit_price: unitPrice ?? 0,
+        unit_price: cost,
+        line_total: roundMoney(cost * qty),
+        markup_percentage: pricing.markup,
+        auto_pricing_enabled: pricing.autoPricingEnabled,
+        selling_price: pricing.autoPricingEnabled
+          ? computeSellingFromMargin(cost, pricing.markup)
+          : cost,
         product_id: null,
         barcode: inferredBarcode,
       }),
     ]);
     setQuickEntry('');
     focusQuickEntry();
-  }, [findProductExact, findQuickMatches, quickCost, quickQuantity]);
+  }, [findProductExact, quickMatches, quickCost, quickQuantity, resolveDepartmentPricing]);
 
   const handleQuickAdd = () => {
     addQuickEntryToken(quickEntry);
@@ -550,11 +747,16 @@ const ReceiveItemsPage: React.FC = () => {
         );
 
       if (matched) {
+        const costPrice = price > 0 ? price : matched.cost_price || 0;
         parsed.push(
           makeLine({
             description: matched.name,
             quantity: qty,
-            unit_price: price > 0 ? price : matched.cost_price || 0,
+            unit_price: costPrice,
+            line_total: roundMoney(costPrice * qty),
+            selling_price: matched.unit_price || costPrice,
+            auto_pricing_enabled: false,
+            markup_percentage: matched.markup_percentage ?? 0,
             product_id: matched.id,
             sku: matched.sku || undefined,
             barcode: matched.barcode || undefined,
@@ -562,11 +764,19 @@ const ReceiveItemsPage: React.FC = () => {
           })
         );
       } else {
+        const pricing = resolveDepartmentPricing(category);
+        const costPrice = Math.max(0, price);
         parsed.push(
           makeLine({
             description: identifier,
             quantity: qty,
-            unit_price: price,
+            unit_price: costPrice,
+            line_total: roundMoney(costPrice * qty),
+            selling_price: pricing.autoPricingEnabled
+              ? computeSellingFromMargin(costPrice, pricing.markup)
+              : costPrice,
+            auto_pricing_enabled: pricing.autoPricingEnabled,
+            markup_percentage: pricing.markup,
             product_id: null,
             category,
             barcode: barcode || undefined,
@@ -587,10 +797,14 @@ const ReceiveItemsPage: React.FC = () => {
       if (line.product_id) {
         const existingIndex = next.findIndex((item) => item.product_id === line.product_id);
         if (existingIndex >= 0) {
+          const nextQty = next[existingIndex].quantity + line.quantity;
+          const nextUnit = line.unit_price > 0 ? line.unit_price : next[existingIndex].unit_price;
           next[existingIndex] = {
             ...next[existingIndex],
-            quantity: next[existingIndex].quantity + line.quantity,
-            unit_price: line.unit_price > 0 ? line.unit_price : next[existingIndex].unit_price,
+            quantity: nextQty,
+            unit_price: nextUnit,
+            line_total: roundMoney(nextQty * nextUnit),
+            selling_price: line.selling_price || next[existingIndex].selling_price || 0,
           };
           return;
         }
@@ -743,18 +957,44 @@ const ReceiveItemsPage: React.FC = () => {
   const handleReceive = async () => {
     if (!currentOutlet?.id) return;
 
-    const validItems = items
+    const validLines = items
       .filter((item) => item.description.trim() && item.quantity > 0)
       .map((item) => {
-        const { lineId, ...invoiceItem } = item;
-        void lineId;
-        return invoiceItem as InvoiceItem;
+        const lineTotal = getLineTotal(item);
+        const quantity = Math.max(0, Number(item.quantity || 0));
+        const unitPrice = quantity > 0 ? roundMoney(lineTotal / quantity) : 0;
+        const pricing = resolveDepartmentPricing(item.category);
+        const sellingPrice = Math.max(
+          0,
+          Number(
+            item.selling_price && item.selling_price > 0
+              ? item.selling_price
+              : pricing.autoPricingEnabled
+                ? computeSellingFromMargin(unitPrice, pricing.markup)
+                : unitPrice
+          )
+        );
+        return {
+          ...item,
+          quantity,
+          unit_price: unitPrice,
+          line_total: lineTotal,
+          markup_percentage: Number(item.markup_percentage ?? pricing.markup),
+          auto_pricing_enabled: item.auto_pricing_enabled ?? pricing.autoPricingEnabled,
+          selling_price: sellingPrice,
+        } as ReceiveLine;
       });
 
-    if (validItems.length === 0) {
+    if (validLines.length === 0) {
       setError('Add at least one valid line item before receiving.');
       return;
     }
+
+    const validItems: InvoiceItem[] = validLines.map((line) => {
+      const { lineId, ...invoiceItem } = line;
+      void lineId;
+      return invoiceItem as InvoiceItem;
+    });
 
     setError('');
     setIsCreating(true);
@@ -771,18 +1011,44 @@ const ReceiveItemsPage: React.FC = () => {
         items: validItems,
       });
 
+      const invoiceItemRows = invoice.invoice_items || [];
+      const itemOverrides = invoiceItemRows.map((invoiceItem, index) => {
+        const source = validLines[index];
+        if (!invoiceItem?.id || !source) return null;
+        return {
+          item_id: invoiceItem.id,
+          quantity: source.quantity,
+          cost_price: source.unit_price,
+          selling_price: source.selling_price,
+          line_total: source.line_total,
+          category: source.category,
+          markup_percentage: source.markup_percentage,
+          auto_pricing_enabled: source.auto_pricing_enabled,
+        };
+      }).filter(Boolean) as Array<{
+        item_id: string;
+        quantity?: number;
+        cost_price?: number;
+        selling_price?: number;
+        line_total?: number;
+        category?: string;
+        markup_percentage?: number;
+        auto_pricing_enabled?: boolean;
+      }>;
+
       const result = await invoiceService.receiveGoods(invoice.id, {
         addToInventory: true,
         updateCostPrices: true,
+        itemsReceived: itemOverrides,
       });
 
       const byProductId = new Map(
-        validItems
-          .filter((item) => !!item.product_id)
-          .map((item) => [item.product_id as string, item])
+        validLines
+          .filter((line) => !!line.product_id)
+          .map((line) => [line.product_id as string, line])
       );
       const byName = new Map(
-        validItems.map((item) => [item.description.trim().toLowerCase(), item])
+        validLines.map((line) => [line.description.trim().toLowerCase(), line])
       );
 
       const printedLabels: ProductLabelData[] = [
@@ -794,7 +1060,7 @@ const ReceiveItemsPage: React.FC = () => {
             name: product.name,
             sku: source?.sku,
             barcode: source?.barcode,
-            price: source?.unit_price,
+            price: source?.selling_price || source?.unit_price,
           };
         }),
         ...result.products_updated.map((product) => {
@@ -805,7 +1071,7 @@ const ReceiveItemsPage: React.FC = () => {
             name: product.name,
             sku: source?.sku,
             barcode: source?.barcode,
-            price: source?.unit_price,
+            price: source?.selling_price || source?.unit_price,
           };
         }),
       ].filter((label) => label.name.trim().length > 0);
@@ -989,8 +1255,16 @@ const ReceiveItemsPage: React.FC = () => {
                         </button>
                       </div>
 
-                      {quickToken.identifier.trim().length > 0 && quickMatches.length > 0 && (
+                      {showQuickSuggestions && (
                         <div className="absolute z-20 mt-1 w-full rounded-xl border border-stone-200 bg-white shadow-lg max-h-56 overflow-y-auto">
+                          {quickMatchLoading && (
+                            <p className="px-3 py-2 text-xs text-stone-500">Searching inventory...</p>
+                          )}
+                          {!quickMatchLoading && quickMatches.length === 0 && quickToken.identifier.trim().length >= 3 && (
+                            <p className="px-3 py-2 text-xs text-stone-500">
+                              No exact inventory match. Press Add to create a new line.
+                            </p>
+                          )}
                           {quickMatches.map((product) => (
                             <button
                               key={product.id}
@@ -1092,15 +1366,16 @@ const ReceiveItemsPage: React.FC = () => {
                   </div>
                 ) : (
                   <div className="overflow-auto max-h-[52vh]">
-                    <table className="w-full min-w-[980px] text-sm">
+                    <table className="w-full min-w-[1040px] text-sm">
                       <thead className="sticky top-0 z-10 bg-stone-100 text-stone-600 text-[11px] uppercase tracking-wide">
                         <tr>
                           <th className="px-3 py-2 text-left w-10">#</th>
                           <th className="px-3 py-2 text-left min-w-[300px]">Item Description</th>
-                          <th className="px-3 py-2 text-left min-w-[160px]">Inventory Link</th>
-                          <th className="px-3 py-2 text-left min-w-[120px]">Category</th>
+                          <th className="px-2 py-2 text-center w-24">Link</th>
+                          <th className="px-3 py-2 text-left min-w-[140px]">Category</th>
                           <th className="px-3 py-2 text-right w-24">Qty</th>
                           <th className="px-3 py-2 text-right w-36">Cost Price</th>
+                          <th className="px-3 py-2 text-right w-36">Selling Price</th>
                           <th className="px-3 py-2 text-right w-36">Line Total</th>
                           <th className="px-3 py-2 text-center w-16">Action</th>
                         </tr>
@@ -1121,16 +1396,16 @@ const ReceiveItemsPage: React.FC = () => {
                               />
                             </td>
 
-                            <td className="px-3 py-2 relative">
+                            <td className="px-2 py-2 relative text-center">
                               {line.product_id ? (
-                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium">
-                                  <Check className="w-3.5 h-3.5" /> Linked
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-medium">
+                                  <Check className="w-3 h-3" /> Linked
                                   <button
                                     onClick={() => updateLine(line.lineId, 'product_id', null)}
                                     className="hover:text-red-600"
                                     title="Unlink product"
                                   >
-                                    <X className="w-3.5 h-3.5" />
+                                    <X className="w-3 h-3" />
                                   </button>
                                 </span>
                               ) : (
@@ -1139,9 +1414,9 @@ const ReceiveItemsPage: React.FC = () => {
                                     setLineSearchTargetId(line.lineId);
                                     setLineProductSearch('');
                                   }}
-                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-stone-300 bg-white text-xs font-medium text-slate-700 hover:bg-stone-100"
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-stone-300 bg-white text-[11px] font-medium text-slate-700 hover:bg-stone-100"
                                 >
-                                  <Search className="w-3.5 h-3.5" /> Search
+                                  <Search className="w-3.5 h-3.5" /> Link
                                 </button>
                               )}
 
@@ -1154,7 +1429,7 @@ const ReceiveItemsPage: React.FC = () => {
                                       setLineProductSearch('');
                                     }}
                                   />
-                                  <div className="absolute left-0 top-full mt-1 w-80 rounded-xl border border-stone-200 bg-white shadow-xl z-30 p-2">
+                                  <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 w-80 rounded-xl border border-stone-200 bg-white shadow-xl z-30 p-2 text-left">
                                     <input
                                       value={lineProductSearch}
                                       onChange={(event) => setLineProductSearch(event.target.value)}
@@ -1163,7 +1438,10 @@ const ReceiveItemsPage: React.FC = () => {
                                       autoFocus
                                     />
                                     <div className="max-h-44 overflow-y-auto mt-1">
-                                      {lineProductSearch.trim().length > 0 && lineSearchMatches.length === 0 && (
+                                      {lineSearchLoading && (
+                                        <p className="p-2 text-[11px] text-stone-500">Searching inventory...</p>
+                                      )}
+                                      {!lineSearchLoading && lineProductSearch.trim().length > 0 && lineSearchMatches.length === 0 && (
                                         <p className="p-2 text-[11px] text-stone-500">
                                           No existing product found. This line will create a new product.
                                         </p>
@@ -1189,15 +1467,26 @@ const ReceiveItemsPage: React.FC = () => {
                             </td>
 
                             <td className="px-3 py-2">
-                              <input
-                                list="receive-department-options"
+                              <select
                                 value={line.category || ''}
                                 onChange={(event) =>
                                   updateLine(line.lineId, 'category', event.target.value)
                                 }
-                                placeholder="Department"
                                 className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
-                              />
+                              >
+                                <option value="">Select department</option>
+                                {line.category &&
+                                  !departmentOptions.some(
+                                    (option) => option.toLowerCase() === line.category!.toLowerCase()
+                                  ) && (
+                                    <option value={line.category}>{line.category}</option>
+                                  )}
+                                {departmentOptions.map((department) => (
+                                  <option key={department} value={department}>
+                                    {department}
+                                  </option>
+                                ))}
+                              </select>
                             </td>
 
                             <td className="px-3 py-2">
@@ -1233,8 +1522,38 @@ const ReceiveItemsPage: React.FC = () => {
                               />
                             </td>
 
-                            <td className="px-3 py-2 text-right font-semibold text-slate-800">
-                              {formatCurrency(line.quantity * line.unit_price)}
+                            <td className="px-3 py-2">
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={line.selling_price ?? 0}
+                                onChange={(event) =>
+                                  updateLine(
+                                    line.lineId,
+                                    'selling_price',
+                                    Math.max(0, parseNumber(event.target.value, 0))
+                                  )
+                                }
+                                className="w-full px-2.5 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-right focus:outline-none focus:ring-2 focus:ring-slate-300"
+                              />
+                            </td>
+
+                            <td className="px-3 py-2">
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={getLineTotal(line)}
+                                onChange={(event) =>
+                                  updateLine(
+                                    line.lineId,
+                                    'line_total',
+                                    Math.max(0, parseNumber(event.target.value, 0))
+                                  )
+                                }
+                                className="w-full px-2.5 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-right font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                              />
                             </td>
 
                             <td className="px-3 py-2 text-center">
@@ -1250,11 +1569,6 @@ const ReceiveItemsPage: React.FC = () => {
                         ))}
                       </tbody>
                     </table>
-                    <datalist id="receive-department-options">
-                      {departmentOptions.map((department) => (
-                        <option key={department} value={department} />
-                      ))}
-                    </datalist>
                   </div>
                 )}
 

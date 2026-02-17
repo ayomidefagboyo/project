@@ -226,6 +226,79 @@ def _upsert_pos_products_compat(supabase, rows: List[Dict[str, Any]]):
     )
 
 
+def _insert_pos_departments_compat(supabase, rows: List[Dict[str, Any]]) -> Tuple[Any, List[str]]:
+    """
+    Insert pos_departments rows with backward compatibility for older schemas.
+    Returns the supabase result and the list of removed columns.
+    """
+    payload_rows = [dict(row) for row in rows]
+    removed_columns: List[str] = []
+
+    for _ in range(12):
+        try:
+            result = supabase.table(Tables.POS_DEPARTMENTS).insert(payload_rows).execute()
+            return result, removed_columns
+        except Exception as exc:
+            missing_column = _extract_missing_column_name(exc)
+            if not missing_column:
+                raise
+
+            removed_any = False
+            for row in payload_rows:
+                if missing_column in row:
+                    row.pop(missing_column, None)
+                    removed_any = True
+
+            if removed_any:
+                removed_columns.append(missing_column)
+                logger.warning(
+                    "pos_departments.%s missing in schema cache; retrying insert without it",
+                    missing_column
+                )
+                continue
+
+            raise
+
+    raise RuntimeError(
+        f"Failed to insert pos_departments after compatibility retries; removed columns={removed_columns}"
+    )
+
+
+def _update_pos_department_compat(
+    supabase,
+    department_id: str,
+    update_data: Dict[str, Any]
+) -> Tuple[Any, List[str]]:
+    """
+    Update one pos_departments row with backward compatibility for older schemas.
+    Returns the supabase result and the list of removed columns.
+    """
+    payload = dict(update_data)
+    removed_columns: List[str] = []
+
+    for _ in range(12):
+        try:
+            result = supabase.table(Tables.POS_DEPARTMENTS).update(payload).eq('id', department_id).execute()
+            return result, removed_columns
+        except Exception as exc:
+            missing_column = _extract_missing_column_name(exc)
+            if missing_column and missing_column in payload:
+                payload.pop(missing_column, None)
+                removed_columns.append(missing_column)
+                logger.warning(
+                    "pos_departments.%s missing in schema cache; retrying update without it",
+                    missing_column
+                )
+                if not payload:
+                    break
+                continue
+            raise
+
+    raise RuntimeError(
+        f"Failed to update pos_departments after compatibility retries; removed columns={removed_columns}"
+    )
+
+
 def _insert_stocktake_session_compat(supabase, session_data: Dict[str, Any]):
     """
     Insert into pos_stocktake_sessions with backward compatibility.
@@ -642,6 +715,10 @@ def _list_departments_with_product_categories(
         merged = dict(row)
         merged['name'] = normalized_name
         merged['source'] = merged.get('source') or 'master'
+        if merged.get('default_markup_percentage') is None:
+            merged['default_markup_percentage'] = Decimal('30')
+        if merged.get('auto_pricing_enabled') is None:
+            merged['auto_pricing_enabled'] = True
         merged_by_name[key] = merged
 
     category_names = _get_department_category_names_from_products(supabase, outlet_id)
@@ -657,6 +734,8 @@ def _list_departments_with_product_categories(
             'code': _normalize_department_code('', category_name),
             'description': None,
             'sort_order': 9999,
+            'default_markup_percentage': Decimal('30'),
+            'auto_pricing_enabled': True,
             'is_active': True,
             'source': 'product_category',
             'created_at': None,
@@ -729,6 +808,8 @@ def _ensure_departments_exist(
             'code': _normalize_department_code('', name),
             'description': None,
             'sort_order': max_sort_order,
+            'default_markup_percentage': Decimal('30'),
+            'auto_pricing_enabled': True,
             'is_active': True,
             'created_at': now_iso,
             'updated_at': now_iso
@@ -747,7 +828,7 @@ def _ensure_departments_exist(
         return
 
     try:
-        supabase.table(Tables.POS_DEPARTMENTS).insert(rows_to_insert).execute()
+        _insert_pos_departments_compat(supabase, rows_to_insert)
     except Exception as exc:
         logger.warning(
             "Failed to create department records for outlet %s during product flow: %s",
@@ -824,13 +905,20 @@ async def create_department(
                 continue
 
             if row.get('is_active') is False:
-                reactivate = supabase.table(Tables.POS_DEPARTMENTS).update({
+                reactivate, removed_columns = _update_pos_department_compat(supabase, str(row.get('id')), {
                     'is_active': True,
                     'sort_order': department.sort_order,
                     'description': department.description,
                     'code': _normalize_department_code(department.code, department_name),
+                    'default_markup_percentage': float(department.default_markup_percentage),
+                    'auto_pricing_enabled': department.auto_pricing_enabled,
                     'updated_at': now_iso
-                }).eq('id', row.get('id')).execute()
+                })
+                if 'default_markup_percentage' in removed_columns or 'auto_pricing_enabled' in removed_columns:
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="Department margin policy columns are missing. Run the latest POS migration and retry."
+                    )
                 if reactivate.data:
                     row = reactivate.data[0]
 
@@ -846,11 +934,18 @@ async def create_department(
             'code': _normalize_department_code(department.code, department_name),
             'description': department.description,
             'sort_order': department.sort_order,
+            'default_markup_percentage': float(department.default_markup_percentage),
+            'auto_pricing_enabled': department.auto_pricing_enabled,
             'is_active': True,
             'created_at': now_iso,
             'updated_at': now_iso
         }
-        result = supabase.table(Tables.POS_DEPARTMENTS).insert(payload).execute()
+        result, removed_columns = _insert_pos_departments_compat(supabase, [payload])
+        if 'default_markup_percentage' in removed_columns or 'auto_pricing_enabled' in removed_columns:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Department margin policy columns are missing. Run the latest POS migration and retry."
+            )
         if not result.data:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -859,6 +954,10 @@ async def create_department(
 
         created_row = dict(result.data[0])
         created_row['name'] = _normalize_department_name(created_row.get('name')) or department_name
+        if created_row.get('default_markup_percentage') is None:
+            created_row['default_markup_percentage'] = float(department.default_markup_percentage)
+        if created_row.get('auto_pricing_enabled') is None:
+            created_row['auto_pricing_enabled'] = department.auto_pricing_enabled
         created_row['source'] = 'master'
         return DepartmentResponse(**created_row)
     except HTTPException:
@@ -868,6 +967,103 @@ async def create_department(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create department: {str(e)}"
+        )
+
+
+@router.put("/departments/{department_id}", response_model=DepartmentResponse)
+async def update_department(
+    department_id: str,
+    department: DepartmentUpdate,
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
+    current_user=Depends(CurrentUser())
+):
+    """Update a department policy/configuration."""
+    try:
+        supabase = get_supabase_admin()
+        existing = supabase.table(Tables.POS_DEPARTMENTS)\
+            .select('id,outlet_id,name')\
+            .eq('id', department_id)\
+            .limit(1)\
+            .execute()
+
+        if not existing.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Department not found"
+            )
+
+        outlet_id = existing.data[0].get('outlet_id')
+        _require_manager_role(supabase, current_user, outlet_id, x_pos_staff_session)
+
+        update_data = department.model_dump(mode='json', exclude_none=True, exclude_unset=True)
+        if not update_data:
+            current = supabase.table(Tables.POS_DEPARTMENTS)\
+                .select('*')\
+                .eq('id', department_id)\
+                .limit(1)\
+                .execute()
+            if not current.data:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Department not found"
+                )
+            row = dict(current.data[0])
+            row['name'] = _normalize_department_name(row.get('name')) or str(existing.data[0].get('name') or '')
+            row['source'] = row.get('source') or 'master'
+            if row.get('default_markup_percentage') is None:
+                row['default_markup_percentage'] = Decimal('30')
+            if row.get('auto_pricing_enabled') is None:
+                row['auto_pricing_enabled'] = True
+            return DepartmentResponse(**row)
+
+        if 'name' in update_data:
+            normalized_name = _normalize_department_name(update_data.get('name'))
+            if not normalized_name:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Department name cannot be empty"
+                )
+            update_data['name'] = normalized_name
+            if 'code' not in update_data:
+                update_data['code'] = _normalize_department_code('', normalized_name)
+
+        if 'code' in update_data:
+            normalized_for_code = update_data.get('name') or _normalize_department_name(existing.data[0].get('name')) or ''
+            update_data['code'] = _normalize_department_code(update_data.get('code'), normalized_for_code)
+
+        update_data['updated_at'] = datetime.utcnow().isoformat()
+
+        result, removed_columns = _update_pos_department_compat(supabase, department_id, update_data)
+        if (
+            ('default_markup_percentage' in update_data and 'default_markup_percentage' in removed_columns)
+            or ('auto_pricing_enabled' in update_data and 'auto_pricing_enabled' in removed_columns)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Department margin policy columns are missing. Run the latest POS migration and retry."
+            )
+
+        if not result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Department not found"
+            )
+
+        row = dict(result.data[0])
+        row['name'] = _normalize_department_name(row.get('name')) or str(existing.data[0].get('name') or '')
+        if row.get('default_markup_percentage') is None:
+            row['default_markup_percentage'] = Decimal('30')
+        if row.get('auto_pricing_enabled') is None:
+            row['auto_pricing_enabled'] = True
+        row['source'] = row.get('source') or 'master'
+        return DepartmentResponse(**row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating department {department_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update department: {str(e)}"
         )
 
 @router.get("/products", response_model=ProductListResponse)

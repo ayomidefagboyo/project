@@ -12,6 +12,10 @@ export interface InvoiceItem {
   quantity: number;
   unit_price: number;
   total?: number;
+  line_total?: number;
+  selling_price?: number;
+  markup_percentage?: number;
+  auto_pricing_enabled?: boolean;
   product_id?: string | null;
   sku?: string;
   barcode?: string;
@@ -142,12 +146,23 @@ class InvoiceService {
   async receiveGoods(invoiceId: string, options: {
     addToInventory?: boolean;
     updateCostPrices?: boolean;
+    itemsReceived?: Array<{
+      item_id: string;
+      quantity?: number;
+      cost_price?: number;
+      selling_price?: number;
+      line_total?: number;
+      category?: string;
+      markup_percentage?: number;
+      auto_pricing_enabled?: boolean;
+    }>;
   } = {}): Promise<ReceiveGoodsResponse> {
     const response = await apiClient.post<ReceiveGoodsResponse>(
       `${this.baseUrl}/${invoiceId}/receive`,
       {
         add_to_inventory: options.addToInventory ?? true,
         update_cost_prices: options.updateCostPrices ?? true,
+        items_received: options.itemsReceived,
       }
     );
     if (response.error || !response.data) {
