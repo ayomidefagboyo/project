@@ -529,9 +529,8 @@ const TransactionsPage: React.FC = () => {
       if (currentOutlet?.id) {
         try {
           const scopedRaw = localStorage.getItem(`pos-receipt-template:${currentOutlet.id}`);
-          const raw = scopedRaw || localStorage.getItem('pos-receipt-template');
-          if (raw) {
-            const tpl = JSON.parse(raw) as ReceiptTemplate;
+          if (scopedRaw) {
+            const tpl = JSON.parse(scopedRaw) as ReceiptTemplate;
             if (tpl?.styling) {
               printStyle = {
                 fontSize: tpl.styling.fontSize,

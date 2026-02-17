@@ -193,11 +193,13 @@ const readCachedReceiptTemplate = (outletId: string): ReceiptTemplate | null => 
   }
 
   localStorage.setItem(scopedKey, JSON.stringify(parsedLegacy));
+  localStorage.removeItem(LEGACY_RECEIPT_TEMPLATE_CACHE_KEY);
   return parsedLegacy;
 };
 
 const writeCachedReceiptTemplate = (outletId: string, template: ReceiptTemplate): void => {
   localStorage.setItem(getReceiptTemplateCacheKey(outletId), JSON.stringify(template));
+  localStorage.removeItem(LEGACY_RECEIPT_TEMPLATE_CACHE_KEY);
 };
 
 const ReceiptEditor: React.FC = () => {

@@ -37,6 +37,13 @@ const toBase64 = (value: string): string => {
   return btoa(binary);
 };
 
+const normalizeReceiptContent = (content: string): string =>
+  content
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trimEnd();
+
 const tryCompazzNativePrint = async (
   content: string,
   copies: number,
@@ -76,7 +83,7 @@ const tryQzRawPrint = async (
       {
         type: 'raw',
         format: 'plain',
-        data: `${content}\n\n\n`,
+        data: `${content}\n`,
       },
     ];
     await qz.print(config, data);
@@ -121,6 +128,8 @@ export const openReceiptPrintWindow = (
   const title = options?.title || 'Receipt';
   const copies = Math.max(1, Math.min(5, Math.floor(options?.copies || 1)));
   const style = options?.style;
+  const normalizedContent = normalizeReceiptContent(receiptContent);
+  if (!normalizedContent) return false;
 
   const fontSize = resolveFontSize(style?.fontSize);
   const fontFamily = resolveFontFamily(style?.fontFamily);
@@ -136,7 +145,7 @@ export const openReceiptPrintWindow = (
       return `
         <section class="copy">
           ${copyLabel}
-          <pre>${escapeHtml(receiptContent)}</pre>
+          <pre>${escapeHtml(normalizedContent)}</pre>
         </section>
       `;
     })
@@ -148,21 +157,19 @@ export const openReceiptPrintWindow = (
     <title>${escapeHtml(title)}</title>
     <style>
       @page {
-        margin: 2mm 0 0 0;
-        size: auto;
+        margin: 0;
+        size: ${maxWidth} auto;
       }
       * { box-sizing: border-box; }
       html, body {
         margin: 0;
         padding: 0;
-        width: 100%;
-        height: auto;
+        width: ${maxWidth};
         background: #fff;
         color: #111827;
       }
       body {
         font-family: ${fontFamily};
-        padding: 4px 8px;
         max-width: ${maxWidth};
       }
       pre {
@@ -174,12 +181,12 @@ export const openReceiptPrintWindow = (
         margin: 0;
         padding: 0;
       }
-      .copy { margin-bottom: 4px; }
+      .copy { margin: 0; }
       .copy-label { font-weight: 700; margin-bottom: 4px; text-transform: uppercase; font-size: ${fontSize}; }
-      .cut { border: 0; border-top: 1px dashed #9ca3af; margin: 6px 0; }
+      .cut { border: 0; border-top: 1px dashed #9ca3af; margin: 4px 0; }
       @media print {
-        html, body { height: auto; padding: 0; margin: 0; }
-        body { padding: 0 2mm; }
+        html, body { padding: 0; margin: 0; width: ${maxWidth}; }
+        body { padding: 0; }
         .copy { break-inside: avoid; page-break-inside: avoid; }
       }
     </style>
@@ -207,19 +214,21 @@ export const printReceiptContent = async (
 ): Promise<{ success: boolean; mode: 'native' | 'browser' | 'none' }> => {
   const copies = Math.max(1, Math.min(5, Math.floor(options?.copies || 1)));
   const printerName = options?.printerName;
+  const normalizedContent = normalizeReceiptContent(receiptContent);
+  if (!normalizedContent) return { success: false, mode: 'none' };
 
   // Attempt native bridge first (Compazz bridge / QZ Tray), then fallback to browser print.
-  const nativeCompazz = await tryCompazzNativePrint(receiptContent, copies, printerName);
+  const nativeCompazz = await tryCompazzNativePrint(normalizedContent, copies, printerName);
   if (nativeCompazz) {
     return { success: true, mode: 'native' };
   }
 
-  const nativeQz = await tryQzRawPrint(receiptContent, copies, printerName);
+  const nativeQz = await tryQzRawPrint(normalizedContent, copies, printerName);
   if (nativeQz) {
     return { success: true, mode: 'native' };
   }
 
-  const opened = openReceiptPrintWindow(receiptContent, {
+  const opened = openReceiptPrintWindow(normalizedContent, {
     title: options?.title,
     copies,
     style: options?.style,

@@ -3513,8 +3513,6 @@ async def print_receipt(
         receipt_lines.append("=" * W)
         receipt_lines.append("Thank you for your patronage!".center(W))
         receipt_lines.append(f"Powered by Compazz POS".center(W))
-        receipt_lines.append("")
-        receipt_lines.append("")
         
         # Mark receipt as printed
         supabase.table('pos_transactions').update({
@@ -3523,7 +3521,7 @@ async def print_receipt(
         }).eq('id', transaction_id).execute()
         
         # Return receipt data (frontend can handle printing via browser print dialog)
-        receipt_content = "\n".join(receipt_lines)
+        receipt_content = "\n".join(receipt_lines).rstrip()
         
         return {
             "message": "Receipt generated successfully",
