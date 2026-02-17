@@ -245,7 +245,19 @@ const StocktakingPage: React.FC = () => {
         }
         return next;
       });
-      await loadProducts();
+      const countedByProductId = new Map(
+        changedRows.map((row) => [row.product.id, row.counted])
+      );
+      setProducts((prev) =>
+        prev.map((product) => {
+          const counted = countedByProductId.get(product.id);
+          if (counted === undefined) return product;
+          return {
+            ...product,
+            quantity_on_hand: counted,
+          };
+        })
+      );
     } catch (err) {
       console.error('Stocktake failed:', err);
       const message = err instanceof Error ? err.message : 'Stocktake failed. Please try again.';

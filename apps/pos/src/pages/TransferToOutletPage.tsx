@@ -215,10 +215,26 @@ const TransferToOutletPage: React.FC = () => {
 
       success(`Transfer ${createdTransfer.transfer_number} sent to ${selectedDestination?.name || 'destination outlet'}.`);
       setDraftItems([]);
+      setSelectedProductId('');
       setTransferReason('Inter-outlet replenishment');
       setNotes('');
-
-      await Promise.all([loadProducts(), loadTransfers()]);
+      const transferQtyByProductId = new Map(
+        draftItems.map((item) => [item.product_id, item.quantity_requested])
+      );
+      setProducts((prev) =>
+        prev.map((product) => {
+          const movedQty = transferQtyByProductId.get(product.id);
+          if (!movedQty) return product;
+          return {
+            ...product,
+            quantity_on_hand: Math.max(0, Number(product.quantity_on_hand || 0) - movedQty),
+          };
+        })
+      );
+      setTransfers((prev) => {
+        const deduped = prev.filter((transfer) => transfer.id !== createdTransfer.id);
+        return [createdTransfer, ...deduped].slice(0, 20);
+      });
     } catch (err) {
       console.error('Failed to create outlet transfer:', err);
       showError('Transfer failed. Please check stock and try again.');
