@@ -170,7 +170,7 @@ const TrialExpired: React.FC<TrialExpiredProps> = ({
 
           {/* Footer */}
           <div className="text-xs text-gray-500 dark:text-gray-400">
-            <p>• Cancel anytime • No setup fees • 30-day money-back guarantee</p>
+            <p>• Cancel anytime • Flexible setup options • 30-day money-back guarantee</p>
             {isExpired && (
               <p className="mt-2 text-red-600 dark:text-red-400">
                 Your account is currently read-only. Upgrade to continue managing your finances.

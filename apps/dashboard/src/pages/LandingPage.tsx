@@ -13,7 +13,12 @@ import {
   Loader2,
   TrendingDown,
   DollarSign,
-  FileText
+  FileText,
+  Flame,
+  Smartphone,
+  BellRing,
+  Wifi,
+  AlertTriangle
 } from 'lucide-react';
 import { paymentPlans } from '@/lib/stripe';
 import { currencyService, type CurrencyInfo } from '@/lib/currencyService';
@@ -227,6 +232,72 @@ const LandingPage: React.FC = () => {
       answer: "We offer a 30-day money-back guarantee. If you're not satisfied with Compazz within the first 30 days, we'll provide a full refund, no questions asked."
     }
   ];
+
+  const nigeriaImmediateValue = [
+    {
+      icon: Shield,
+      title: 'Theft Detection',
+      description: 'Know which staff is stealing stock. This solves a major day-to-day pain point.'
+    },
+    {
+      icon: Smartphone,
+      title: 'Mobile Owner Dashboard',
+      description: 'Owners can check sales and control operations from anywhere.'
+    },
+    {
+      icon: BellRing,
+      title: 'Low Stock Alerts',
+      description: 'Auto low-stock and reorder alerts through channels like WhatsApp.'
+    },
+    {
+      icon: DollarSign,
+      title: 'Real Profit Reports',
+      description: 'Not just sales totals. Clear gross margin and net profitability visibility.'
+    },
+    {
+      icon: Building2,
+      title: 'Multi-Branch Sync',
+      description: 'High-value capability for chains running two or more outlets.'
+    },
+    {
+      icon: Receipt,
+      title: 'Purchase & Supplier Tracking',
+      description: 'Control procurement leakage, costs, and invoice history.'
+    },
+    {
+      icon: Wifi,
+      title: 'Offline-First Operations',
+      description: 'Non-negotiable reliability when internet is unstable.'
+    }
+  ];
+
+  const nigeriaRevenuePhases = [
+    {
+      title: 'Phase 1 — Entry',
+      points: [
+        'Cheap onboarding',
+        'Focus supermarkets and pharmacies',
+        'Local installers as partners'
+      ]
+    },
+    {
+      title: 'Phase 2 — Expansion',
+      points: [
+        'Multi-branch features',
+        'Analytics upsells',
+        'Financing integrations'
+      ]
+    },
+    {
+      title: 'Phase 3 — Platform',
+      points: [
+        'Supplier marketplace',
+        'Embedded credit',
+        'Payments (optional)'
+      ]
+    }
+  ];
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <PublicHeader />
@@ -656,6 +727,105 @@ const LandingPage: React.FC = () => {
         </div>
       </section>
 
+      {/* Nigeria Pricing & Positioning Strategy */}
+      <section className="section-padding bg-muted/30">
+        <div className="container-width">
+          <div className="max-w-5xl mx-auto">
+            <div className="text-center mb-10">
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-border bg-background text-sm font-semibold text-foreground mb-5">
+                <Flame className="w-4 h-4 text-orange-500" />
+                Winning Pricing Strategy (Nigeria)
+              </div>
+              <h2 className="text-3xl md:text-4xl font-semibold text-foreground mb-4 text-balance">
+                Sell control over money and staff, not just inventory software
+              </h2>
+              <p className="text-lg text-muted-foreground max-w-3xl mx-auto text-balance">
+                Do not copy Western SaaS pricing one-for-one. In this market, a hybrid commercial model
+                and strong business-control positioning convert faster.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+              <div className="card p-6">
+                <h3 className="text-xl font-semibold text-foreground mb-3">Hybrid model that wins locally</h3>
+                <div className="space-y-4 text-muted-foreground">
+                  <div>
+                    <p className="font-medium text-foreground">Setup Fee</p>
+                    <p>₦50,000 - ₦150,000</p>
+                    <p className="text-sm mt-1">Paid installation builds trust, feels serious, and covers onboarding.</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">Monthly Subscription</p>
+                    <p>Starter: ₦10,000 - ₦15,000</p>
+                    <p>Growth: ₦20,000 - ₦35,000</p>
+                    <p>Pro: ₦50,000+</p>
+                    <p className="text-sm mt-1">Include value beyond inventory to justify recurring spend.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="card p-6 border border-border">
+                <h3 className="text-xl font-semibold text-foreground mb-3">How you beat legacy EPOS vendors</h3>
+                <p className="text-muted-foreground mb-3">
+                  They mostly sell software once. Compazz can sell ongoing business intelligence,
+                  control, and automation.
+                </p>
+                <p className="text-muted-foreground">
+                  Positioning is the advantage: stop stock loss and know real profit.
+                </p>
+              </div>
+            </div>
+
+            <div className="mb-8">
+              <h3 className="text-2xl font-semibold text-foreground mb-4 text-center">
+                Features businesses will pay for immediately
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {nigeriaImmediateValue.map((feature) => (
+                  <div key={feature.title} className="card p-5">
+                    <div className="w-10 h-10 rounded-lg bg-accent/40 border border-border flex items-center justify-center mb-3">
+                      <feature.icon className="w-5 h-5 text-foreground" />
+                    </div>
+                    <h4 className="font-semibold text-foreground mb-1">{feature.title}</h4>
+                    <p className="text-sm text-muted-foreground">{feature.description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+              {nigeriaRevenuePhases.map((phase) => (
+                <div key={phase.title} className="card p-5">
+                  <h4 className="font-semibold text-foreground mb-2">{phase.title}</h4>
+                  <ul className="space-y-1 text-sm text-muted-foreground">
+                    {phase.points.map((point) => (
+                      <li key={point} className="flex items-start">
+                        <Check className="w-4 h-4 text-emerald-500 mt-0.5 mr-2 flex-shrink-0" />
+                        {point}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+
+            <div className="rounded-2xl border border-amber-300/50 bg-amber-50/80 dark:bg-amber-900/10 px-5 py-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-700 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-amber-900 dark:text-amber-200">
+                    Critical mistake to avoid
+                  </p>
+                  <p className="text-sm text-amber-800 dark:text-amber-300 mt-1">
+                    Do not launch as “inventory app.” Launch as “stop stock loss and know your real profit.”
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Testimonials Section */}
       <section id="testimonials" className="section-padding bg-muted/30">
         <div className="container-width">
@@ -892,7 +1062,7 @@ const LandingPage: React.FC = () => {
             <div className="flex items-center space-x-6 text-sm text-primary-foreground/80">
               <span className="flex items-center">
                 <Check className="w-4 h-4 text-emerald-400 mr-2" />
-                No setup fees
+                Flexible setup options
               </span>
               <span className="flex items-center">
                 <Check className="w-4 h-4 text-emerald-400 mr-2" />
