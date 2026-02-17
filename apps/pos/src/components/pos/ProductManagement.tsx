@@ -3,7 +3,7 @@
  * Swiss Premium Design with touch optimization
  */
 
-import React, { useState, useEffect, useRef, useMemo, forwardRef, useImperativeHandle } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, forwardRef, useImperativeHandle } from 'react';
 import {
   Plus,
   Save,
