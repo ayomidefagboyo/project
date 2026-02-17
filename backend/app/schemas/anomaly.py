@@ -71,6 +71,7 @@ class AnomalyResponse(AnomalyBase):
     id: str = Field(..., description="Anomaly unique identifier")
     outlet_id: str = Field(..., description="Outlet identifier")
     detected_at: datetime = Field(..., description="Detection timestamp")
+    ai_reasoning: Optional[str] = Field(None, description="AI reasoning behind this anomaly")
     resolved: bool = Field(False, description="Whether anomaly is resolved")
     resolved_by: Optional[str] = Field(None, description="User who resolved the anomaly")
     resolved_at: Optional[datetime] = Field(None, description="Resolution timestamp")
@@ -115,6 +116,7 @@ class AnomalyDetectionResult(BaseModel):
     anomalies: List[AnomalyResponse] = Field(..., description="Detected anomalies")
     risk_score: float = Field(..., ge=0, le=100, description="Overall risk score")
     recommendations: List[str] = Field(..., description="AI recommendations")
+    reasoning_summary: Optional[str] = Field(None, description="High-level AI reasoning summary")
     detection_time: datetime = Field(..., description="Detection timestamp")
     confidence: float = Field(..., ge=0, le=100, description="Detection confidence")
 
@@ -200,7 +202,6 @@ class AnomalyDashboardResponse(BaseModel):
     trends: AnomalyTrendResponse = Field(..., description="Trend data")
     alerts: List[AnomalyAlert] = Field(..., description="Active alerts")
     recommendations: List[AnomalyRecommendation] = Field(..., description="Active recommendations")
-
 
 
 
