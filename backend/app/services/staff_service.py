@@ -267,16 +267,18 @@ class StaffService:
             # No updates to make
             return await StaffService.get_staff_profile(profile_id)
 
+        # Supabase Python client compatibility: update builders do not support
+        # chaining .select() after .eq() in all versions.
         response = supabase.table(Tables.STAFF_PROFILES)\
             .update(update_dict)\
             .eq('id', profile_id)\
-            .select()\
-            .single()\
             .execute()
 
-        if response.data:
-            return StaffProfileResponse(**response.data)
-        return None
+        if not response.data:
+            return None
+
+        # Re-fetch updated row for a stable response payload.
+        return await StaffService.get_staff_profile(profile_id)
 
     @staticmethod
     async def delete_staff_profile(profile_id: str) -> bool:
