@@ -415,17 +415,30 @@ def _normalize_split_payments(raw_split_payments: Any) -> List[Dict[str, Any]]:
 
 def _build_persisted_transaction_notes(
     notes: Optional[str],
-    split_payments: List[Dict[str, Any]]
+    split_payments: List[Dict[str, Any]],
+    metadata: Optional[Dict[str, Any]] = None
 ) -> Optional[str]:
     """Persist free-form note and split metadata in one notes payload."""
     note_text = notes.strip() if isinstance(notes, str) else ""
-    if not split_payments:
-        return note_text or None
 
-    payload: Dict[str, Any] = {"split_payments": split_payments}
+    payload: Dict[str, Any] = {}
+    if split_payments:
+        payload["split_payments"] = split_payments
+
+    if isinstance(metadata, dict):
+        for key, value in metadata.items():
+            if value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue
+            payload[key] = value
+
     if note_text:
         payload["note"] = note_text
-    return json.dumps(payload, separators=(",", ":"))
+
+    if payload:
+        return json.dumps(payload, separators=(",", ":"))
+    return note_text or None
 
 
 def _extract_split_payments_from_record(record: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -456,6 +469,17 @@ def _extract_display_note_from_record(record: Dict[str, Any]) -> Optional[str]:
         return None
 
     return notes_value
+
+
+def _extract_cashier_staff_profile_id_from_record(record: Dict[str, Any]) -> Optional[str]:
+    """Resolve cashier staff profile id from first-class column or notes payload metadata."""
+    direct_value = str(record.get("cashier_staff_profile_id") or "").strip()
+    if direct_value:
+        return direct_value
+
+    notes_data = _safe_json_loads(record.get("notes"))
+    note_value = str(notes_data.get("cashier_staff_profile_id") or "").strip()
+    return note_value or None
 
 
 def _decorate_transaction_record(record: Dict[str, Any]) -> Dict[str, Any]:
@@ -1732,7 +1756,8 @@ async def create_transaction(
 
         persisted_notes = _build_persisted_transaction_notes(
             transaction.notes,
-            split_payments if len(split_payments) > 1 else []
+            split_payments if len(split_payments) > 1 else [],
+            {"cashier_staff_profile_id": staff_profile_id} if staff_profile_id else None
         )
 
         # Get cashier's name for display (prefer staff_profiles, then users).
@@ -1756,6 +1781,7 @@ async def create_transaction(
             'transaction_number': transaction_number,
             'outlet_id': transaction.outlet_id,
             'cashier_id': cashier_id,
+            'cashier_staff_profile_id': staff_profile_id,
             'cashier_name': cashier_name,
             'customer_id': transaction.customer_id,
             'customer_name': transaction.customer_name,
@@ -1866,6 +1892,7 @@ async def get_transactions(
     """Get transactions with filtering and pagination"""
     try:
         supabase = get_supabase_admin()
+        cashier_filter_value = str(cashier_id or '').strip()
 
         def apply_filters(query_builder, include_payment_filter: bool = True):
             query_builder = query_builder.eq('outlet_id', outlet_id)
@@ -1876,8 +1903,6 @@ async def get_transactions(
             if date_to:
                 end_exclusive = date_to + timedelta(days=1)
                 query_builder = query_builder.lt('transaction_date', f"{end_exclusive.isoformat()}T00:00:00")
-            if cashier_id:
-                query_builder = query_builder.eq('cashier_id', cashier_id)
             if include_payment_filter and payment_method:
                 query_builder = query_builder.eq('payment_method', payment_method.value)
             if status:
@@ -1895,9 +1920,30 @@ async def get_transactions(
 
             return query_builder
 
+        def matches_cashier_filter(record: Dict[str, Any]) -> bool:
+            if not cashier_filter_value:
+                return True
+
+            transaction_cashier_id = str(record.get('cashier_id') or '').strip()
+            transaction_staff_profile_id = _extract_cashier_staff_profile_id_from_record(record)
+            transaction_cashier_name = str(record.get('cashier_name') or '').strip()
+
+            if transaction_staff_profile_id:
+                cashier_group_key = f"staff:{transaction_staff_profile_id}"
+            elif transaction_cashier_name:
+                cashier_group_key = f"name:{transaction_cashier_name.lower()}"
+            else:
+                cashier_group_key = f"user:{transaction_cashier_id}"
+
+            return cashier_filter_value in {
+                cashier_group_key,
+                transaction_cashier_id,
+                transaction_staff_profile_id or '',
+            }
+
         offset = (page - 1) * size
-        # Payment-specific filters need split-awareness and may require post-filtering.
-        if split_only or payment_method is not None:
+        # Payment-specific filters and staff-aware cashier filters require post-filtering.
+        if split_only or payment_method is not None or cashier_filter_value:
             query = apply_filters(
                 supabase.table('pos_transactions').select('*, items:pos_transaction_items(*)'),
                 include_payment_filter=False
@@ -1905,17 +1951,23 @@ async def get_transactions(
             query = query.order('transaction_date', desc=True)
             result = query.execute()
 
-            decorated = [_decorate_transaction_record(row) for row in (result.data or [])]
+            filtered: List[Dict[str, Any]] = []
+            target_method = payment_method.value if payment_method else None
 
-            if split_only:
-                filtered = [row for row in decorated if len(row.get('split_payments') or []) > 1]
-            else:
-                target_method = payment_method.value if payment_method else None
-                filtered = [
-                    row
-                    for row in decorated
-                    if len(row.get('split_payments') or []) <= 1 and row.get('payment_method') == target_method
-                ]
+            for row in (result.data or []):
+                if not matches_cashier_filter(row):
+                    continue
+
+                decorated_row = _decorate_transaction_record(row)
+                split_count = len(decorated_row.get('split_payments') or [])
+                if split_only:
+                    if split_count <= 1:
+                        continue
+                elif target_method:
+                    if split_count > 1 or decorated_row.get('payment_method') != target_method:
+                        continue
+
+                filtered.append(decorated_row)
 
             total = len(filtered)
             items = filtered[offset: offset + size]
@@ -3753,6 +3805,7 @@ async def get_sales_breakdown(
     """Get detailed sales breakdown by payment method with cashier filtering for EOD reconciliation"""
     try:
         supabase = get_supabase_admin()
+        cashier_filter_value = str(cashier_id or "").strip()
 
         # Build date filter
         date_filter = f"transaction_date.gte.{date_from}T00:00:00"
@@ -3767,9 +3820,6 @@ async def get_sales_breakdown(
             .gte('transaction_date', f"{date_from}T00:00:00")\
             .lte('transaction_date', f"{date_to}T23:59:59")
 
-        if cashier_id:
-            query = query.eq('cashier_id', cashier_id)
-
         result = query.order('transaction_date', desc=False).execute()
 
         transactions = result.data or []
@@ -3777,7 +3827,7 @@ async def get_sales_breakdown(
         # Initialize breakdown structure
         breakdown = {
             'summary': {
-                'total_transactions': len(transactions),
+                'total_transactions': 0,
                 'total_amount': Decimal('0'),
                 'cash_total': Decimal('0'),
                 'pos_total': Decimal('0'),
@@ -3799,14 +3849,40 @@ async def get_sales_breakdown(
 
         # Process each transaction
         for tx in transactions:
+            transaction_cashier_id = str(tx.get('cashier_id') or '').strip()
+            transaction_staff_profile_id = _extract_cashier_staff_profile_id_from_record(tx)
+            transaction_cashier_name = str(tx.get('cashier_name') or '').strip()
+            user_cashier_name = (
+                tx.get('users', {}).get('name', 'Unknown Cashier')
+                if tx.get('users')
+                else 'Unknown Cashier'
+            )
+            cashier_name = transaction_cashier_name or user_cashier_name
+
+            if transaction_staff_profile_id:
+                cashier_group_key = f"staff:{transaction_staff_profile_id}"
+            elif transaction_cashier_name:
+                cashier_group_key = f"name:{transaction_cashier_name.lower()}"
+            else:
+                cashier_group_key = f"user:{transaction_cashier_id}"
+
+            if cashier_filter_value:
+                cashier_filter_matches = cashier_filter_value in {
+                    cashier_group_key,
+                    transaction_cashier_id,
+                    transaction_staff_profile_id or '',
+                }
+                if not cashier_filter_matches:
+                    continue
+
             amount = Decimal(str(tx['total_amount']))
             payment_method = str(tx.get('payment_method') or 'cash').lower()
-            cashier_name = tx.get('users', {}).get('name', 'Unknown Cashier') if tx.get('users') else 'Unknown Cashier'
-            cashier_id = tx['cashier_id']
             tx_date = datetime.fromisoformat(tx['transaction_date'].replace('Z', '+00:00'))
             hour = tx_date.hour
             split_payments = _extract_split_payments_from_record(tx)
             payment_allocations = _allocate_transaction_amount_by_method(tx)
+
+            breakdown['summary']['total_transactions'] += 1
 
             # Update summary
             breakdown['summary']['total_amount'] += amount
@@ -3831,8 +3907,11 @@ async def get_sales_breakdown(
                     breakdown['summary']['mobile_total'] += method_amount
 
             # Group by cashier
-            if cashier_id not in breakdown['by_cashier']:
-                breakdown['by_cashier'][cashier_id] = {
+            if cashier_group_key not in breakdown['by_cashier']:
+                breakdown['by_cashier'][cashier_group_key] = {
+                    'id': cashier_group_key,
+                    'staff_profile_id': transaction_staff_profile_id,
+                    'user_id': transaction_cashier_id,
                     'name': cashier_name,
                     'transaction_count': 0,
                     'total_amount': Decimal('0'),
@@ -3843,7 +3922,7 @@ async def get_sales_breakdown(
                     'transactions': []
                 }
 
-            cashier_data = breakdown['by_cashier'][cashier_id]
+            cashier_data = breakdown['by_cashier'][cashier_group_key]
             cashier_data['transaction_count'] += 1
             cashier_data['total_amount'] += amount
 
@@ -3875,6 +3954,9 @@ async def get_sales_breakdown(
                 'amount': float(amount),
                 'payment_method': payment_method,
                 'split_payments': split_payments if len(split_payments) > 1 else None,
+                'cashier_id': transaction_cashier_id,
+                'cashier_staff_profile_id': transaction_staff_profile_id,
+                'cashier_group_key': cashier_group_key,
                 'cashier_name': cashier_name,
                 'transaction_date': tx['transaction_date'],
                 'items_count': len(tx.get('pos_transaction_items', [])),
