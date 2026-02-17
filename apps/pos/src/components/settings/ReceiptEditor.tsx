@@ -26,6 +26,7 @@ import { useTerminalId } from '../../hooks/useTerminalId';
 import { loadHardwareState, resolveReceiptPrinter } from '../../lib/hardwareProfiles';
 import { posService } from '../../lib/posService';
 import { printReceiptContent, type ReceiptPrintStyle } from '../../lib/receiptPrinter';
+import { dataService } from '../../lib/dataService';
 import logger from '../../lib/logger';
 
 export interface ReceiptTemplate {
@@ -174,6 +175,51 @@ const parseCachedTemplate = (raw: string): ReceiptTemplate | null => {
   }
 };
 
+const toRecord = (value: unknown): Record<string, unknown> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+};
+
+const parseTemplateLike = (value: unknown): Partial<ReceiptTemplate> | null => {
+  if (!value) return null;
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value) as Partial<ReceiptTemplate>;
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return value as Partial<ReceiptTemplate>;
+  }
+
+  return null;
+};
+
+const extractReceiptTemplateFromTerminalSettings = (terminalSettings: unknown): ReceiptTemplate | null => {
+  const record = toRecord(terminalSettings);
+  const rawTemplate =
+    parseTemplateLike(record.receipt_template) ??
+    parseTemplateLike(record.receiptTemplate);
+  if (!rawTemplate) return null;
+  return mergeReceiptTemplate(defaultTemplate, rawTemplate);
+};
+
+const mergeReceiptTemplateIntoTerminalSettings = (
+  terminalSettings: unknown,
+  template: ReceiptTemplate
+): Record<string, unknown> => {
+  const base = toRecord(terminalSettings);
+  return {
+    ...base,
+    receipt_template: template,
+    receiptTemplate: template,
+  };
+};
+
 const readCachedReceiptTemplate = (outletId: string): ReceiptTemplate | null => {
   const scopedKey = getReceiptTemplateCacheKey(outletId);
   const scopedRaw = localStorage.getItem(scopedKey);
@@ -203,7 +249,7 @@ const writeCachedReceiptTemplate = (outletId: string, template: ReceiptTemplate)
 };
 
 const ReceiptEditor: React.FC = () => {
-  const { currentOutlet } = useOutlet();
+  const { currentOutlet, businessSettings, setBusinessSettings } = useOutlet();
   const { terminalId } = useTerminalId();
   const [template, setTemplate] = useState<ReceiptTemplate>(defaultTemplate);
   const [activeSection, setActiveSection] = useState<'header' | 'body' | 'footer' | 'styling'>('header');
@@ -227,13 +273,23 @@ const ReceiptEditor: React.FC = () => {
 
       setIsLoading(true);
       try {
-        const [receiptSettings, outletInfo] = await Promise.all([
+        const [receiptSettings, outletInfo, businessSettingsResult] = await Promise.all([
           posService.getReceiptSettings(outletId),
           posService.getOutletInfo(outletId),
+          dataService.getBusinessSettings(outletId),
         ]);
+        const persistedTemplate =
+          extractReceiptTemplateFromTerminalSettings(
+            businessSettingsResult.data?.pos_terminal_settings
+          ) ??
+          extractReceiptTemplateFromTerminalSettings(businessSettings?.pos_terminal_settings);
 
         setTemplate((prev) => {
-          const source = cachedTemplate ? mergeReceiptTemplate(prev, cachedTemplate) : prev;
+          const source = persistedTemplate
+            ? mergeReceiptTemplate(defaultTemplate, persistedTemplate)
+            : cachedTemplate
+            ? mergeReceiptTemplate(defaultTemplate, cachedTemplate)
+            : mergeReceiptTemplate(defaultTemplate, prev);
 
           let addressText = source.header.address;
           if (outletInfo.address !== undefined && outletInfo.address !== null) {
@@ -252,30 +308,44 @@ const ReceiptEditor: React.FC = () => {
             }
           }
 
-          return {
+          const withOutletInfo: ReceiptTemplate = {
             ...source,
             header: {
               ...source.header,
-              businessName: receiptSettings.header_text ?? outletInfo.name ?? source.header.businessName,
+              businessName: source.header.businessName || outletInfo.name || defaultTemplate.header.businessName,
               address: addressText,
               // Respect explicit null/empty values from outlet profile; only fallback when truly undefined.
               phone: outletInfo.phone !== undefined ? (outletInfo.phone ?? '') : source.header.phone,
               email: outletInfo.email !== undefined ? (outletInfo.email ?? '') : source.header.email,
               website: outletInfo.website !== undefined ? (outletInfo.website ?? '') : source.header.website,
-              logoUrl: receiptSettings.logo_url ?? source.header.logoUrl,
-              showQR: receiptSettings.show_qr_code ?? source.header.showQR
+            }
+          };
+
+          // Prefer full template stored in business_settings. Only fall back to
+          // legacy receipt_settings fields when no persisted full template exists.
+          if (persistedTemplate) {
+            return withOutletInfo;
+          }
+
+          return {
+            ...withOutletInfo,
+            header: {
+              ...withOutletInfo.header,
+              businessName: receiptSettings.header_text ?? withOutletInfo.header.businessName,
+              logoUrl: receiptSettings.logo_url ?? withOutletInfo.header.logoUrl,
+              showQR: receiptSettings.show_qr_code ?? withOutletInfo.header.showQR
             },
             body: {
-              ...source.body,
-              showTaxBreakdown: receiptSettings.show_tax_breakdown ?? source.body.showTaxBreakdown
+              ...withOutletInfo.body,
+              showTaxBreakdown: receiptSettings.show_tax_breakdown ?? withOutletInfo.body.showTaxBreakdown
             },
             footer: {
-              ...source.footer,
-              thankYouMessage: receiptSettings.footer_text ?? source.footer.thankYouMessage,
-              showCashierName: receiptSettings.show_customer_points ?? source.footer.showCashierName
+              ...withOutletInfo.footer,
+              thankYouMessage: receiptSettings.footer_text ?? withOutletInfo.footer.thankYouMessage,
+              showCashierName: receiptSettings.show_customer_points ?? withOutletInfo.footer.showCashierName
             },
             styling: {
-              ...source.styling,
+              ...withOutletInfo.styling,
               fontSize: mapBackendFontSizeToUi(receiptSettings.font_size),
               paperWidth: mapBackendWidthToUi(receiptSettings.receipt_width)
             }
@@ -295,7 +365,7 @@ const ReceiptEditor: React.FC = () => {
     };
 
     void loadSettings();
-  }, [currentOutlet?.id]);
+  }, [currentOutlet?.id, businessSettings?.pos_terminal_settings]);
 
   // Cache template to localStorage whenever it changes (for offline fallback)
   useEffect(() => {
@@ -316,32 +386,88 @@ const ReceiptEditor: React.FC = () => {
     setUiMessage(null);
     
     try {
-      // Save receipt settings to backend
-      await posService.updateReceiptSettings(currentOutlet.id, {
-        header_text: template.header.businessName,
-        footer_text: template.footer.thankYouMessage,
-        logo_url: template.header.logoUrl,
-        show_qr_code: template.header.showQR,
-        show_customer_points: template.footer.showCashierName, // Map appropriately
-        show_tax_breakdown: template.body.showTaxBreakdown,
-        receipt_width: template.styling.paperWidth === '58mm' ? 58 : template.styling.paperWidth === '80mm' ? 80 : 80,
-        font_size: mapUiFontSizeToBackend(template.styling.fontSize)
-      });
-      
-      // Also save outlet business info if changed
-      await posService.updateOutletInfo(currentOutlet.id, {
-        name: template.header.businessName,
-        phone: template.header.phone,
-        email: template.header.email ?? '',
-        website: template.header.website ?? '',
-        address: template.header.address
-      });
+      const existingTerminalSettings = businessSettings?.pos_terminal_settings;
+      const mergedTerminalSettings = mergeReceiptTemplateIntoTerminalSettings(
+        existingTerminalSettings,
+        template
+      );
+
+      const buildBusinessSettingsPayload = (): Record<string, unknown> => {
+        const basePayload: Record<string, unknown> = {
+          pos_terminal_settings: mergedTerminalSettings,
+        };
+
+        if (businessSettings) return basePayload;
+
+        return {
+          ...basePayload,
+          business_name: currentOutlet.name,
+          business_type: currentOutlet.businessType || 'retail',
+          theme: 'auto',
+          language: 'en',
+          date_format: 'MM/DD/YYYY',
+          time_format: '12h',
+          currency: currentOutlet.currency || 'NGN',
+          timezone: currentOutlet.timezone || 'Africa/Lagos',
+        };
+      };
+
+      const [businessSettingsSave, legacyReceiptSave, outletInfoSave] = await Promise.allSettled([
+        dataService.updateBusinessSettings(currentOutlet.id, buildBusinessSettingsPayload() as any),
+        posService.updateReceiptSettings(currentOutlet.id, {
+          header_text: template.header.businessName,
+          footer_text: template.footer.thankYouMessage,
+          logo_url: template.header.logoUrl,
+          show_qr_code: template.header.showQR,
+          show_customer_points: template.footer.showCashierName,
+          show_tax_breakdown: template.body.showTaxBreakdown,
+          receipt_width: template.styling.paperWidth === '58mm' ? 58 : template.styling.paperWidth === '80mm' ? 80 : 80,
+          font_size: mapUiFontSizeToBackend(template.styling.fontSize)
+        }),
+        posService.updateOutletInfo(currentOutlet.id, {
+          name: template.header.businessName,
+          phone: template.header.phone,
+          email: template.header.email ?? '',
+          website: template.header.website ?? '',
+          address: template.header.address
+        })
+      ]);
+
+      if (
+        businessSettingsSave.status === 'rejected' ||
+        businessSettingsSave.value.error ||
+        !businessSettingsSave.value.data
+      ) {
+        const message =
+          businessSettingsSave.status === 'rejected'
+            ? businessSettingsSave.reason instanceof Error
+              ? businessSettingsSave.reason.message
+              : 'Failed to save receipt settings'
+            : businessSettingsSave.value.error || 'Failed to save receipt settings';
+        throw new Error(message);
+      }
+
+      setBusinessSettings(businessSettingsSave.value.data);
+
+      const warnings: string[] = [];
+      if (legacyReceiptSave.status === 'rejected') {
+        warnings.push('Legacy receipt profile sync failed');
+      }
+      if (outletInfoSave.status === 'rejected') {
+        warnings.push('Outlet business info sync failed');
+      }
       
       // Cache in localStorage for offline support
       writeCachedReceiptTemplate(currentOutlet.id, template);
       
       setSaveStatus('success');
-      setUiMessage({ type: 'success', text: 'Settings saved successfully.' });
+      setUiMessage({
+        type: warnings.length > 0 ? 'info' : 'success',
+        text:
+          warnings.length > 0
+            ? `Settings saved for this outlet. ${warnings.join(' · ')}.`
+            : 'Settings saved successfully.',
+      });
       setTimeout(() => setSaveStatus(null), 3000);
     } catch (error) {
       logger.error('Failed to save receipt settings:', error);
@@ -366,15 +492,48 @@ const ReceiptEditor: React.FC = () => {
     
     // Reset backend settings to defaults
     try {
-      await posService.updateReceiptSettings(currentOutlet.id, {
-        header_text: defaultTemplate.header.businessName,
-        footer_text: defaultTemplate.footer.thankYouMessage,
-        show_qr_code: defaultTemplate.header.showQR,
-        show_customer_points: defaultTemplate.footer.showCashierName,
-        show_tax_breakdown: defaultTemplate.body.showTaxBreakdown,
-        receipt_width: 80,
-        font_size: mapUiFontSizeToBackend(defaultTemplate.styling.fontSize)
-      });
+      const mergedTerminalSettings = mergeReceiptTemplateIntoTerminalSettings(
+        businessSettings?.pos_terminal_settings,
+        defaultTemplate
+      );
+
+      const buildBusinessSettingsPayload = (): Record<string, unknown> => {
+        const basePayload: Record<string, unknown> = {
+          pos_terminal_settings: mergedTerminalSettings,
+        };
+
+        if (businessSettings) return basePayload;
+
+        return {
+          ...basePayload,
+          business_name: currentOutlet.name,
+          business_type: currentOutlet.businessType || 'retail',
+          theme: 'auto',
+          language: 'en',
+          date_format: 'MM/DD/YYYY',
+          time_format: '12h',
+          currency: currentOutlet.currency || 'NGN',
+          timezone: currentOutlet.timezone || 'Africa/Lagos',
+        };
+      };
+
+      const [businessSettingsSave] = await Promise.all([
+        dataService.updateBusinessSettings(currentOutlet.id, buildBusinessSettingsPayload() as any),
+        posService.updateReceiptSettings(currentOutlet.id, {
+          header_text: defaultTemplate.header.businessName,
+          footer_text: defaultTemplate.footer.thankYouMessage,
+          show_qr_code: defaultTemplate.header.showQR,
+          show_customer_points: defaultTemplate.footer.showCashierName,
+          show_tax_breakdown: defaultTemplate.body.showTaxBreakdown,
+          receipt_width: 80,
+          font_size: mapUiFontSizeToBackend(defaultTemplate.styling.fontSize)
+        })
+      ]);
+
+      if (!businessSettingsSave.error && businessSettingsSave.data) {
+        setBusinessSettings(businessSettingsSave.data);
+      }
+
       setTemplate(defaultTemplate);
       writeCachedReceiptTemplate(currentOutlet.id, defaultTemplate);
       setSaveStatus('success');
