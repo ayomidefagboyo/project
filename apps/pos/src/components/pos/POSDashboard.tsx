@@ -50,6 +50,8 @@ import {
 } from '../../lib/hardwareProfiles';
 import { resolveAdapterCapabilities, supportsHardwareAction } from '../../lib/hardwareAdapters';
 import { printReceiptContent } from '../../lib/receiptPrinter';
+import type { ReceiptPrintStyle } from '../../lib/receiptPrinter';
+import type { ReceiptTemplate } from '../settings/ReceiptEditor';
 
 export interface CartItem {
   product: POSProduct;
@@ -99,6 +101,18 @@ interface LocalReceiptPayload {
   payments: Array<{ method: PaymentMethod; amount: number }>;
   pendingSync: boolean;
 }
+
+const readCachedReceiptTemplate = (outletId?: string): ReceiptTemplate | null => {
+  if (!outletId) return null;
+  try {
+    const scopedRaw = localStorage.getItem(`pos-receipt-template:${outletId}`);
+    const raw = scopedRaw || localStorage.getItem('pos-receipt-template');
+    if (!raw) return null;
+    return JSON.parse(raw) as ReceiptTemplate;
+  } catch {
+    return null;
+  }
+};
 
 const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) => {
   // Context and state
@@ -202,22 +216,42 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     value.length <= maxLength ? value : `${value.slice(0, Math.max(0, maxLength - 3))}...`;
 
   const buildLocalReceiptContent = (payload: LocalReceiptPayload): string => {
+    const template = readCachedReceiptTemplate(currentOutlet?.id);
     const lines: string[] = [];
     const createdAt = new Date(payload.createdAtIso);
     const overpayAmount = Math.max(0, payload.totalPaid - payload.total);
     const hasCashPayment = payload.payments.some((payment) => payment.method === PaymentMethod.CASH);
+    const sep = '----------------------------------------';
 
+    // --- Header ---
     lines.push(payload.outletName || 'Compazz POS');
+    if (template?.header?.address) {
+      lines.push(template.header.address);
+    }
+    if (template?.header?.phone) {
+      lines.push(template.header.phone);
+    }
+    if (template?.header?.email) {
+      lines.push(template.header.email);
+    }
     lines.push('Sales Receipt');
-    lines.push('----------------------------------------');
-    lines.push(`Receipt: ${payload.receiptNumber}`);
-    lines.push(`Date: ${createdAt.toLocaleString('en-NG')}`);
-    lines.push(`Cashier: ${payload.cashierName}`);
+    lines.push(sep);
+
+    // --- Transaction info (respecting footer toggles) ---
+    const showTxn = template?.footer?.showTransactionNumber ?? true;
+    const showDateTime = template?.footer?.showDateTime ?? true;
+    const showCashier = template?.footer?.showCashierName ?? true;
+
+    if (showTxn) lines.push(`Receipt: ${payload.receiptNumber}`);
+    if (showDateTime) lines.push(`Date: ${createdAt.toLocaleString('en-NG')}`);
+    if (showCashier) lines.push(`Cashier: ${payload.cashierName}`);
     if (payload.customerName) {
       lines.push(`Customer: ${payload.customerName}`);
     }
-    lines.push('----------------------------------------');
+    lines.push(sep);
 
+    // --- Items ---
+    const showDiscounts = template?.body?.showDiscounts ?? true;
     payload.items.forEach((item) => {
       const lineDiscount = Math.max(0, item.discount) * item.quantity;
       const lineTotal = item.quantity * item.unitPrice - lineDiscount;
@@ -225,22 +259,25 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       lines.push(
         `  ${item.quantity} x ${formatCurrency(item.unitPrice)} = ${formatCurrency(lineTotal)}`
       );
-      if (lineDiscount > 0) {
+      if (showDiscounts && lineDiscount > 0) {
         lines.push(`  Discount: -${formatCurrency(lineDiscount)}`);
       }
     });
 
-    lines.push('----------------------------------------');
+    // --- Totals ---
+    lines.push(sep);
     lines.push(`Subtotal: ${formatCurrency(payload.subtotal)}`);
-    if (payload.totalDiscount > 0) {
+    if (showDiscounts && payload.totalDiscount > 0) {
       lines.push(`Discount: -${formatCurrency(payload.totalDiscount)}`);
     }
-    if (payload.totalTax > 0) {
+    const showTax = template?.body?.showTaxBreakdown ?? true;
+    if (showTax && payload.totalTax > 0) {
       lines.push(`VAT (incl.): ${formatCurrency(payload.totalTax)}`);
     }
     lines.push(`Total: ${formatCurrency(payload.total)}`);
-    lines.push('----------------------------------------');
+    lines.push(sep);
 
+    // --- Payments ---
     if (payload.payments.length === 0) {
       lines.push(`Payment: ${formatCurrency(payload.totalPaid)}`);
     } else {
@@ -254,11 +291,20 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     }
 
     if (payload.pendingSync) {
-      lines.push('----------------------------------------');
+      lines.push(sep);
       lines.push('Offline copy (pending sync)');
     }
 
-    lines.push('Thank you');
+    // --- Footer ---
+    const thankYou = template?.footer?.thankYouMessage || 'Thank you';
+    lines.push(thankYou);
+    if (template?.footer?.returnPolicy) {
+      lines.push(template.footer.returnPolicy);
+    }
+    if (template?.footer?.additionalInfo) {
+      lines.push(template.footer.additionalInfo);
+    }
+
     return lines.join('\n');
   };
 
@@ -280,10 +326,22 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       logger.warn('Failed to resolve hardware runtime for receipt print:', runtimeError);
     }
 
+    // Read template styling for the print window
+    const template = readCachedReceiptTemplate(currentOutlet?.id);
+    const printStyle: ReceiptPrintStyle | undefined = template?.styling
+      ? {
+          fontSize: template.styling.fontSize,
+          fontFamily: template.styling.fontFamily,
+          lineSpacing: template.styling.lineSpacing,
+          paperWidth: template.styling.paperWidth,
+        }
+      : undefined;
+
     const result = await printReceiptContent(receiptContent, {
       title: options?.title || 'Receipt',
       copies: options?.copies || 1,
       printerName,
+      style: printStyle,
     });
     return result.success;
   };

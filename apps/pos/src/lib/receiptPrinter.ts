@@ -13,6 +13,13 @@ declare global {
   }
 }
 
+export interface ReceiptPrintStyle {
+  fontSize?: 'small' | 'medium' | 'large';
+  fontFamily?: 'monospace' | 'serif' | 'sans-serif';
+  lineSpacing?: 'compact' | 'normal' | 'loose';
+  paperWidth?: '58mm' | '80mm' | 'A4';
+}
+
 const escapeHtml = (value: string): string =>
   value
     .replace(/&/g, '&amp;')
@@ -79,16 +86,48 @@ const tryQzRawPrint = async (
   }
 };
 
+const resolveFontSize = (size?: ReceiptPrintStyle['fontSize']): string => {
+  if (size === 'small') return '10px';
+  if (size === 'large') return '14px';
+  return '12px';
+};
+
+const resolveFontFamily = (family?: ReceiptPrintStyle['fontFamily']): string => {
+  if (family === 'serif') return 'Georgia, "Times New Roman", serif';
+  if (family === 'sans-serif') return '-apple-system, "Segoe UI", Arial, sans-serif';
+  return '"Courier New", Courier, monospace';
+};
+
+const resolveLineHeight = (spacing?: ReceiptPrintStyle['lineSpacing']): string => {
+  if (spacing === 'compact') return '1.2';
+  if (spacing === 'loose') return '1.6';
+  return '1.4';
+};
+
+const resolvePaperMaxWidth = (width?: ReceiptPrintStyle['paperWidth']): string => {
+  if (width === '58mm') return '58mm';
+  if (width === 'A4') return '210mm';
+  return '80mm';
+};
+
 export const openReceiptPrintWindow = (
   receiptContent: string,
   options?: {
     title?: string;
     copies?: number;
+    style?: ReceiptPrintStyle;
   }
 ): boolean => {
   const title = options?.title || 'Receipt';
   const copies = Math.max(1, Math.min(5, Math.floor(options?.copies || 1)));
-  const printWindow = window.open('', '_blank', 'width=900,height=700');
+  const style = options?.style;
+
+  const fontSize = resolveFontSize(style?.fontSize);
+  const fontFamily = resolveFontFamily(style?.fontFamily);
+  const lineHeight = resolveLineHeight(style?.lineSpacing);
+  const maxWidth = resolvePaperMaxWidth(style?.paperWidth);
+
+  const printWindow = window.open('', '_blank', 'width=420,height=600');
   if (!printWindow) return false;
 
   const copyBlocks = Array.from({ length: copies })
@@ -103,28 +142,56 @@ export const openReceiptPrintWindow = (
     })
     .join('<hr class="cut" />');
 
-  printWindow.document.write(`
-    <html>
-      <head>
-        <title>${escapeHtml(title)}</title>
-        <style>
-          body { font-family: monospace; padding: 16px; color: #111827; }
-          pre { white-space: pre-wrap; font-size: 12px; margin: 0; }
-          .copy { margin-bottom: 12px; }
-          .copy-label { font-weight: 700; margin-bottom: 8px; text-transform: uppercase; }
-          .cut { border: 0; border-top: 1px dashed #9ca3af; margin: 14px 0; }
-          @media print {
-            body { padding: 0; }
-            .copy { break-inside: avoid; page-break-inside: avoid; }
-          }
-        </style>
-      </head>
-      <body>
-        ${copyBlocks}
-        <script>window.onload = () => window.print();</script>
-      </body>
-    </html>
-  `);
+  printWindow.document.write(`<!DOCTYPE html>
+<html>
+  <head>
+    <title>${escapeHtml(title)}</title>
+    <style>
+      @page {
+        margin: 2mm 0 0 0;
+        size: auto;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: auto;
+        background: #fff;
+        color: #111827;
+      }
+      body {
+        font-family: ${fontFamily};
+        padding: 4px 8px;
+        max-width: ${maxWidth};
+      }
+      pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: inherit;
+        font-size: ${fontSize};
+        line-height: ${lineHeight};
+        margin: 0;
+        padding: 0;
+      }
+      .copy { margin-bottom: 4px; }
+      .copy-label { font-weight: 700; margin-bottom: 4px; text-transform: uppercase; font-size: ${fontSize}; }
+      .cut { border: 0; border-top: 1px dashed #9ca3af; margin: 6px 0; }
+      @media print {
+        html, body { height: auto; padding: 0; margin: 0; }
+        body { padding: 0 2mm; }
+        .copy { break-inside: avoid; page-break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    ${copyBlocks}
+    <script>
+      window.onload = function() { window.print(); };
+      window.onafterprint = function() { window.close(); };
+    </script>
+  </body>
+</html>`);
   printWindow.document.close();
   return true;
 };
@@ -135,6 +202,7 @@ export const printReceiptContent = async (
     title?: string;
     copies?: number;
     printerName?: string;
+    style?: ReceiptPrintStyle;
   }
 ): Promise<{ success: boolean; mode: 'native' | 'browser' | 'none' }> => {
   const copies = Math.max(1, Math.min(5, Math.floor(options?.copies || 1)));
@@ -154,6 +222,7 @@ export const printReceiptContent = async (
   const opened = openReceiptPrintWindow(receiptContent, {
     title: options?.title,
     copies,
+    style: options?.style,
   });
   if (opened) return { success: true, mode: 'browser' };
   return { success: false, mode: 'none' };
