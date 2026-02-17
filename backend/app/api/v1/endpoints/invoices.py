@@ -88,6 +88,43 @@ def _update_pos_product_compat(supabase, product_id: str, update_data: Dict[str,
     )
 
 
+def _insert_invoice_items_compat(supabase, items_data: List[Dict[str, Any]]):
+    """Insert into invoice_items, dropping unsupported columns when needed."""
+    if not items_data:
+        return None
+
+    payload_rows = [dict(row) for row in items_data]
+    removed_columns: List[str] = []
+
+    for _ in range(20):
+        try:
+            return supabase.table(Tables.INVOICE_ITEMS).insert(payload_rows).execute()
+        except Exception as exc:
+            missing_column = _extract_missing_column_name(exc)
+            if missing_column:
+                removed_any = False
+                next_rows: List[Dict[str, Any]] = []
+                for row in payload_rows:
+                    if missing_column in row:
+                        removed_any = True
+                        row = dict(row)
+                        row.pop(missing_column, None)
+                    next_rows.append(row)
+                if removed_any:
+                    payload_rows = next_rows
+                    removed_columns.append(missing_column)
+                    logger.warning(
+                        "invoice_items.%s missing in schema cache during insert; retrying without it",
+                        missing_column
+                    )
+                    continue
+            raise
+
+    raise Exception(
+        f"Failed to insert invoice_items after compatibility retries; removed columns={removed_columns}"
+    )
+
+
 # ===============================================
 # SCHEMAS
 # ===============================================
@@ -269,10 +306,13 @@ async def create_invoice(
                     'quantity': item.quantity,
                     'unit_price': item.unit_price,
                     'total': item.quantity * item.unit_price,
+                    'sku': item.sku,
+                    'barcode': item.barcode,
+                    'category': item.category,
                     'created_at': datetime.utcnow().isoformat()
                 })
 
-            supabase.table(Tables.INVOICE_ITEMS).insert(items_data).execute()
+            _insert_invoice_items_compat(supabase, items_data)
 
         # If vendor invoice, update vendor balance
         if invoice.vendor_id:
@@ -592,6 +632,8 @@ async def receive_invoice_goods(
 
                 if prod_result.data:
                     product = prod_result.data
+                    item_barcode = str(item.get('barcode') or '').strip()
+                    item_sku = str(item.get('sku') or '').strip()
                     current_qty = _to_float(
                         product.get('quantity_on_hand'),
                         _to_float(product.get('quantity'), 0)
@@ -618,6 +660,12 @@ async def receive_invoice_goods(
 
                     if override and override.get('auto_pricing_enabled') is not None:
                         update_fields['auto_pricing'] = auto_pricing_enabled
+
+                    # Preserve barcode/SKU capture from receiving lines when product currently has no value.
+                    if item_barcode and not str(product.get('barcode') or '').strip():
+                        update_fields['barcode'] = item_barcode
+                    if item_sku and not str(product.get('sku') or '').strip():
+                        update_fields['sku'] = item_sku
 
                     update_result = _update_pos_product_compat(supabase, product_id, update_fields)
                     updated_product = (update_result.data or [product])[0]
@@ -788,10 +836,13 @@ async def add_invoice_item(
             'quantity': item.quantity,
             'unit_price': item.unit_price,
             'total': item.quantity * item.unit_price,
+            'sku': item.sku,
+            'barcode': item.barcode,
+            'category': item.category,
             'created_at': datetime.utcnow().isoformat()
         }
 
-        supabase.table(Tables.INVOICE_ITEMS).insert(item_data).execute()
+        _insert_invoice_items_compat(supabase, [item_data])
 
         # Recalculate invoice totals
         _recalculate_invoice_totals(supabase, invoice_id)

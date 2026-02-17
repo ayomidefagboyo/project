@@ -1182,6 +1182,15 @@ class POSService {
     try {
       const response = await apiClient.put<POSProduct>(`${this.baseUrl}/products/${productId}`, updates);
       if (!response.data) throw new Error(response.error || 'Failed to update product');
+
+      if (this.isInitialized) {
+        try {
+          await offlineDatabase.storeProducts([response.data]);
+        } catch (cacheError) {
+          logger.warn('Failed to cache updated product locally:', cacheError);
+        }
+      }
+
       return response.data;
     } catch (error) {
       logger.error('Error updating product:', error);
