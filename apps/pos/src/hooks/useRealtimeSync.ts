@@ -15,6 +15,8 @@ interface UseRealtimeSyncOptions {
   onProductChange?: (action: 'INSERT' | 'UPDATE' | 'DELETE', data: any) => void;
   // Transactions (Sales)
   onTransactionChange?: (action: 'INSERT' | 'UPDATE' | 'DELETE', data: any) => void;
+  // Held Receipts
+  onHeldReceiptChange?: (action: 'INSERT' | 'UPDATE' | 'DELETE', data: any) => void;
   // Inventory Movements
   onInventoryChange?: (action: 'INSERT' | 'UPDATE' | 'DELETE', data: any) => void;
   // Stock Transfers
@@ -34,6 +36,7 @@ export function useRealtimeSync({
   enabled = true,
   onProductChange,
   onTransactionChange,
+  onHeldReceiptChange,
   onInventoryChange,
   onStockTransferChange,
   onCashDrawerChange,
@@ -46,6 +49,7 @@ export function useRealtimeSync({
   const [syncStats, setSyncStats] = useState({
     products: 0,
     transactions: 0,
+    heldReceipts: 0,
     inventory: 0,
     transfers: 0,
     cashDrawer: 0,
@@ -58,6 +62,7 @@ export function useRealtimeSync({
   const callbacksRef = useRef({
     onProductChange,
     onTransactionChange,
+    onHeldReceiptChange,
     onInventoryChange,
     onStockTransferChange,
     onCashDrawerChange,
@@ -71,6 +76,7 @@ export function useRealtimeSync({
     callbacksRef.current = {
       onProductChange,
       onTransactionChange,
+      onHeldReceiptChange,
       onInventoryChange,
       onStockTransferChange,
       onCashDrawerChange,
@@ -128,7 +134,24 @@ export function useRealtimeSync({
     }
 
     // ==========================================
-    // 3. INVENTORY MOVEMENTS REAL-TIME
+    // 3. HELD RECEIPTS REAL-TIME
+    // ==========================================
+    if (callbacksRef.current.onHeldReceiptChange) {
+      const heldReceiptChannel = supabase
+        .channel(`held_receipts:${outletId}:${channelRunId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'pos_held_receipts', filter: `outlet_id=eq.${outletId}` },
+          (payload) => {
+            logger.debug('🧾 Held receipt changed:', payload.eventType, payload.new || payload.old);
+            callbacksRef.current.onHeldReceiptChange?.(payload.eventType as any, payload.eventType === 'DELETE' ? payload.old : payload.new);
+            setSyncStats(prev => ({ ...prev, heldReceipts: prev.heldReceipts + 1 }));
+          }
+        )
+        .subscribe((status) => logger.debug('📡 Held receipts channel:', status));
+      activeChannels.push(heldReceiptChannel);
+    }
+
+    // ==========================================
+    // 4. INVENTORY MOVEMENTS REAL-TIME
     // ==========================================
     if (callbacksRef.current.onInventoryChange) {
       const inventoryChannel = supabase
@@ -145,7 +168,7 @@ export function useRealtimeSync({
     }
 
     // ==========================================
-    // 4. STOCK TRANSFERS REAL-TIME
+    // 5. STOCK TRANSFERS REAL-TIME
     // ==========================================
     if (callbacksRef.current.onStockTransferChange) {
       const transferChannel = supabase
@@ -163,7 +186,7 @@ export function useRealtimeSync({
     }
 
     // ==========================================
-    // 5. CASH DRAWER SESSIONS REAL-TIME
+    // 6. CASH DRAWER SESSIONS REAL-TIME
     // ==========================================
     if (callbacksRef.current.onCashDrawerChange) {
       const cashDrawerChannel = supabase
@@ -180,7 +203,7 @@ export function useRealtimeSync({
     }
 
     // ==========================================
-    // 6. CUSTOMERS REAL-TIME
+    // 7. CUSTOMERS REAL-TIME
     // ==========================================
     if (callbacksRef.current.onCustomerChange) {
       const customerChannel = supabase
@@ -197,7 +220,7 @@ export function useRealtimeSync({
     }
 
     // ==========================================
-    // 7. INVOICES REAL-TIME
+    // 8. INVOICES REAL-TIME
     // ==========================================
     if (callbacksRef.current.onInvoiceChange) {
       const invoiceChannel = supabase
@@ -214,7 +237,7 @@ export function useRealtimeSync({
     }
 
     // ==========================================
-    // 8. STAFF PROFILES REAL-TIME
+    // 9. STAFF PROFILES REAL-TIME
     // ==========================================
     if (callbacksRef.current.onStaffChange) {
       const staffChannel = supabase

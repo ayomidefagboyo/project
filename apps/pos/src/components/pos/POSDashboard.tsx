@@ -557,6 +557,10 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       if (action === 'INSERT' || action === 'UPDATE') {
         loadProducts();
       }
+    },
+    onHeldReceiptChange: () => {
+      // Pull latest held receipts fast on any terminal when another terminal updates them.
+      void loadHeldReceipts({ silent: true });
     }
   });
 
@@ -890,13 +894,16 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     ? `pos_hold_carts_${currentOutlet.id}`
     : null;
 
-  const loadHeldReceipts = useCallback(async () => {
+  const loadHeldReceipts = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
     if (!currentOutlet?.id) {
       setHeldSales([]);
       return;
     }
 
-    setIsLoadingHeldReceipts(true);
+    if (!silent) {
+      setIsLoadingHeldReceipts(true);
+    }
     try {
       // Try to load from backend first
       if (isOnline) {
@@ -972,7 +979,9 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
         }
       }
     } finally {
-      setIsLoadingHeldReceipts(false);
+      if (!silent) {
+        setIsLoadingHeldReceipts(false);
+      }
     }
   }, [currentOutlet?.id, isOnline, heldStorageKey, products]);
 
@@ -980,6 +989,36 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   useEffect(() => {
     loadHeldReceipts();
   }, [loadHeldReceipts]);
+
+  // Keep held receipts actively converged across terminals.
+  // Uses fast polling as a fallback where table realtime events are delayed/misconfigured.
+  useEffect(() => {
+    if (!currentOutlet?.id || !isStaffAuthenticated || !isOnline) return;
+
+    let disposed = false;
+    let inFlight = false;
+    const pollMs = showHeldModal ? 2500 : 5000;
+
+    const refreshHeldReceipts = async () => {
+      if (disposed || inFlight) return;
+      inFlight = true;
+      try {
+        await loadHeldReceipts({ silent: true });
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    void refreshHeldReceipts();
+    const intervalId = window.setInterval(() => {
+      void refreshHeldReceipts();
+    }, pollMs);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+    };
+  }, [currentOutlet?.id, isStaffAuthenticated, isOnline, showHeldModal, loadHeldReceipts]);
 
   const persistHeldSales = async (sales: HeldSale[]) => {
     if (!currentOutlet?.id) return;
