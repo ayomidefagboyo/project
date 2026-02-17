@@ -121,6 +121,37 @@ function AppContent() {
     };
   }, []);
 
+  // Keep syncing queued offline sales regardless of active terminal page.
+  useEffect(() => {
+    if (terminalPhase !== 'operational' || !terminalConfig?.outlet_id || !isOnline) return;
+
+    let disposed = false;
+
+    const retryPendingSalesSync = async () => {
+      try {
+        const pendingCount = await posService.getOfflineTransactionCount();
+        if (pendingCount <= 0 || disposed) return;
+
+        const synced = await posService.syncOfflineTransactions();
+        if (synced > 0 && !disposed) {
+          window.dispatchEvent(new CustomEvent('pos-transactions-synced', { detail: { synced } }));
+        }
+      } catch (syncError) {
+        console.warn('Background offline transaction sync failed:', syncError);
+      }
+    };
+
+    void retryPendingSalesSync();
+    const intervalId = window.setInterval(() => {
+      void retryPendingSalesSync();
+    }, 8000);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+    };
+  }, [terminalPhase, terminalConfig?.outlet_id, isOnline]);
+
   // Listen for staff logout events (from sidebar Clock Out button)
   useEffect(() => {
     const handleStaffLogoutEvent = () => {
@@ -130,7 +161,12 @@ function AppContent() {
     };
 
     window.addEventListener('pos-staff-logout', handleStaffLogoutEvent);
-    return () => window.removeEventListener('pos-staff-logout', handleStaffLogoutEvent);
+    window.addEventListener('pos-staff-session-expired', handleStaffLogoutEvent);
+
+    return () => {
+      window.removeEventListener('pos-staff-logout', handleStaffLogoutEvent);
+      window.removeEventListener('pos-staff-session-expired', handleStaffLogoutEvent);
+    };
   }, []);
 
   // Helper functions

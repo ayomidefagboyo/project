@@ -293,6 +293,17 @@ const TransactionsPage: React.FC = () => {
     matchesActiveFilters,
   ]);
 
+  const handleRefresh = useCallback(async () => {
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
+      try {
+        await posService.syncOfflineTransactions();
+      } catch (syncErr) {
+        console.error('Failed to sync pending offline transactions on refresh:', syncErr);
+      }
+    }
+    await loadTransactions();
+  }, [loadTransactions]);
+
   const openTransactionDetails = useCallback(async (tx: ExtendedTransaction) => {
     setSelectedTransaction(tx);
     setIsLoadingTransactionDetails(false);
@@ -348,6 +359,16 @@ const TransactionsPage: React.FC = () => {
   useEffect(() => {
     if (!currentOutlet?.id) return;
     loadTransactions();
+  }, [currentOutlet?.id, loadTransactions]);
+
+  useEffect(() => {
+    const handleSyncedEvent = () => {
+      if (!currentOutlet?.id) return;
+      void loadTransactions();
+    };
+
+    window.addEventListener('pos-transactions-synced', handleSyncedEvent);
+    return () => window.removeEventListener('pos-transactions-synced', handleSyncedEvent);
   }, [currentOutlet?.id, loadTransactions]);
 
   const formatCurrency = (amount: number): string =>
@@ -617,7 +638,7 @@ const TransactionsPage: React.FC = () => {
               <option value="refunded">Refunded</option>
             </select>
             <button
-              onClick={loadTransactions}
+              onClick={() => void handleRefresh()}
               className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
               title="Refresh"
             >
