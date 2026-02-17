@@ -106,9 +106,8 @@ const readCachedReceiptTemplate = (outletId?: string): ReceiptTemplate | null =>
   if (!outletId) return null;
   try {
     const scopedRaw = localStorage.getItem(`pos-receipt-template:${outletId}`);
-    const raw = scopedRaw || localStorage.getItem('pos-receipt-template');
-    if (!raw) return null;
-    return JSON.parse(raw) as ReceiptTemplate;
+    if (!scopedRaw) return null;
+    return JSON.parse(scopedRaw) as ReceiptTemplate;
   } catch {
     return null;
   }
