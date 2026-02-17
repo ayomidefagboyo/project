@@ -11,16 +11,37 @@ interface NewStaffForm {
   permissions: string[];
 }
 
+interface EditStaffForm {
+  display_name: string;
+  role: string;
+  permissions: string[];
+}
+
+const STAFF_ROLE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'cashier', label: 'Cashier' },
+  { value: 'manager', label: 'Manager' },
+  { value: 'waiter', label: 'Waiter' },
+  { value: 'inventory_staff', label: 'Inventory Staff' },
+  { value: 'pharmacist', label: 'Pharmacist' }
+];
+
 const StaffManagement: React.FC = () => {
   const { currentOutlet, currentUser } = useOutlet();
   const [staffProfiles, setStaffProfiles] = useState<StaffProfile[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [editingStaff, setEditingStaff] = useState<StaffProfile | null>(null);
   const [showPin, setShowPin] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newStaff, setNewStaff] = useState<NewStaffForm>({
     display_name: '',
     pin: '',
+    role: 'cashier',
+    permissions: rolePermissions.cashier
+  });
+  const [editStaff, setEditStaff] = useState<EditStaffForm>({
+    display_name: '',
     role: 'cashier',
     permissions: rolePermissions.cashier
   });
@@ -47,6 +68,11 @@ const StaffManagement: React.FC = () => {
   const hideToast = () => {
     setToast(prev => ({ ...prev, visible: false }));
   };
+
+  const canManageStaff =
+    currentUser?.role === 'business_owner' ||
+    currentUser?.role === 'outlet_admin' ||
+    currentUser?.role === 'super_admin';
 
   // Load existing staff profiles
   useEffect(() => {
@@ -83,6 +109,14 @@ const StaffManagement: React.FC = () => {
 
   const handleRoleChange = (role: string) => {
     setNewStaff(prev => ({
+      ...prev,
+      role,
+      permissions: rolePermissions[role as keyof typeof rolePermissions] || []
+    }));
+  };
+
+  const handleEditRoleChange = (role: string) => {
+    setEditStaff(prev => ({
       ...prev,
       role,
       permissions: rolePermissions[role as keyof typeof rolePermissions] || []
@@ -181,6 +215,57 @@ const StaffManagement: React.FC = () => {
     }
   };
 
+  const openEditStaffForm = (staff: StaffProfile) => {
+    setEditingStaff(staff);
+    setEditStaff({
+      display_name: staff.display_name,
+      role: staff.role,
+      permissions: rolePermissions[staff.role as keyof typeof rolePermissions] || staff.permissions || []
+    });
+  };
+
+  const closeEditStaffForm = () => {
+    if (isSavingEdit) return;
+    setEditingStaff(null);
+    setEditStaff({
+      display_name: '',
+      role: 'cashier',
+      permissions: rolePermissions.cashier
+    });
+  };
+
+  const updateStaffProfile = async () => {
+    if (!editingStaff) return;
+
+    if (!editStaff.display_name.trim()) {
+      showToast('Please enter staff name', 'warning');
+      return;
+    }
+
+    try {
+      setIsSavingEdit(true);
+      const response = await staffService.updateStaffProfile(editingStaff.id, {
+        display_name: editStaff.display_name.trim(),
+        role: editStaff.role,
+        permissions: editStaff.permissions
+      });
+
+      if (response.error) {
+        showToast(`Failed to update staff profile: ${response.error}`, 'error');
+        return;
+      }
+
+      await loadStaffProfiles();
+      closeEditStaffForm();
+      showToast('Staff profile updated successfully', 'success');
+    } catch (editError) {
+      console.error('Failed to update staff profile:', editError);
+      showToast('Failed to update staff profile', 'error');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
   // Show loading or error states
   if (!currentOutlet) {
     return (
@@ -207,8 +292,9 @@ const StaffManagement: React.FC = () => {
         </div>
         <button
           onClick={() => setShowCreateForm(true)}
-          disabled={isLoading}
+          disabled={isLoading || !canManageStaff}
           className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          title={canManageStaff ? 'Add staff profile' : 'You do not have permission to add staff'}
         >
           <Plus className="w-4 h-4" />
           Add Staff
@@ -260,11 +346,11 @@ const StaffManagement: React.FC = () => {
                 onChange={(e) => handleRoleChange(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
-                <option value="cashier">Cashier</option>
-                <option value="manager">Manager</option>
-                <option value="waiter">Waiter</option>
-                <option value="inventory_staff">Inventory Staff</option>
-                <option value="pharmacist">Pharmacist</option>
+                {STAFF_ROLE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -372,9 +458,18 @@ const StaffManagement: React.FC = () => {
 
                     <div className="flex gap-2">
                       <button
+                        onClick={() => openEditStaffForm(staff)}
+                        disabled={!canManageStaff}
+                        className="p-1 text-blue-600 hover:bg-blue-50 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                        title={canManageStaff ? 'Edit staff profile' : 'You do not have permission to edit staff'}
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      <button
                         onClick={() => deleteStaffProfile(staff.id)}
+                        disabled={!canManageStaff}
                         className="p-1 text-red-600 hover:bg-red-50 rounded"
-                        title="Delete staff profile"
+                        title={canManageStaff ? 'Delete staff profile' : 'You do not have permission to delete staff'}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -400,11 +495,94 @@ const StaffManagement: React.FC = () => {
         <h3 className="font-medium text-blue-900 mb-2">Quick Setup Guide</h3>
         <div className="text-sm text-blue-800 space-y-1">
           <p>1. Create staff profiles with name and PIN (no email needed)</p>
-          <p>2. Assign appropriate roles (cashier, manager, etc.)</p>
+          <p>2. Assign and update roles as responsibilities change</p>
           <p>3. Staff can login to POS system using their Staff Code + PIN</p>
           <p>4. Different roles have different permission levels in the POS</p>
         </div>
       </div>
+
+      {/* Edit Staff Modal */}
+      {editingStaff && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-lg w-full mx-4 shadow-xl">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Edit Staff Profile</h3>
+                <p className="text-sm text-gray-600">Update role and permissions for {editingStaff.display_name}</p>
+              </div>
+              <button
+                onClick={closeEditStaffForm}
+                disabled={isSavingEdit}
+                className="text-gray-500 hover:text-gray-700 disabled:opacity-50"
+                aria-label="Close edit modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Staff Name
+                </label>
+                <input
+                  type="text"
+                  value={editStaff.display_name}
+                  onChange={(e) => setEditStaff((prev) => ({ ...prev, display_name: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Role
+                </label>
+                <select
+                  value={editStaff.role}
+                  onChange={(e) => handleEditRoleChange(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  {STAFF_ROLE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Permissions
+              </label>
+              <div className="bg-gray-50 rounded-lg p-3 max-h-32 overflow-y-auto">
+                {editStaff.permissions.map((permission, index) => (
+                  <span key={index} className="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded mr-2 mb-1">
+                    {permission.replace(/_/g, ' ')}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={closeEditStaffForm}
+                disabled={isSavingEdit}
+                className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={updateStaffProfile}
+                disabled={isSavingEdit}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {isSavingEdit ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Success Modal */}
       {successModal.visible && (
