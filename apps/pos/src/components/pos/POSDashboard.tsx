@@ -404,7 +404,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       copies,
     });
     if (!opened) {
-      warning('Allow pop-ups to print receipts.', 5000);
+      warning('Receipt print failed. Configure native printer bridge (Compazz/QZ).', 5000);
     }
     return opened;
   };

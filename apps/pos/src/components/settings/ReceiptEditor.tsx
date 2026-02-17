@@ -22,7 +22,10 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { useOutlet } from '../../contexts/OutletContext';
+import { useTerminalId } from '../../hooks/useTerminalId';
+import { loadHardwareState, resolveReceiptPrinter } from '../../lib/hardwareProfiles';
 import { posService } from '../../lib/posService';
+import { printReceiptContent, type ReceiptPrintStyle } from '../../lib/receiptPrinter';
 import logger from '../../lib/logger';
 
 export interface ReceiptTemplate {
@@ -199,11 +202,13 @@ const writeCachedReceiptTemplate = (outletId: string, template: ReceiptTemplate)
 
 const ReceiptEditor: React.FC = () => {
   const { currentOutlet } = useOutlet();
+  const { terminalId } = useTerminalId();
   const [template, setTemplate] = useState<ReceiptTemplate>(defaultTemplate);
   const [activeSection, setActiveSection] = useState<'header' | 'body' | 'footer' | 'styling'>('header');
   const [previewMode, setPreviewMode] = useState<'edit' | 'preview'>('edit');
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isTestPrinting, setIsTestPrinting] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'success' | 'error' | null>(null);
   const [uiMessage, setUiMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
@@ -229,7 +234,7 @@ const ReceiptEditor: React.FC = () => {
           const source = cachedTemplate ? mergeReceiptTemplate(prev, cachedTemplate) : prev;
 
           let addressText = source.header.address;
-          if (outletInfo.address) {
+          if (outletInfo.address !== undefined && outletInfo.address !== null) {
             if (typeof outletInfo.address === 'string') {
               addressText = outletInfo.address;
             } else if (typeof outletInfo.address === 'object') {
@@ -249,11 +254,11 @@ const ReceiptEditor: React.FC = () => {
             ...source,
             header: {
               ...source.header,
-              businessName: receiptSettings.header_text || outletInfo.name || source.header.businessName,
+              businessName: receiptSettings.header_text ?? outletInfo.name ?? source.header.businessName,
               address: addressText,
-              phone: outletInfo.phone || source.header.phone,
-              email: outletInfo.email || source.header.email,
-              website: outletInfo.website || source.header.website,
+              phone: outletInfo.phone ?? source.header.phone,
+              email: outletInfo.email ?? source.header.email,
+              website: outletInfo.website ?? source.header.website,
               logoUrl: receiptSettings.logo_url ?? source.header.logoUrl,
               showQR: receiptSettings.show_qr_code ?? source.header.showQR
             },
@@ -263,7 +268,7 @@ const ReceiptEditor: React.FC = () => {
             },
             footer: {
               ...source.footer,
-              thankYouMessage: receiptSettings.footer_text || source.footer.thankYouMessage,
+              thankYouMessage: receiptSettings.footer_text ?? source.footer.thankYouMessage,
               showCashierName: receiptSettings.show_customer_points ?? source.footer.showCashierName
             },
             styling: {
@@ -324,8 +329,8 @@ const ReceiptEditor: React.FC = () => {
       await posService.updateOutletInfo(currentOutlet.id, {
         name: template.header.businessName,
         phone: template.header.phone,
-        email: template.header.email || undefined,
-        website: template.header.website || undefined,
+        email: template.header.email ?? '',
+        website: template.header.website ?? '',
         address: template.header.address
       });
       
@@ -385,6 +390,79 @@ const ReceiptEditor: React.FC = () => {
       ...prev,
       [section]: { ...prev[section], ...updates }
     }));
+  };
+
+  const buildTestReceiptContent = (): string => {
+    const now = new Date();
+    const formatCurrency = (amount: number) =>
+      new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN' }).format(amount);
+
+    const lines: string[] = [];
+    lines.push(template.header.businessName || 'Compazz POS');
+    if (template.header.address) lines.push(template.header.address);
+    if (template.header.phone) lines.push(template.header.phone);
+    if (template.header.email) lines.push(template.header.email);
+    if (template.header.website) lines.push(template.header.website);
+    lines.push('--------------------------------');
+    if (template.footer.showDateTime) lines.push(`Date: ${now.toLocaleString('en-NG')}`);
+    lines.push('Receipt: TEST-PRINT-001');
+    if (template.footer.showCashierName) lines.push('Cashier: Test User');
+    lines.push('--------------------------------');
+    lines.push('Sample Item x1  1,500.00');
+    lines.push('--------------------------------');
+    if (template.body.showTaxBreakdown) lines.push(`VAT: ${formatCurrency(112.5)}`);
+    lines.push(`Total: ${formatCurrency(1500)}`);
+    lines.push('--------------------------------');
+    if (template.footer.thankYouMessage) lines.push(template.footer.thankYouMessage);
+    if (template.footer.returnPolicy) lines.push(template.footer.returnPolicy);
+    if (template.footer.additionalInfo) lines.push(template.footer.additionalInfo);
+    return lines.join('\n');
+  };
+
+  const handleTestPrint = async () => {
+    if (!currentOutlet?.id) {
+      setUiMessage({ type: 'error', text: 'Please select an outlet first.' });
+      return;
+    }
+
+    setIsTestPrinting(true);
+    setUiMessage(null);
+
+    try {
+      const runtime = loadHardwareState(currentOutlet.id, terminalId || undefined);
+      const printer = resolveReceiptPrinter(runtime);
+      const printStyle: ReceiptPrintStyle = {
+        fontSize: template.styling.fontSize,
+        fontFamily: template.styling.fontFamily,
+        lineSpacing: template.styling.lineSpacing,
+        paperWidth: template.styling.paperWidth,
+      };
+
+      const result = await printReceiptContent(buildTestReceiptContent(), {
+        title: 'Receipt Template Test',
+        copies: 1,
+        printerName: printer?.name,
+        style: printStyle,
+      });
+
+      if (!result.success) {
+        setUiMessage({
+          type: 'error',
+          text: 'Test print failed. Configure native printer bridge (Compazz/QZ) in terminal settings.',
+        });
+        return;
+      }
+
+      setUiMessage({
+        type: 'success',
+        text: printer?.name ? `Test print sent to "${printer.name}".` : 'Test print sent successfully.',
+      });
+    } catch (error) {
+      logger.error('Test print failed:', error);
+      setUiMessage({ type: 'error', text: 'Test print failed. Please verify printer setup.' });
+    } finally {
+      setIsTestPrinting(false);
+    }
   };
 
   const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1038,9 +1116,13 @@ const ReceiptEditor: React.FC = () => {
               <Eye className="w-4 h-4" />
               {previewMode === 'edit' ? 'Full Preview' : 'Split View'}
             </button>
-            <button className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm">
+            <button
+              onClick={handleTestPrint}
+              disabled={isTestPrinting}
+              className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors text-sm"
+            >
               <Printer className="w-4 h-4" />
-              Test Print
+              {isTestPrinting ? 'Printing...' : 'Test Print'}
             </button>
           </div>
         </div>
