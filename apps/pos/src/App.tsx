@@ -550,7 +550,9 @@ function AppContent() {
                   onClick={() => addProductFromSearch(product)}
                   onMouseEnter={() => setHighlightedSearchIndex(index)}
                   className={`w-full flex items-center px-3 py-2.5 transition-colors text-left border-b border-stone-100 last:border-b-0 ${
-                    index === highlightedSearchIndex ? 'bg-stone-100' : 'hover:bg-stone-50'
+                    index === highlightedSearchIndex
+                      ? 'bg-brand-soft border-brand-soft'
+                      : 'hover:bg-stone-50'
                   }`}
                 >
                   <div className="flex items-center justify-between w-full space-x-3">
