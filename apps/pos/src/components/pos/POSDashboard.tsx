@@ -38,7 +38,6 @@ import StockReportModal from './modals/StockReportModal';
 
 // Staff Management Modals
 import StaffManagementModal from './modals/StaffManagementModal';
-// import PinEntryModal from './PinEntryModal'; // REMOVED: No longer used
 import ClockOutConfirmModal from '../modals/ClockOutConfirmModal';
 import LoginForm from '../auth/LoginForm';
 import TransactionHistory from './TransactionHistory';
@@ -778,11 +777,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     setShowManagerLogin(false);
     // The OutletContext will update currentUser automatically
     // This will trigger a re-render with proper authentication state
-  };
-
-  // Handle manager login from PIN entry
-  const handleManagerLoginFromPIN = () => {
-    setShowManagerLogin(true);
   };
 
   /**
@@ -1708,23 +1702,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       </div>
     );
   }
-
-
-  // Show PIN Entry Screen - REMOVED: Now redirects to reconfigure terminal instead
-  // if (screenToShow === 'pin_entry') {
-  //   return (
-  //     <div className="min-h-screen bg-white">
-  //       <PinEntryModal
-  //         isOpen={true}
-  //         onClose={() => {}} // Can't close PIN entry
-  //         onSuccess={handleStaffAuthentication}
-  //         staffProfiles={staffProfiles}
-  //         onManagerLogin={handleManagerLoginFromPIN}
-  //         onForceReload={loadStaffProfiles}
-  //       />
-  //     </div>
-  //   );
-  // }
 
   return (
     <div className="h-full min-h-0 bg-stone-50 p-3 sm:p-4 lg:p-5">

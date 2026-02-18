@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Settings, AlertCircle, Shield, ChevronRight, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Settings, AlertCircle, Shield, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { staffService } from '@/lib/staffService';
 import { useToast } from '@/components/ui/Toast';
 import { resolveDashboardAppUrl } from '../../../../../shared/services/urlResolver';
@@ -40,6 +40,7 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [error, setError] = useState('');
   const { success, error: toastError } = useToast();
+  const profilesSliderRef = useRef<HTMLDivElement | null>(null);
 
   // Load staff profiles for this outlet
   useEffect(() => {
@@ -131,6 +132,15 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
     }
   };
 
+  const scrollProfiles = (direction: 'left' | 'right') => {
+    const slider = profilesSliderRef.current;
+    if (!slider) return;
+
+    const cardStep = 200; // card width + gap, touch-friendly step
+    const delta = direction === 'left' ? -cardStep : cardStep;
+    slider.scrollBy({ left: delta, behavior: 'smooth' });
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-8">
@@ -215,44 +225,71 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
         </p>
       </div>
 
-      {/* Staff Profiles Grid */}
-      <div className="flex-1 flex flex-col items-center justify-center">
-        <div className="grid grid-cols-6 gap-6 max-w-6xl w-full mb-12">
-          {staffProfiles.map((staff) => (
-            <button
-              key={staff.id}
-              onClick={() => {
-                setSelectedStaffCode(staff.staff_code);
-                setPin('');
-                setError('');
-              }}
-              className={`p-4 border-2 rounded-lg transition-all duration-200 text-center ${
-                selectedStaffCode === staff.staff_code
-                  ? 'border-primary bg-primary/5'
-                  : 'border-border bg-card hover:border-border/60'
-              }`}
-            >
-              <div className="flex flex-col items-center space-y-3">
-                <div className={`w-16 h-16 rounded-full flex items-center justify-center font-medium text-lg ${
+      {/* Staff Profiles + PIN Entry */}
+      <div className="flex-1 flex flex-col items-center min-h-0">
+        <div className="max-w-6xl w-full mb-8">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-medium text-foreground">Staff Profiles</h2>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => scrollProfiles('left')}
+                className="h-10 w-10 rounded-lg border border-border bg-card hover:bg-accent transition-colors flex items-center justify-center"
+                aria-label="Scroll staff profiles left"
+              >
+                <ChevronLeft className="w-5 h-5 text-muted-foreground" />
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollProfiles('right')}
+                className="h-10 w-10 rounded-lg border border-border bg-card hover:bg-accent transition-colors flex items-center justify-center"
+                aria-label="Scroll staff profiles right"
+              >
+                <ChevronRight className="w-5 h-5 text-muted-foreground" />
+              </button>
+            </div>
+          </div>
+
+          <div
+            ref={profilesSliderRef}
+            className="flex gap-4 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent"
+          >
+            {staffProfiles.map((staff) => (
+              <button
+                key={staff.id}
+                onClick={() => {
+                  setSelectedStaffCode(staff.staff_code);
+                  setPin('');
+                  setError('');
+                }}
+                className={`snap-start shrink-0 w-44 p-4 border-2 rounded-lg transition-all duration-200 text-center ${
                   selectedStaffCode === staff.staff_code
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-secondary text-secondary-foreground'
-                }`}>
-                  {staff.display_name.charAt(0).toUpperCase()}
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border bg-card hover:border-border/60'
+                }`}
+              >
+                <div className="flex flex-col items-center space-y-3">
+                  <div className={`w-16 h-16 rounded-full flex items-center justify-center font-medium text-lg ${
+                    selectedStaffCode === staff.staff_code
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-secondary text-secondary-foreground'
+                  }`}>
+                    {staff.display_name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0 w-full">
+                    <h3 className="font-medium text-foreground truncate">{staff.display_name}</h3>
+                    <span className="text-xs px-2 py-1 bg-secondary text-secondary-foreground rounded font-medium mt-1 inline-block">
+                      {staff.role}
+                    </span>
+                  </div>
                 </div>
-                <div className="min-w-0 w-full">
-                  <h3 className="font-medium text-foreground truncate">{staff.display_name}</h3>
-                  <span className="text-xs px-2 py-1 bg-secondary text-secondary-foreground rounded font-medium mt-1 inline-block">
-                    {staff.role}
-                  </span>
-                </div>
-              </div>
-            </button>
-          ))}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* PIN Entry Section */}
-        <div className="w-full max-w-sm relative">
+        <div className="w-full max-w-sm relative mt-auto">
           <div className="text-center mb-6">
             {/* PIN Display */}
             <div className="flex justify-center space-x-3">
