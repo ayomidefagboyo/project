@@ -44,6 +44,71 @@ interface StaffProfile {
   created_at: string;
 }
 
+interface TerminalBootState {
+  config: TerminalConfig | null;
+  staff: StaffProfile | null;
+  phase: 'setup' | 'staff_auth' | 'operational';
+}
+
+const getInitialTerminalBootState = (): TerminalBootState => {
+  if (typeof window === 'undefined') {
+    return { config: null, staff: null, phase: 'setup' };
+  }
+
+  const storedConfig = localStorage.getItem('pos_terminal_config');
+  if (!storedConfig) {
+    return { config: null, staff: null, phase: 'setup' };
+  }
+
+  try {
+    const parsedConfig = JSON.parse(storedConfig) as Partial<TerminalConfig>;
+    const outletId = typeof parsedConfig?.outlet_id === 'string' ? parsedConfig.outlet_id.trim() : '';
+    const outletName = typeof parsedConfig?.outlet_name === 'string' ? parsedConfig.outlet_name.trim() : '';
+    if (!outletId || !outletName) {
+      throw new Error('Invalid terminal config');
+    }
+
+    const config: TerminalConfig = {
+      outlet_id: outletId,
+      outlet_name: outletName,
+      initialized_by: typeof parsedConfig.initialized_by === 'string' ? parsedConfig.initialized_by : '',
+      initialized_at: typeof parsedConfig.initialized_at === 'string' ? parsedConfig.initialized_at : '',
+    };
+
+    const storedStaffSession = getStaffSessionRaw();
+    if (!storedStaffSession) {
+      return { config, staff: null, phase: 'staff_auth' };
+    }
+
+    try {
+      const parsedSession = JSON.parse(storedStaffSession) as {
+        expires_at?: string;
+        staff_profile?: StaffProfile;
+      };
+
+      const expiresAt = typeof parsedSession?.expires_at === 'string' ? parsedSession.expires_at : '';
+      if (!expiresAt || Number.isNaN(new Date(expiresAt).getTime()) || new Date(expiresAt) <= new Date()) {
+        clearStaffSession();
+        return { config, staff: null, phase: 'staff_auth' };
+      }
+
+      if (parsedSession.staff_profile && typeof parsedSession.staff_profile.id === 'string') {
+        return { config, staff: parsedSession.staff_profile, phase: 'operational' };
+      }
+    } catch (sessionError) {
+      console.error('Invalid staff session:', sessionError);
+      clearStaffSession();
+    }
+
+    return { config, staff: null, phase: 'staff_auth' };
+  } catch (configError) {
+    console.error('Invalid terminal config:', configError);
+    localStorage.removeItem('pos_terminal_config');
+    clearStaffSession();
+    return { config: null, staff: null, phase: 'setup' };
+  }
+};
+
 function AppContent() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -52,10 +117,16 @@ function AppContent() {
   const posDashboardRef = useRef<POSDashboardHandle>(null);
   const { error } = useToast();
 
-  // Terminal State
-  const [terminalConfig, setTerminalConfig] = useState<TerminalConfig | null>(null);
-  const [currentStaff, setCurrentStaff] = useState<StaffProfile | null>(null);
-  const [terminalPhase, setTerminalPhase] = useState<'setup' | 'staff_auth' | 'operational'>('setup');
+  // Terminal state is restored synchronously to avoid auth-route flicker on startup.
+  const initialTerminalBootStateRef = useRef<TerminalBootState | null>(null);
+  if (!initialTerminalBootStateRef.current) {
+    initialTerminalBootStateRef.current = getInitialTerminalBootState();
+  }
+  const [terminalConfig, setTerminalConfig] = useState<TerminalConfig | null>(initialTerminalBootStateRef.current.config);
+  const [currentStaff, setCurrentStaff] = useState<StaffProfile | null>(initialTerminalBootStateRef.current.staff);
+  const [terminalPhase, setTerminalPhase] = useState<'setup' | 'staff_auth' | 'operational'>(
+    initialTerminalBootStateRef.current.phase
+  );
 
   // POS Search State
   const [searchQuery, setSearchQuery] = useState('');
@@ -74,47 +145,6 @@ function AppContent() {
   // Import/Export State
   const [showImportModal, setShowImportModal] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
-
-  // Check terminal configuration on mount
-  useEffect(() => {
-    const storedConfig = localStorage.getItem('pos_terminal_config');
-    const storedStaffSession = getStaffSessionRaw();
-
-    if (storedConfig) {
-      try {
-        const config = JSON.parse(storedConfig);
-        setTerminalConfig(config);
-
-        // Check if staff is already authenticated
-        if (storedStaffSession) {
-          try {
-            const staffSession = JSON.parse(storedStaffSession);
-            // Check if session is still valid (24 hours)
-            if (new Date(staffSession.expires_at) > new Date()) {
-              setCurrentStaff(staffSession.staff_profile);
-              setTerminalPhase('operational');
-            } else {
-              // Session expired, clear it
-              clearStaffSession();
-              setTerminalPhase('staff_auth');
-            }
-          } catch (err) {
-            console.error('Invalid staff session:', err);
-            clearStaffSession();
-            setTerminalPhase('staff_auth');
-          }
-        } else {
-          setTerminalPhase('staff_auth');
-        }
-      } catch (err) {
-        console.error('Invalid terminal config:', err);
-        localStorage.removeItem('pos_terminal_config');
-        setTerminalPhase('setup');
-      }
-    } else {
-      setTerminalPhase('setup');
-    }
-  }, []);
 
   // Monitor online status
   useEffect(() => {
@@ -458,8 +488,12 @@ function AppContent() {
     );
   }
 
-  // Redirect to auth if not authenticated (except for auth page)
-  if (!currentUser) {
+  // Terminal mode can continue with staff PIN auth when manager session is unavailable.
+  // Only force manager/business-owner auth when terminal is not yet configured.
+  const canRunWithTerminalSessionOnly =
+    !!terminalConfig && (terminalPhase === 'staff_auth' || terminalPhase === 'operational');
+
+  if (!currentUser && !canRunWithTerminalSessionOnly) {
     return <Navigate to="/auth" replace />;
   }
 
