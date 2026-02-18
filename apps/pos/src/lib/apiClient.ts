@@ -5,15 +5,10 @@
 import logger from './logger';
 import { ApiClientBase } from '../../../../shared/services/apiClientBase';
 import { resolveApiBaseUrl } from '../../../../shared/services/urlResolver';
-
-const STAFF_SESSION_STORAGE_KEY = 'pos_staff_session';
+import { getStaffSessionRaw, clearStaffSession } from './staffSessionStorage';
 
 const clearExpiredStaffSession = () => {
-  try {
-    localStorage.removeItem(STAFF_SESSION_STORAGE_KEY);
-  } catch {
-    // Ignore storage failures.
-  }
+  clearStaffSession();
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('pos-staff-session-expired'));
@@ -36,7 +31,7 @@ class ApiClient extends ApiClientBase {
       },
       getAdditionalHeaders: async () => {
         try {
-          const raw = localStorage.getItem(STAFF_SESSION_STORAGE_KEY);
+          const raw = getStaffSessionRaw();
           if (!raw) return {};
           const parsed = JSON.parse(raw);
           const sessionToken = parsed?.session_token;
