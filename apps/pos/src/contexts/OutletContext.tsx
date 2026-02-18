@@ -12,6 +12,48 @@ import {
 
 type CachedAuthState = { user: AuthUser; outlets: Outlet[]; outlet: Outlet | null; settings: BusinessSettings | null };
 
+const buildDefaultOpeningHours = () => ({
+  monday: { open: '08:00', close: '18:00', isOpen: true },
+  tuesday: { open: '08:00', close: '18:00', isOpen: true },
+  wednesday: { open: '08:00', close: '18:00', isOpen: true },
+  thursday: { open: '08:00', close: '18:00', isOpen: true },
+  friday: { open: '08:00', close: '18:00', isOpen: true },
+  saturday: { open: '08:00', close: '18:00', isOpen: true },
+  sunday: { open: '10:00', close: '16:00', isOpen: false },
+});
+
+const getTerminalConfiguredOutletSnapshot = (): Outlet | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem('pos_terminal_config');
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as { outlet_id?: string; outlet_name?: string };
+    const outletId = typeof parsed?.outlet_id === 'string' ? parsed.outlet_id.trim() : '';
+    const outletName = typeof parsed?.outlet_name === 'string' ? parsed.outlet_name.trim() : '';
+    if (!outletId || !outletName) return null;
+
+    const now = new Date().toISOString();
+    return {
+      id: outletId,
+      name: outletName,
+      businessType: 'retail',
+      status: 'active',
+      address: { street: '', city: '', state: '', zip: '', country: '' },
+      phone: '',
+      email: '',
+      openingHours: buildDefaultOpeningHours(),
+      taxRate: 0,
+      currency: 'NGN',
+      timezone: 'Africa/Lagos',
+      createdAt: now,
+      updatedAt: now,
+    };
+  } catch {
+    return null;
+  }
+};
+
 const getTerminalConfiguredOutletId = (): string | null => {
   if (typeof window === 'undefined') return null;
   try {
@@ -84,14 +126,21 @@ interface OutletProviderProps {
 
 export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
   // --- Instant restore from localStorage cache ---
+  const terminalOutletSnapshot = getTerminalConfiguredOutletSnapshot();
   const cachedState = readCachedAuthState();
+  const initialOutlet = cachedState?.outlet ?? terminalOutletSnapshot ?? null;
+  const initialOutlets = cachedState?.outlet
+    ? cachedState.outlets
+    : initialOutlet
+      ? [initialOutlet]
+      : cachedState?.outlets ?? [];
 
-  const [currentOutlet, setCurrentOutlet] = useState<Outlet | null>(cachedState?.outlet ?? null);
-  const [userOutlets, setUserOutlets] = useState<Outlet[]>(cachedState?.outlets ?? []);
+  const [currentOutlet, setCurrentOutlet] = useState<Outlet | null>(initialOutlet);
+  const [userOutlets, setUserOutlets] = useState<Outlet[]>(initialOutlets);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(cachedState?.user ?? null);
   const [businessSettings, setBusinessSettings] = useState<BusinessSettings | null>(cachedState?.settings ?? null);
   // Skip spinner only when cache includes a usable outlet snapshot.
-  const [isLoading, setIsLoading] = useState(!(cachedState && cachedState.outlet));
+  const [isLoading, setIsLoading] = useState(!initialOutlet);
   // Bump this to re-trigger initializeAuth (e.g. after login)
   const [authTrigger, setAuthTrigger] = useState(0);
 
@@ -142,6 +191,9 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
   useEffect(() => {
     const initializeAuth = async () => {
       try {
+        const hasTerminalConfig = !!localStorage.getItem('pos_terminal_config');
+        const canUseTerminalCache = hasTerminalConfig && !!(cachedState?.outlet || currentOutlet);
+
         // Only show spinner if we have NO cache
         if (!cachedState) setIsLoading(true);
 
@@ -162,6 +214,13 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
 
         // If there's a refresh token error, clear invalid session and continue
         if (sessionError && sessionError.includes('Invalid Refresh Token')) {
+          if (canUseTerminalCache) {
+            console.warn('Invalid refresh token detected; continuing in terminal mode with cached outlet context.');
+            setCurrentUser(null);
+            setIsLoading(false);
+            return;
+          }
+
           console.warn('Invalid refresh token detected, clearing session');
           await authService.signOut();
           localStorage.removeItem('pos_auth_cache');
@@ -216,6 +275,12 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
               }
             }
           } else if (error && error.includes('Invalid Refresh Token')) {
+            if (canUseTerminalCache) {
+              console.warn('Invalid refresh token in getCurrentUser; continuing in terminal mode with cached outlet context.');
+              setCurrentUser(null);
+              return;
+            }
+
             console.warn('Invalid refresh token in getCurrentUser, clearing session');
             await authService.signOut();
             localStorage.removeItem('pos_auth_cache');
@@ -228,13 +293,24 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
             }
           }
         } else {
-          // No session — clear cache and user
+          if (canUseTerminalCache) {
+            // Terminal mode can continue with PIN-based staff auth even without manager session.
+            setCurrentUser(null);
+            return;
+          }
+
+          // No session and no terminal config cache: clear auth cache.
           localStorage.removeItem('pos_auth_cache');
           setCurrentUser(null);
         }
       } catch (error) {
         console.error('Error initializing auth:', error);
         if (error instanceof Error && error.message.includes('Invalid Refresh Token')) {
+          if (localStorage.getItem('pos_terminal_config') && (cachedState?.outlet || currentOutlet)) {
+            console.warn('Clearing invalid refresh token error for terminal mode; keeping cached outlet context.');
+            setCurrentUser(null);
+            return;
+          }
           console.warn('Clearing invalid session due to refresh token error');
           await authService.signOut();
           localStorage.removeItem('pos_auth_cache');
