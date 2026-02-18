@@ -9,11 +9,13 @@
  *   - Cash drawer control
  *   - Printer enumeration
  *   - App version info
+ *   - App auto-update (check/download/install)
  */
 
-import { app, BrowserWindow, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, dialog } from 'electron';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { autoUpdater } from 'electron-updater';
 import { printReceipt, listPrinters, setMainWindow } from './printBridge.js';
 
 // ---------------------------------------------------------------------------
@@ -32,6 +34,8 @@ const DIST_PATH = path.join(__dirname, '..', 'dist');
 const DEV_URL = 'http://localhost:5174';
 
 const isDev = !app.isPackaged;
+const AUTO_UPDATE_CHECK_DELAY_MS = 15_000;
+const AUTO_UPDATE_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Single-instance lock — prevent launching multiple windows
@@ -47,6 +51,156 @@ if (!gotLock) {
 // ---------------------------------------------------------------------------
 
 let mainWindow: BrowserWindow | null = null;
+let updateInterval: NodeJS.Timeout | null = null;
+let isCheckingForUpdates = false;
+let updateDownloaded = false;
+let autoUpdaterConfigured = false;
+
+type AppUpdateStatus =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | { state: 'available'; version: string; releaseName?: string }
+  | { state: 'not-available'; version?: string }
+  | { state: 'downloading'; percent: number; transferred: number; total: number; bytesPerSecond: number }
+  | { state: 'downloaded'; version: string; releaseName?: string }
+  | { state: 'error'; message: string };
+
+let latestUpdateStatus: AppUpdateStatus = { state: 'idle' };
+
+const readVersion = (payload: unknown): string => {
+  if (payload && typeof payload === 'object' && 'version' in payload) {
+    const version = (payload as { version?: unknown }).version;
+    if (typeof version === 'string' && version.trim().length > 0) return version;
+  }
+  return '';
+};
+
+const readReleaseName = (payload: unknown): string | undefined => {
+  if (payload && typeof payload === 'object' && 'releaseName' in payload) {
+    const releaseName = (payload as { releaseName?: unknown }).releaseName;
+    if (typeof releaseName === 'string' && releaseName.trim().length > 0) return releaseName;
+  }
+  return undefined;
+};
+
+const readErrorMessage = (err: unknown): string => {
+  if (err instanceof Error && err.message.trim().length > 0) return err.message;
+  if (typeof err === 'string' && err.trim().length > 0) return err;
+  return 'Unknown update error';
+};
+
+const toNumber = (value: unknown): number =>
+  typeof value === 'number' && Number.isFinite(value) ? value : 0;
+
+const publishUpdateStatus = (status: AppUpdateStatus): void => {
+  latestUpdateStatus = status;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('app-update-status', status);
+};
+
+const checkForAppUpdates = async (): Promise<{ ok: boolean; error?: string }> => {
+  if (isDev) return { ok: false, error: 'Auto-update is disabled in development.' };
+  if (isCheckingForUpdates) return { ok: true };
+
+  isCheckingForUpdates = true;
+  publishUpdateStatus({ state: 'checking' });
+
+  try {
+    await autoUpdater.checkForUpdates();
+    return { ok: true };
+  } catch (err) {
+    const message = readErrorMessage(err);
+    publishUpdateStatus({ state: 'error', message });
+    return { ok: false, error: message };
+  } finally {
+    isCheckingForUpdates = false;
+  }
+};
+
+const configureAutoUpdater = (): void => {
+  if (isDev || autoUpdaterConfigured) return;
+  autoUpdaterConfigured = true;
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    publishUpdateStatus({ state: 'checking' });
+  });
+
+  autoUpdater.on('update-available', (info: unknown) => {
+    updateDownloaded = false;
+    const version = readVersion(info);
+    publishUpdateStatus({
+      state: 'available',
+      version: version || 'latest',
+      releaseName: readReleaseName(info),
+    });
+  });
+
+  autoUpdater.on('update-not-available', (info: unknown) => {
+    updateDownloaded = false;
+    const version = readVersion(info);
+    publishUpdateStatus({ state: 'not-available', ...(version ? { version } : {}) });
+  });
+
+  autoUpdater.on('download-progress', (progress: unknown) => {
+    if (!progress || typeof progress !== 'object') return;
+    publishUpdateStatus({
+      state: 'downloading',
+      percent: toNumber((progress as { percent?: unknown }).percent),
+      transferred: toNumber((progress as { transferred?: unknown }).transferred),
+      total: toNumber((progress as { total?: unknown }).total),
+      bytesPerSecond: toNumber((progress as { bytesPerSecond?: unknown }).bytesPerSecond),
+    });
+  });
+
+  autoUpdater.on('update-downloaded', async (info: unknown) => {
+    updateDownloaded = true;
+    const version = readVersion(info) || app.getVersion();
+    publishUpdateStatus({
+      state: 'downloaded',
+      version,
+      releaseName: readReleaseName(info),
+    });
+
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+
+    try {
+      const response = await dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        buttons: ['Restart Now', 'Later'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+        title: 'Update Ready',
+        message: `Compazz POS ${version} is ready to install.`,
+        detail: 'Choose "Restart Now" to apply it immediately. Otherwise it will install when the app closes.',
+      });
+
+      if (response.response === 0) {
+        setImmediate(() => {
+          autoUpdater.quitAndInstall();
+        });
+      }
+    } catch (err) {
+      publishUpdateStatus({ state: 'error', message: readErrorMessage(err) });
+    }
+  });
+
+  autoUpdater.on('error', (err: unknown) => {
+    publishUpdateStatus({ state: 'error', message: readErrorMessage(err) });
+  });
+
+  setTimeout(() => {
+    void checkForAppUpdates();
+  }, AUTO_UPDATE_CHECK_DELAY_MS);
+
+  updateInterval = setInterval(() => {
+    void checkForAppUpdates();
+  }, AUTO_UPDATE_INTERVAL_MS);
+  updateInterval.unref?.();
+};
 
 const createWindow = (): void => {
   // Hide the default menu bar (no File/Edit/View etc.)
@@ -99,6 +253,7 @@ app.on('second-instance', () => {
 
 app.whenReady().then(() => {
   createWindow();
+  configureAutoUpdater();
 
   // macOS: re-create window when dock icon clicked and no windows open
   app.on('activate', () => {
@@ -109,6 +264,12 @@ app.whenReady().then(() => {
 // Quit when all windows are closed (except macOS dock behavior)
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', () => {
+  if (!updateInterval) return;
+  clearInterval(updateInterval);
+  updateInterval = null;
 });
 
 // ---------------------------------------------------------------------------
@@ -151,4 +312,21 @@ ipcMain.handle('list-printers', async () => {
 /** App version */
 ipcMain.handle('get-app-version', () => {
   return app.getVersion();
+});
+
+/** Trigger manual update check */
+ipcMain.handle('app-update:check', async () => {
+  return checkForAppUpdates();
+});
+
+/** Read latest update status snapshot */
+ipcMain.handle('app-update:get-status', () => {
+  return latestUpdateStatus;
+});
+
+/** Install downloaded update immediately */
+ipcMain.handle('app-update:install', () => {
+  if (isDev || !updateDownloaded) return false;
+  autoUpdater.quitAndInstall();
+  return true;
 });
