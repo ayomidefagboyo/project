@@ -14,6 +14,19 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 
+type AppUpdateStatus =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | { state: 'available'; version: string; releaseName?: string }
+  | { state: 'not-available'; version?: string }
+  | { state: 'downloading'; percent: number; transferred: number; total: number; bytesPerSecond: number }
+  | { state: 'downloaded'; version: string; releaseName?: string }
+  | { state: 'error'; message: string };
+
+const updateStatusListeners = new Map<string, (_event: any, status: AppUpdateStatus) => void>();
+const createListenerId = (): string =>
+  `listener-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
 // ---------------------------------------------------------------------------
 // 1. CompazzNativePrinter — the receipt printing bridge
 //    (matches the type in src/lib/receiptPrinter.ts)
@@ -62,4 +75,33 @@ contextBridge.exposeInMainWorld('compazzDesktop', {
    */
   openCashDrawer: (printerName?: string): Promise<boolean> =>
     ipcRenderer.invoke('open-cash-drawer', { printerName }),
+
+  /** Manual update check trigger. */
+  checkForUpdates: (): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('app-update:check'),
+
+  /** Get latest update status snapshot from main process. */
+  getUpdateStatus: (): Promise<AppUpdateStatus> =>
+    ipcRenderer.invoke('app-update:get-status'),
+
+  /** Install a downloaded update immediately (quits app). */
+  installUpdate: (): Promise<boolean> =>
+    ipcRenderer.invoke('app-update:install'),
+
+  /** Subscribe to updater status events from the main process. */
+  onUpdateStatus: (callback: (status: AppUpdateStatus) => void): string => {
+    const listenerId = createListenerId();
+    const listener = (_event: any, status: AppUpdateStatus) => callback(status);
+    updateStatusListeners.set(listenerId, listener);
+    ipcRenderer.on('app-update-status', listener);
+    return listenerId;
+  },
+
+  /** Unsubscribe from updater status events. */
+  offUpdateStatus: (listenerId: string): void => {
+    const listener = updateStatusListeners.get(listenerId);
+    if (!listener) return;
+    ipcRenderer.removeListener('app-update-status', listener);
+    updateStatusListeners.delete(listenerId);
+  },
 });

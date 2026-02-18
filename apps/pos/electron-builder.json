@@ -13,6 +13,13 @@
   "extraMetadata": {
     "main": "electron-dist/main.js"
   },
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "ayomidefagboyo",
+      "repo": "project"
+    }
+  ],
   "win": {
     "target": [
       {
@@ -35,7 +42,7 @@
     "shortcutName": "Compazz POS"
   },
   "mac": {
-    "target": ["dmg"],
+    "target": ["dmg", "zip"],
     "icon": "build/icon.icns",
     "category": "public.app-category.business"
   },
