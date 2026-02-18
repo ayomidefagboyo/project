@@ -13,7 +13,6 @@ import {
   ArrowRight,
   Check,
   ClipboardPaste,
-  FileText,
   Package,
   Plus,
   ScanLine,
@@ -1162,7 +1161,7 @@ const ReceiveItemsPage: React.FC = () => {
     }
   };
 
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     setStep('entry');
     setSelectedVendorId('');
     setInvoiceNumber('');
@@ -1181,47 +1180,28 @@ const ReceiveItemsPage: React.FC = () => {
     setLineProductSearch('');
     setSelectedHistoryInvoice(null);
     setHistoryLoadingInvoiceId(null);
-  };
+  }, []);
+
+  useEffect(() => {
+    const handleHeaderAction = (event: Event) => {
+      const action = (event as CustomEvent<{ action?: string }>).detail?.action;
+      if (action === 'toggle-history') {
+        setShowHistory((prev) => !prev);
+        return;
+      }
+      if (action === 'reset') {
+        resetForm();
+      }
+    };
+
+    window.addEventListener('pos-receive-items-action', handleHeaderAction);
+    return () => window.removeEventListener('pos-receive-items-action', handleHeaderAction);
+  }, [resetForm]);
 
   return (
     <div className="h-full min-h-0 overflow-y-auto bg-stone-50">
       <div className="max-w-[1440px] mx-auto px-4 lg:px-6 py-5 lg:py-6">
         <div className="space-y-4">
-          <div className="rounded-2xl border border-stone-200 bg-white px-4 lg:px-5 py-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-xl bg-slate-900 text-stone-100 flex items-center justify-center">
-                  <Truck className="w-5 h-5" />
-                </div>
-                <div>
-                  <h1 className="text-xl lg:text-2xl font-semibold text-slate-900">Receive Items</h1>
-                  <p className="text-sm text-stone-500">
-                    Fast receiving for supplier invoices, barcode scans, and bulk rows.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={() => setShowHistory((prev) => !prev)}
-                  className="px-4 py-2.5 rounded-xl border border-stone-300 bg-white hover:bg-stone-100 text-sm font-medium text-slate-700 flex items-center gap-2"
-                >
-                  <FileText className="w-4 h-4" />
-                  {showHistory ? 'Hide History' : 'History'}
-                </button>
-
-                {step !== 'done' && (
-                  <button
-                    onClick={resetForm}
-                    className="px-4 py-2.5 rounded-xl border border-stone-300 bg-stone-100 hover:bg-stone-200 text-sm font-medium text-slate-700"
-                  >
-                    Reset
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-
           {error && (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-start gap-2">
               <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
@@ -1234,76 +1214,74 @@ const ReceiveItemsPage: React.FC = () => {
 
           {step === 'entry' && (
             <>
-              <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                <div className="xl:col-span-2 rounded-2xl border border-stone-200 bg-white p-4 lg:p-5">
-                  <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-xs font-semibold tracking-[0.14em] uppercase text-stone-500">
-                      Invoice Details
-                    </h2>
-                    <button
-                      onClick={() => setShowVendorModal(true)}
-                      className="px-3 py-1.5 rounded-lg border border-stone-300 bg-white hover:bg-stone-100 text-xs font-medium text-slate-700 inline-flex items-center gap-1.5"
+              <div className="rounded-2xl border border-stone-200 bg-white p-4 lg:p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-xs font-semibold tracking-[0.14em] uppercase text-stone-500">
+                    Invoice Details
+                  </h2>
+                  <button
+                    onClick={() => setShowVendorModal(true)}
+                    className="px-3 py-1.5 rounded-lg border border-stone-300 bg-white hover:bg-stone-100 text-xs font-medium text-slate-700 inline-flex items-center gap-1.5"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    Add Supplier
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-stone-500 mb-1">Supplier / Vendor</label>
+                    <select
+                      value={selectedVendorId}
+                      onChange={(event) => setSelectedVendorId(event.target.value)}
+                      className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
                     >
-                      <UserPlus className="w-3.5 h-3.5" />
-                      Add Supplier
-                    </button>
+                      <option value="">Walk-in / No Vendor</option>
+                      {vendors.map((vendor) => (
+                        <option key={vendor.id} value={vendor.id}>
+                          {vendor.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-stone-500 mb-1">Supplier / Vendor</label>
-                      <select
-                        value={selectedVendorId}
-                        onChange={(event) => setSelectedVendorId(event.target.value)}
-                        className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                      >
-                        <option value="">Walk-in / No Vendor</option>
-                        {vendors.map((vendor) => (
-                          <option key={vendor.id} value={vendor.id}>
-                            {vendor.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                  <div>
+                    <label className="block text-xs font-medium text-stone-500 mb-1">Invoice Number</label>
+                    <input
+                      value={invoiceNumber}
+                      onChange={(event) => setInvoiceNumber(event.target.value)}
+                      placeholder="e.g. SUP-2026-001"
+                      className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                    />
+                  </div>
 
-                    <div>
-                      <label className="block text-xs font-medium text-stone-500 mb-1">Invoice Number</label>
-                      <input
-                        value={invoiceNumber}
-                        onChange={(event) => setInvoiceNumber(event.target.value)}
-                        placeholder="e.g. SUP-2026-001"
-                        className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                      />
-                    </div>
+                  <div>
+                    <label className="block text-xs font-medium text-stone-500 mb-1">Invoice Date</label>
+                    <input
+                      type="date"
+                      value={invoiceDate}
+                      onChange={(event) => setInvoiceDate(event.target.value)}
+                      className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                    />
+                  </div>
 
-                    <div>
-                      <label className="block text-xs font-medium text-stone-500 mb-1">Invoice Date</label>
-                      <input
-                        type="date"
-                        value={invoiceDate}
-                        onChange={(event) => setInvoiceDate(event.target.value)}
-                        className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-stone-500 mb-1">Notes</label>
-                      <input
-                        value={notes}
-                        onChange={(event) => setNotes(event.target.value)}
-                        placeholder="Optional"
-                        className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                      />
-                    </div>
+                  <div>
+                    <label className="block text-xs font-medium text-stone-500 mb-1">Notes</label>
+                    <input
+                      value={notes}
+                      onChange={(event) => setNotes(event.target.value)}
+                      placeholder="Optional"
+                      className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                    />
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-stone-200 bg-white p-4 lg:p-5">
+                <div className="mt-4 pt-4 border-t border-stone-200">
                   <h2 className="text-xs font-semibold tracking-[0.14em] uppercase text-stone-500 mb-3">
                     Fast Receive
                   </h2>
 
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <div className="relative">
                       <div className="flex items-center rounded-xl border border-stone-300 bg-white px-3">
                         <ScanLine className="w-4 h-4 text-stone-500" />
@@ -1370,7 +1348,7 @@ const ReceiveItemsPage: React.FC = () => {
                       )}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                       <div>
                         <label className="block text-[11px] font-medium text-stone-500 mb-1">Quick Qty</label>
                         <input
@@ -1392,24 +1370,25 @@ const ReceiveItemsPage: React.FC = () => {
                           className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
                         />
                       </div>
+                      <div className="self-end">
+                        <button
+                          onClick={addBlankLine}
+                          className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white hover:bg-stone-100 text-xs font-medium text-slate-700 inline-flex items-center justify-center gap-1.5"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          Blank Row
+                        </button>
+                      </div>
+                      <div className="self-end">
+                        <button
+                          onClick={() => setShowBulkModal(true)}
+                          className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white hover:bg-stone-100 text-xs font-medium text-slate-700 inline-flex items-center justify-center gap-1.5"
+                        >
+                          <ClipboardPaste className="w-3.5 h-3.5" />
+                          Paste Table
+                        </button>
+                      </div>
                     </div>
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <button
-                      onClick={addBlankLine}
-                      className="px-3 py-2.5 rounded-lg border border-stone-300 bg-white hover:bg-stone-100 text-xs font-medium text-slate-700 inline-flex items-center justify-center gap-1.5"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      Blank Row
-                    </button>
-                    <button
-                      onClick={() => setShowBulkModal(true)}
-                      className="px-3 py-2.5 rounded-lg border border-stone-300 bg-white hover:bg-stone-100 text-xs font-medium text-slate-700 inline-flex items-center justify-center gap-1.5"
-                    >
-                      <ClipboardPaste className="w-3.5 h-3.5" />
-                      Paste Table
-                    </button>
                   </div>
 
                   <div className="mt-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-xs text-stone-600">

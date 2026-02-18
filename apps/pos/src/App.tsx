@@ -11,7 +11,7 @@ import TransferToOutletPage from './pages/TransferToOutletPage';
 import PharmacyPatientsPage from './pages/PharmacyPatientsPage';
 import AppLayout from './components/layout/AppLayout';
 import { OutletProvider, useOutlet } from './contexts/OutletContext';
-import { Upload, Download, Plus, Wifi, WifiOff, ChevronDown } from 'lucide-react';
+import { Upload, Download, Plus, Wifi, WifiOff, ChevronDown, FileText, RotateCcw } from 'lucide-react';
 import ImportProductsModal from './components/pos/ImportProductsModal';
 import { exportProducts } from './lib/inventoryImportExport';
 import { posService, type POSProduct } from './lib/posService';
@@ -744,6 +744,39 @@ function AppContent() {
     </div>
   );
 
+  const dispatchReceiveHeaderAction = useCallback((action: 'toggle-history' | 'reset') => {
+    window.dispatchEvent(new CustomEvent('pos-receive-items-action', { detail: { action } }));
+  }, []);
+
+  const receiveItemsHeader = (
+    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between w-full gap-3">
+      <div className="min-w-0">
+        <h2 className="text-lg sm:text-xl font-bold text-slate-900">Receive Items</h2>
+        <p className="text-sm text-stone-500">
+          Fast receiving for supplier invoices, barcode scans, and bulk rows.
+        </p>
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => dispatchReceiveHeaderAction('toggle-history')}
+          className="px-4 py-2.5 rounded-xl border border-stone-300 bg-white hover:bg-stone-100 text-sm font-medium text-slate-700 inline-flex items-center gap-2"
+        >
+          <FileText className="w-4 h-4" />
+          History
+        </button>
+        <button
+          type="button"
+          onClick={() => dispatchReceiveHeaderAction('reset')}
+          className="px-4 py-2.5 rounded-xl border border-stone-300 bg-stone-100 hover:bg-stone-200 text-sm font-medium text-slate-700 inline-flex items-center gap-2"
+        >
+          <RotateCcw className="w-4 h-4" />
+          Reset
+        </button>
+      </div>
+    </div>
+  );
+
   // Handle different terminal phases
   if (terminalPhase === 'setup') {
     return <TerminalSetup onSetupComplete={handleTerminalSetup} />;
@@ -771,6 +804,8 @@ function AppContent() {
   const headerContent =
     location.pathname === '/products'
       ? productManagementHeader
+      : location.pathname === '/receive'
+        ? receiveItemsHeader
       : location.pathname === '/stocktaking'
         ? stocktakingHeader
         : location.pathname === '/transfer-outlet'
