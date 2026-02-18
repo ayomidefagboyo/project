@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Settings, AlertCircle, Shield, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { staffService } from '@/lib/staffService';
+import { setStaffSessionRaw } from '@/lib/staffSessionStorage';
 import { useToast } from '@/components/ui/Toast';
 import { resolveDashboardAppUrl } from '../../../../../shared/services/urlResolver';
 
@@ -39,6 +40,8 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [error, setError] = useState('');
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
   const { success, error: toastError } = useToast();
   const profilesSliderRef = useRef<HTMLDivElement | null>(null);
 
@@ -108,7 +111,7 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
         clocked_in_at: new Date().toISOString(),
       };
 
-      localStorage.setItem('pos_staff_session', JSON.stringify(staffSession));
+      setStaffSessionRaw(JSON.stringify(staffSession));
 
       success(`Welcome, ${authResponse.staff_profile.display_name}!`);
       onStaffAuthenticated(authResponse.staff_profile);
@@ -131,6 +134,39 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
       handleAuthentication();
     }
   };
+
+  const updateSliderControls = useCallback(() => {
+    const slider = profilesSliderRef.current;
+    if (!slider) {
+      setCanScrollLeft(false);
+      setCanScrollRight(false);
+      return;
+    }
+
+    const maxScrollLeft = slider.scrollWidth - slider.clientWidth;
+    const threshold = 2;
+    setCanScrollLeft(slider.scrollLeft > threshold);
+    setCanScrollRight(maxScrollLeft - slider.scrollLeft > threshold);
+  }, []);
+
+  useEffect(() => {
+    const slider = profilesSliderRef.current;
+    if (!slider) return;
+
+    const onScroll = () => updateSliderControls();
+    const onResize = () => updateSliderControls();
+
+    slider.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onResize);
+
+    const rafId = window.requestAnimationFrame(() => updateSliderControls());
+
+    return () => {
+      slider.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onResize);
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [staffProfiles.length, updateSliderControls]);
 
   const scrollProfiles = (direction: 'left' | 'right') => {
     const slider = profilesSliderRef.current;
@@ -230,61 +266,73 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
         <div className="max-w-6xl w-full mb-8">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-medium text-foreground">Staff Profiles</h2>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => scrollProfiles('left')}
-                className="h-10 w-10 rounded-lg border border-border bg-card hover:bg-accent transition-colors flex items-center justify-center"
-                aria-label="Scroll staff profiles left"
-              >
-                <ChevronLeft className="w-5 h-5 text-muted-foreground" />
-              </button>
-              <button
-                type="button"
-                onClick={() => scrollProfiles('right')}
-                className="h-10 w-10 rounded-lg border border-border bg-card hover:bg-accent transition-colors flex items-center justify-center"
-                aria-label="Scroll staff profiles right"
-              >
-                <ChevronRight className="w-5 h-5 text-muted-foreground" />
-              </button>
-            </div>
           </div>
 
-          <div
-            ref={profilesSliderRef}
-            className="flex gap-4 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent"
-          >
-            {staffProfiles.map((staff) => (
-              <button
-                key={staff.id}
-                onClick={() => {
-                  setSelectedStaffCode(staff.staff_code);
-                  setPin('');
-                  setError('');
-                }}
-                className={`snap-start shrink-0 w-44 p-4 border-2 rounded-lg transition-all duration-200 text-center ${
-                  selectedStaffCode === staff.staff_code
-                    ? 'border-primary bg-primary/5'
-                    : 'border-border bg-card hover:border-border/60'
-                }`}
-              >
-                <div className="flex flex-col items-center space-y-3">
-                  <div className={`w-16 h-16 rounded-full flex items-center justify-center font-medium text-lg ${
+          <div className="relative">
+            {canScrollLeft && (
+              <>
+                <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-14 bg-gradient-to-r from-background to-transparent" />
+                <button
+                  type="button"
+                  onClick={() => scrollProfiles('left')}
+                  className="absolute left-1 top-1/2 z-20 -translate-y-1/2 h-10 w-10 rounded-full border border-border bg-card/95 shadow-sm hover:bg-accent transition-colors flex items-center justify-center"
+                  aria-label="Scroll staff profiles left"
+                >
+                  <ChevronLeft className="w-5 h-5 text-muted-foreground" />
+                </button>
+              </>
+            )}
+
+            {canScrollRight && (
+              <>
+                <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-14 bg-gradient-to-l from-background to-transparent" />
+                <button
+                  type="button"
+                  onClick={() => scrollProfiles('right')}
+                  className="absolute right-1 top-1/2 z-20 -translate-y-1/2 h-10 w-10 rounded-full border border-border bg-card/95 shadow-sm hover:bg-accent transition-colors flex items-center justify-center"
+                  aria-label="Scroll staff profiles right"
+                >
+                  <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                </button>
+              </>
+            )}
+
+            <div
+              ref={profilesSliderRef}
+              className="flex gap-4 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent"
+            >
+              {staffProfiles.map((staff) => (
+                <button
+                  key={staff.id}
+                  onClick={() => {
+                    setSelectedStaffCode(staff.staff_code);
+                    setPin('');
+                    setError('');
+                  }}
+                  className={`snap-start shrink-0 w-44 p-4 border-2 rounded-lg transition-all duration-200 text-center ${
                     selectedStaffCode === staff.staff_code
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-secondary text-secondary-foreground'
-                  }`}>
-                    {staff.display_name.charAt(0).toUpperCase()}
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border bg-card hover:border-border/60'
+                  }`}
+                >
+                  <div className="flex flex-col items-center space-y-3">
+                    <div className={`w-16 h-16 rounded-full flex items-center justify-center font-medium text-lg ${
+                      selectedStaffCode === staff.staff_code
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-secondary text-secondary-foreground'
+                    }`}>
+                      {staff.display_name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 w-full">
+                      <h3 className="font-medium text-foreground truncate">{staff.display_name}</h3>
+                      <span className="text-xs px-2 py-1 bg-secondary text-secondary-foreground rounded font-medium mt-1 inline-block">
+                        {staff.role}
+                      </span>
+                    </div>
                   </div>
-                  <div className="min-w-0 w-full">
-                    <h3 className="font-medium text-foreground truncate">{staff.display_name}</h3>
-                    <span className="text-xs px-2 py-1 bg-secondary text-secondary-foreground rounded font-medium mt-1 inline-block">
-                      {staff.role}
-                    </span>
-                  </div>
-                </div>
-              </button>
-            ))}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 

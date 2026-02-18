@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, RefreshCw, Search } from 'lucide-react';
 import { useOutlet } from '@/contexts/OutletContext';
 import { posService, type POSProduct, type POSDepartment } from '@/lib/posService';
+import { getParsedStaffSession } from '@/lib/staffSessionStorage';
 import { useToast } from '@/components/ui/Toast';
 
 interface StocktakeEdit {
@@ -41,14 +42,8 @@ const StocktakingPage: React.FC = () => {
   const loadRequestRef = useRef(0);
 
   const activeStaffId = useMemo(() => {
-    try {
-      const raw = localStorage.getItem('pos_staff_session');
-      if (!raw) return currentUser?.id || 'system';
-      const parsed = JSON.parse(raw);
-      return parsed?.staff_profile?.id || currentUser?.id || 'system';
-    } catch {
-      return currentUser?.id || 'system';
-    }
+    const parsed = getParsedStaffSession<any>();
+    return parsed?.staff_profile?.id || currentUser?.id || 'system';
   }, [currentUser?.id]);
 
   const loadProducts = async () => {

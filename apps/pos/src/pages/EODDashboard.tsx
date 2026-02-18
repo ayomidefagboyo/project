@@ -22,6 +22,7 @@ import {
 import { useOutlet } from '../contexts/OutletContext';
 import { posEodService, type POSEODCreateData } from '../lib/eodService';
 import { posService } from '../lib/posService';
+import { clearStaffSession } from '../lib/staffSessionStorage';
 import logger from '../lib/logger';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
 import { SalesBreakdownModal } from '../components/SalesBreakdownModal';
@@ -297,7 +298,7 @@ const POSEODDashboard: React.FC = () => {
                 <button
                   onClick={() => {
                     setSuccessMessage(null);
-                    localStorage.removeItem('pos_staff_session');
+                    clearStaffSession();
                     window.dispatchEvent(new CustomEvent('pos-staff-logout'));
                   }}
                   className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 shadow-sm hover:shadow-md"
@@ -366,7 +367,7 @@ const POSEODDashboard: React.FC = () => {
                 </button>
                 <button
                   onClick={() => {
-                    localStorage.removeItem('pos_staff_session');
+                    clearStaffSession();
                     window.dispatchEvent(new CustomEvent('pos-staff-logout'));
                   }}
                   className="w-full flex items-center justify-center gap-2 text-red-600 hover:text-red-700 dark:text-red-400 px-6 py-2.5 rounded-xl font-medium transition-colors hover:bg-red-50 dark:hover:bg-red-900/20"

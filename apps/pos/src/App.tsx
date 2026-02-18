@@ -16,6 +16,7 @@ import ImportProductsModal from './components/pos/ImportProductsModal';
 import { exportProducts } from './lib/inventoryImportExport';
 import { posService, type POSProduct } from './lib/posService';
 import { setMissingProductIntent } from './lib/missingProductIntent';
+import { getStaffSessionRaw, clearStaffSession } from './lib/staffSessionStorage';
 import { useToast } from './components/ui/Toast';
 import TerminalSetup from './components/setup/TerminalSetup';
 import StaffAuthentication from './components/auth/StaffAuthentication';
@@ -77,7 +78,7 @@ function AppContent() {
   // Check terminal configuration on mount
   useEffect(() => {
     const storedConfig = localStorage.getItem('pos_terminal_config');
-    const storedStaffSession = localStorage.getItem('pos_staff_session');
+    const storedStaffSession = getStaffSessionRaw();
 
     if (storedConfig) {
       try {
@@ -94,12 +95,12 @@ function AppContent() {
               setTerminalPhase('operational');
             } else {
               // Session expired, clear it
-              localStorage.removeItem('pos_staff_session');
+              clearStaffSession();
               setTerminalPhase('staff_auth');
             }
           } catch (err) {
             console.error('Invalid staff session:', err);
-            localStorage.removeItem('pos_staff_session');
+            clearStaffSession();
             setTerminalPhase('staff_auth');
           }
         } else {
@@ -202,7 +203,7 @@ function AppContent() {
   // Listen for staff logout events (from sidebar Clock Out button)
   useEffect(() => {
     const handleStaffLogoutEvent = () => {
-      localStorage.removeItem('pos_staff_session');
+      clearStaffSession();
       setCurrentStaff(null);
       setTerminalPhase('staff_auth');
     };
@@ -256,14 +257,14 @@ function AppContent() {
 
   const handleReconfigureTerminal = () => {
     localStorage.removeItem('pos_terminal_config');
-    localStorage.removeItem('pos_staff_session');
+    clearStaffSession();
     setTerminalConfig(null);
     setCurrentStaff(null);
     setTerminalPhase('setup');
   };
 
   const handleStaffLogout = () => {
-    localStorage.removeItem('pos_staff_session');
+    clearStaffSession();
     setCurrentStaff(null);
     setTerminalPhase('staff_auth');
   };

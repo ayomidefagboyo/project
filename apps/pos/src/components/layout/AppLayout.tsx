@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useOutlet } from '../../contexts/OutletContext';
+import { clearStaffSession } from '../../lib/staffSessionStorage';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -107,7 +108,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent, staffRol
 
   // Clock out handler – returns to staff auth (PIN entry), NOT main sign-in
   const handleClockOut = () => {
-    localStorage.removeItem('pos_staff_session');
+    clearStaffSession();
     // Dispatch event so App.tsx can reset terminal phase to staff_auth
     window.dispatchEvent(new CustomEvent('pos-staff-logout'));
   };

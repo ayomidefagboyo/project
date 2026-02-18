@@ -22,6 +22,7 @@ import { ToastContainer, useToast } from '../ui/Toast';
 import logger from '../../lib/logger';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
 import { useTerminalId } from '../../hooks/useTerminalId';
+import { getStaffSessionRaw, setStaffSessionRaw, clearStaffSession } from '../../lib/staffSessionStorage';
 
 // Sub-components (we'll create these next)
 import POSProductGrid from './POSProductGrid';
@@ -543,8 +544,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       // Only trigger auto clock-out if staff is authenticated
       if (isStaffAuthenticated && currentStaff) {
-        // Clear staff session from localStorage to trigger automatic clock-out
-        localStorage.removeItem('pos_staff_session');
+        // Clear staff session to trigger automatic clock-out.
+        clearStaffSession();
 
         // Store clock-out timestamp for potential recovery
         const clockOutData = {
@@ -736,7 +737,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     setIsStaffAuthenticated(true);
 
     // Store staff session info
-    localStorage.setItem('pos_staff_session', JSON.stringify({
+    setStaffSessionRaw(JSON.stringify({
       staff_profile: authResponse.staff_profile,
       session_token: authResponse.session_token,
       expires_at: authResponse.expires_at,
@@ -762,7 +763,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     setIsStaffAuthenticated(false);
 
     // Clear staff session
-    localStorage.removeItem('pos_staff_session');
+    clearStaffSession();
 
     // Clear any auto-clockout data since this is a manual logout
     sessionStorage.removeItem('pos_auto_clockout');
@@ -798,7 +799,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       }
     }
 
-    const staffSession = localStorage.getItem('pos_staff_session');
+    const staffSession = getStaffSessionRaw();
     if (staffSession) {
       try {
         const session = JSON.parse(staffSession);
@@ -811,11 +812,11 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
           setIsStaffAuthenticated(true);
         } else {
           // Session expired or different outlet, clear it
-          localStorage.removeItem('pos_staff_session');
+          clearStaffSession();
         }
       } catch (err) {
         logger.error('Error parsing staff session:', err);
-        localStorage.removeItem('pos_staff_session');
+        clearStaffSession();
       }
     }
   };
