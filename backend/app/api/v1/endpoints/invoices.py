@@ -613,6 +613,19 @@ async def receive_invoice_goods(
             if qty <= 0:
                 continue
 
+            rounded_qty = round(qty)
+            if abs(qty - rounded_qty) > 1e-9:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Invalid quantity for '{description}': {qty}. "
+                        "Inventory quantities must be whole numbers."
+                    )
+                )
+            qty_units = int(rounded_qty)
+            if qty_units <= 0:
+                continue
+
             if explicit_selling_price is not None:
                 final_selling_price = explicit_selling_price
             elif auto_pricing_enabled and cost_price > 0:
@@ -638,7 +651,8 @@ async def receive_invoice_goods(
                         product.get('quantity_on_hand'),
                         _to_float(product.get('quantity'), 0)
                     )
-                    new_qty = current_qty + qty
+                    current_qty_units = int(round(current_qty))
+                    new_qty = current_qty_units + qty_units
 
                     update_fields: Dict[str, Any] = {
                         'quantity_on_hand': new_qty,
@@ -673,7 +687,7 @@ async def receive_invoice_goods(
                     products_updated.append({
                         'product_id': product_id,
                         'name': updated_product.get('name') or description,
-                        'quantity_added': qty,
+                        'quantity_added': qty_units,
                         'new_total': new_qty
                     })
 
@@ -683,7 +697,7 @@ async def receive_invoice_goods(
                         'outlet_id': invoice['outlet_id'],
                         'product_id': product_id,
                         'movement_type': 'receive',
-                        'quantity': qty,
+                        'quantity': qty_units,
                         'reference_type': 'vendor_invoice',
                         'reference_id': invoice_id,
                         'notes': f"Received from invoice {invoice['invoice_number']}",
@@ -708,8 +722,8 @@ async def receive_invoice_goods(
                     'cost_price': cost_price,
                     'unit_price': final_selling_price,
                     'selling_price': final_selling_price,  # legacy fallback
-                    'quantity_on_hand': qty,
-                    'quantity': qty,  # legacy fallback
+                    'quantity_on_hand': qty_units,
+                    'quantity': qty_units,  # legacy fallback
                     'reorder_level': 5,
                     'min_stock_level': 5,  # legacy fallback
                     'reorder_quantity': 0,
@@ -736,7 +750,7 @@ async def receive_invoice_goods(
                     'name': created_product.get('name') or description,
                     'quantity': _to_float(
                         created_product.get('quantity_on_hand'),
-                        _to_float(created_product.get('quantity'), qty)
+                        _to_float(created_product.get('quantity'), qty_units)
                     ),
                     'cost_price': _to_float(created_product.get('cost_price'), cost_price),
                     'selling_price': _to_float(
@@ -751,7 +765,7 @@ async def receive_invoice_goods(
                     'outlet_id': invoice['outlet_id'],
                     'product_id': new_product_id,
                     'movement_type': 'receive',
-                    'quantity': qty,
+                    'quantity': qty_units,
                     'reference_type': 'vendor_invoice',
                     'reference_id': invoice_id,
                     'notes': f"New product created from invoice {invoice['invoice_number']}",

@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.database import get_supabase_admin, Tables
 from app.schemas.auth import UserRole, BusinessType
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -49,37 +50,101 @@ class AuthService:
     def verify_token(self, token: str) -> Dict[str, Any]:
         """Verify and decode a JWT token (Supabase or custom)"""
         logger.debug("Attempting token verification")
+        supabase_error: Optional[Exception] = None
 
+        # First try to verify as Supabase token
+        logger.debug("Trying Supabase token validation")
         try:
-            # First try to verify as Supabase token
-            logger.debug("Trying Supabase token validation")
-            supabase = get_supabase_admin()
-            user_response = supabase.auth.get_user(token)
-
+            user_response = self._get_supabase_user_with_retry(token)
             if user_response.user:
                 logger.debug("Supabase token valid for user %s", user_response.user.id)
-                # Return payload in expected format for Supabase tokens
                 return {
                     "sub": user_response.user.id,
                     "email": user_response.user.email,
                     "aud": user_response.user.aud,
                 }
-            else:
-                logger.debug("Supabase token validation returned no user, trying custom JWT")
-                # Fallback to custom JWT validation
-                payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
-                logger.debug("Custom JWT valid")
-                return payload
-
-        except Exception as e:
-            logger.warning("Token verification failed: %s", type(e).__name__)
+            logger.debug("Supabase token validation returned no user, trying custom JWT")
+        except Exception as exc:
+            supabase_error = exc
+            logger.warning("Supabase token verification failed: %s", type(exc).__name__)
             if settings.DEBUG:
-                logger.exception("Token verification error detail")
+                logger.exception("Supabase token verification error detail")
+
+        # Fallback to custom JWT validation (legacy/internal tokens)
+        try:
+            payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
+            logger.debug("Custom JWT valid")
+            return payload
+        except JWTError:
+            if supabase_error and self._is_retryable_auth_error(supabase_error):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Authentication provider temporarily unavailable. Please retry.",
+                )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        except Exception as e:
+            logger.warning("Custom JWT verification failed: %s", type(e).__name__)
+            if settings.DEBUG:
+                logger.exception("Custom JWT verification error detail")
+            if supabase_error and self._is_retryable_auth_error(supabase_error):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Authentication provider temporarily unavailable. Please retry.",
+                )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+    def _is_retryable_auth_error(self, exc: Exception) -> bool:
+        """Detect transient upstream auth/provider failures that should not be treated as invalid credentials."""
+        text = f"{type(exc).__name__}: {exc}".lower()
+        transient_markers = (
+            "authretryableerror",
+            "json could not be generated",
+            "cloudflare",
+            "error code 500",
+            "bad gateway",
+            "gateway timeout",
+            "service unavailable",
+            "code': 502",
+            'code": 502',
+            "code': 503",
+            'code": 503',
+            "eof occurred in violation of protocol",
+            "_ssl.c",
+        )
+        return any(marker in text for marker in transient_markers)
+
+    def _get_supabase_user_with_retry(self, token: str, max_attempts: int = 3):
+        """Call Supabase auth.get_user with short retries for transient upstream failures."""
+        last_error: Optional[Exception] = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                supabase = get_supabase_admin()
+                return supabase.auth.get_user(token)
+            except Exception as exc:
+                last_error = exc
+                if not self._is_retryable_auth_error(exc) or attempt >= max_attempts:
+                    raise
+                backoff_seconds = 0.2 * attempt
+                logger.warning(
+                    "Transient Supabase auth error (%s); retrying in %.1fs (%d/%d)",
+                    type(exc).__name__,
+                    backoff_seconds,
+                    attempt,
+                    max_attempts,
+                )
+                time.sleep(backoff_seconds)
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Supabase auth verification failed without error context")
     
     async def create_owner_account(self, signup_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new owner account with outlet"""
@@ -281,7 +346,16 @@ class AuthService:
             )
 
         supabase = get_supabase_admin()
-        user_response = supabase.table(Tables.USERS).select("*").eq("id", user_id).execute()
+        try:
+            user_response = supabase.table(Tables.USERS).select("*").eq("id", user_id).execute()
+        except Exception as exc:
+            if self._is_retryable_auth_error(exc):
+                logger.warning("Transient auth user lookup failure for %s: %s", user_id, type(exc).__name__)
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Authentication provider temporarily unavailable. Please retry.",
+                )
+            raise
 
         if not user_response.data:
             # For OAuth users who haven't completed onboarding yet,
