@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, RefreshCw, Send, Truck, X } from 'lucide-react';
+import { Plus, RefreshCw, Search, Send, Truck, X } from 'lucide-react';
 import { useOutlet } from '@/contexts/OutletContext';
 import { posService, TransferStatus, type InventoryTransfer, type POSProduct } from '@/lib/posService';
 import { useToast } from '@/components/ui/Toast';
@@ -17,6 +17,8 @@ const TransferToOutletPage: React.FC = () => {
 
   const [products, setProducts] = useState<POSProduct[]>([]);
   const [selectedProductId, setSelectedProductId] = useState('');
+  const [productSearchQuery, setProductSearchQuery] = useState('');
+  const [isProductSearchOpen, setIsProductSearchOpen] = useState(false);
   const [draftItems, setDraftItems] = useState<TransferDraftItem[]>([]);
   const [toOutletId, setToOutletId] = useState('');
   const [transferReason, setTransferReason] = useState('Inter-outlet replenishment');
@@ -46,6 +48,25 @@ const TransferToOutletPage: React.FC = () => {
     products.forEach((product) => map.set(product.id, product));
     return map;
   }, [products]);
+
+  const searchableProducts = useMemo(
+    () => products.filter((product) => Number(product.quantity_on_hand || 0) > 0),
+    [products]
+  );
+
+  const filteredProducts = useMemo(() => {
+    const needle = productSearchQuery.trim().toLowerCase();
+    if (!needle) return [] as POSProduct[];
+
+    return searchableProducts
+      .filter((product) => {
+        const name = String(product.name || '').toLowerCase();
+        const sku = String(product.sku || '').toLowerCase();
+        const barcode = String(product.barcode || '').toLowerCase();
+        return name.includes(needle) || sku.includes(needle) || barcode.includes(needle);
+      })
+      .slice(0, 20);
+  }, [searchableProducts, productSearchQuery]);
 
   const loadProducts = async () => {
     if (!currentOutlet?.id) {
@@ -141,10 +162,14 @@ const TransferToOutletPage: React.FC = () => {
     void loadOutletsFallback();
   }, [currentOutlet?.id]);
 
-  const addDraftItem = () => {
-    if (!selectedProductId) return;
+  const addDraftItem = (productIdOverride?: string) => {
+    const targetProductId = productIdOverride || selectedProductId;
+    if (!targetProductId) {
+      warning('Search and select a product to transfer.');
+      return;
+    }
 
-    if (draftItems.some((item) => item.product_id === selectedProductId)) {
+    if (draftItems.some((item) => item.product_id === targetProductId)) {
       warning('Product already in transfer list.');
       return;
     }
@@ -152,11 +177,19 @@ const TransferToOutletPage: React.FC = () => {
     setDraftItems((prev) => [
       ...prev,
       {
-        product_id: selectedProductId,
+        product_id: targetProductId,
         quantity_requested: 1,
       },
     ]);
     setSelectedProductId('');
+    setProductSearchQuery('');
+    setIsProductSearchOpen(false);
+  };
+
+  const selectProduct = (product: POSProduct) => {
+    setSelectedProductId(product.id);
+    setProductSearchQuery(`${product.name} (${product.sku})`);
+    setIsProductSearchOpen(false);
   };
 
   const updateDraftItem = (productId: string, quantityRequested: number) => {
@@ -317,25 +350,64 @@ const TransferToOutletPage: React.FC = () => {
 
             <div className="rounded-xl border border-stone-200 p-3 space-y-3">
               <div className="flex flex-col lg:flex-row lg:items-center gap-2">
-                <select
-                  value={selectedProductId}
-                  onChange={(event) => setSelectedProductId(event.target.value)}
-                  className="flex-1 h-12 rounded-xl border border-stone-300 px-3 text-base focus:ring-2 focus:ring-slate-400 focus:border-transparent"
-                >
-                  <option value="">Select product to transfer</option>
-                  {products
-                    .filter((product) => (product.quantity_on_hand || 0) > 0)
-                    .map((product) => (
-                      <option key={product.id} value={product.id}>
-                        {product.name} ({product.sku}) • Stock: {product.quantity_on_hand}
-                      </option>
-                    ))}
-                </select>
+                <div className="relative flex-1">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-500" />
+                    <input
+                      type="text"
+                      value={productSearchQuery}
+                      onChange={(event) => {
+                        setProductSearchQuery(event.target.value);
+                        setSelectedProductId('');
+                        setIsProductSearchOpen(true);
+                      }}
+                      onFocus={() => setIsProductSearchOpen(true)}
+                      onBlur={() => {
+                        window.setTimeout(() => setIsProductSearchOpen(false), 120);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter') return;
+                        event.preventDefault();
+                        const fallbackProductId = selectedProductId || filteredProducts[0]?.id;
+                        addDraftItem(fallbackProductId);
+                      }}
+                      className="w-full h-12 rounded-xl border border-stone-300 pl-10 pr-3 text-base focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                      placeholder="Search inventory by name, SKU, or barcode"
+                    />
+                  </div>
+
+                  {isProductSearchOpen && productSearchQuery.trim().length > 0 && (
+                    <div className="absolute z-20 mt-1 w-full rounded-xl border border-stone-200 bg-white shadow-lg max-h-72 overflow-y-auto">
+                      {filteredProducts.length === 0 ? (
+                        <p className="px-3 py-2 text-sm text-stone-500">No matching products found.</p>
+                      ) : (
+                        filteredProducts.map((product) => (
+                          <button
+                            type="button"
+                            key={product.id}
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              selectProduct(product);
+                            }}
+                            className="w-full text-left px-3 py-2 hover:bg-stone-100 border-b border-stone-100 last:border-b-0"
+                          >
+                            <div className="text-sm font-semibold text-slate-900 truncate">{product.name}</div>
+                            <div className="text-xs text-stone-600 truncate">
+                              {product.sku}
+                              {product.barcode ? ` • ${product.barcode}` : ''}
+                              {` • Stock: ${product.quantity_on_hand || 0}`}
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
 
                 <button
                   type="button"
-                  onClick={addDraftItem}
-                  disabled={!selectedProductId || isLoadingProducts}
+                  onClick={() => addDraftItem(selectedProductId || filteredProducts[0]?.id)}
+                  disabled={(!selectedProductId && filteredProducts.length === 0) || isLoadingProducts}
                   className="h-12 px-4 rounded-xl border border-stone-300 bg-white hover:bg-stone-100 text-base font-semibold text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
                 >
                   <Plus className="w-5 h-5" />

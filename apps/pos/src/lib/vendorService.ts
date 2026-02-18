@@ -46,19 +46,19 @@ export const vendorService = {
         return response;
     },
 
-    async getVendor(id: string): Promise<ApiResponse<Vendor>> {
-        return apiClient.get<Vendor>(`/vendors/${id}`);
+    async getVendor(id: string, outletId: string): Promise<ApiResponse<Vendor>> {
+        return apiClient.get<Vendor>(`/vendors/${id}?outlet_id=${outletId}`);
     },
 
-    async createVendor(data: CreateVendorData): Promise<ApiResponse<Vendor>> {
-        return apiClient.post<Vendor>('/vendors', toBackendPayload(data));
+    async createVendor(data: CreateVendorData, outletId: string): Promise<ApiResponse<Vendor>> {
+        return apiClient.post<Vendor>(`/vendors?outlet_id=${outletId}`, toBackendPayload(data));
     },
 
-    async updateVendor(id: string, data: Partial<CreateVendorData>): Promise<ApiResponse<Vendor>> {
-        return apiClient.put<Vendor>(`/vendors/${id}`, toBackendPayload(data));
+    async updateVendor(id: string, data: Partial<CreateVendorData>, outletId: string): Promise<ApiResponse<Vendor>> {
+        return apiClient.put<Vendor>(`/vendors/${id}?outlet_id=${outletId}`, toBackendPayload(data));
     },
 
-    async deleteVendor(id: string): Promise<ApiResponse<void>> {
-        return apiClient.delete(`/vendors/${id}`);
+    async deleteVendor(id: string, outletId: string): Promise<ApiResponse<void>> {
+        return apiClient.delete(`/vendors/${id}?outlet_id=${outletId}`);
     }
 };

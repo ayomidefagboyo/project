@@ -932,7 +932,7 @@ const ReceiveItemsPage: React.FC = () => {
         is_active: true,
       };
 
-      const response = await vendorService.createVendor(payload);
+      const response = await vendorService.createVendor(payload, currentOutlet.id);
       if (response.error || !response.data) {
         throw new Error(response.error || 'Failed to create vendor');
       }
