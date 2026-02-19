@@ -56,8 +56,23 @@ interface ReceiveLine extends InvoiceItem {
   markup_percentage?: number;
 }
 
+interface HeldReceiveDraft {
+  id: string;
+  outlet_id: string;
+  vendor_id: string;
+  invoice_number: string;
+  invoice_date: string;
+  notes: string;
+  items: ReceiveLine[];
+  created_at: string;
+  updated_at: string;
+}
+
 const createLineId = (): string =>
   `line-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const createHeldDraftId = (): string =>
+  `receive-hold-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const makeLine = (seed: Partial<ReceiveLine> = {}): ReceiveLine => ({
   lineId: createLineId(),
@@ -209,6 +224,13 @@ const ReceiveItemsPage: React.FC = () => {
   const [showHistory, setShowHistory] = useState(false);
   const [selectedHistoryInvoice, setSelectedHistoryInvoice] = useState<Invoice | null>(null);
   const [historyLoadingInvoiceId, setHistoryLoadingInvoiceId] = useState<string | null>(null);
+  const [heldDrafts, setHeldDrafts] = useState<HeldReceiveDraft[]>([]);
+  const [activeHeldDraftId, setActiveHeldDraftId] = useState<string | null>(null);
+
+  const heldDraftStorageKey = useMemo(
+    () => (currentOutlet?.id ? `pos_receive_hold_invoices_${currentOutlet.id}` : null),
+    [currentOutlet?.id]
+  );
 
   const formatCurrency = (amount: number): string =>
     new Intl.NumberFormat('en-NG', {
@@ -216,6 +238,16 @@ const ReceiveItemsPage: React.FC = () => {
       currency: 'NGN',
       minimumFractionDigits: 2,
     }).format(amount);
+
+  const persistHeldDrafts = useCallback(
+    (nextDrafts: HeldReceiveDraft[]) => {
+      setHeldDrafts(nextDrafts);
+      if (heldDraftStorageKey) {
+        localStorage.setItem(heldDraftStorageKey, JSON.stringify(nextDrafts));
+      }
+    },
+    [heldDraftStorageKey]
+  );
 
   const quickToken = useMemo(() => parseQuickToken(quickEntry), [quickEntry]);
   const showQuickSuggestions = quickToken.identifier.trim().length > 0 && (
@@ -404,6 +436,91 @@ const ReceiveItemsPage: React.FC = () => {
       })
       .filter((label) => label.name.length > 0);
   }, []);
+
+  useEffect(() => {
+    if (!heldDraftStorageKey || !currentOutlet?.id) {
+      setHeldDrafts([]);
+      setActiveHeldDraftId(null);
+      return;
+    }
+
+    try {
+      const raw = localStorage.getItem(heldDraftStorageKey);
+      if (!raw) {
+        setHeldDrafts([]);
+        setActiveHeldDraftId(null);
+        return;
+      }
+
+      const nowIso = new Date().toISOString();
+      const parsed = JSON.parse(raw);
+      const normalized = Array.isArray(parsed)
+        ? parsed
+            .map((entryRaw: unknown): HeldReceiveDraft | null => {
+              if (!entryRaw || typeof entryRaw !== 'object') return null;
+              const entry = entryRaw as Record<string, unknown>;
+
+              const entryItems = Array.isArray(entry.items)
+                ? entry.items.map((lineRaw: unknown) => {
+                    const line =
+                      lineRaw && typeof lineRaw === 'object'
+                        ? (lineRaw as Record<string, unknown>)
+                        : {};
+                    return (
+                    makeLine({
+                      ...line,
+                      lineId: String(line.lineId || createLineId()),
+                      description: String(line.description || ''),
+                      quantity: Math.max(0, Number(line.quantity || 0)),
+                      unit_price: Math.max(0, Number(line.unit_price || 0)),
+                      line_total: Number.isFinite(Number(line.line_total))
+                        ? Math.max(0, Number(line.line_total))
+                        : undefined,
+                      selling_price: Number.isFinite(Number(line.selling_price))
+                        ? Math.max(0, Number(line.selling_price))
+                        : undefined,
+                      markup_percentage: Number.isFinite(Number(line.markup_percentage))
+                        ? Math.max(0, Number(line.markup_percentage))
+                        : undefined,
+                      auto_pricing_enabled:
+                        line.auto_pricing_enabled === undefined
+                          ? undefined
+                          : Boolean(line.auto_pricing_enabled),
+                      product_id: line.product_id ?? null,
+                      sku: typeof line.sku === 'string' ? line.sku : undefined,
+                      barcode: typeof line.barcode === 'string' ? line.barcode : undefined,
+                      category: typeof line.category === 'string' ? line.category : '',
+                    })
+                    );
+                  })
+                : [];
+
+              return {
+                id: String(entry.id || createHeldDraftId()),
+                outlet_id: String(entry.outlet_id || currentOutlet.id),
+                vendor_id: String(entry.vendor_id || ''),
+                invoice_number: String(entry.invoice_number || ''),
+                invoice_date: String(entry.invoice_date || new Date().toISOString().split('T')[0]),
+                notes: String(entry.notes || ''),
+                items: entryItems,
+                created_at: String(entry.created_at || nowIso),
+                updated_at: String(entry.updated_at || entry.created_at || nowIso),
+              };
+            })
+            .filter((entry): entry is HeldReceiveDraft => !!entry)
+        : [];
+
+      normalized.sort(
+        (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+      );
+
+      setHeldDrafts(normalized);
+      setActiveHeldDraftId(null);
+    } catch {
+      setHeldDrafts([]);
+      setActiveHeldDraftId(null);
+    }
+  }, [heldDraftStorageKey, currentOutlet?.id]);
 
   useEffect(() => {
     if (!currentOutlet?.id) return;
@@ -1026,6 +1143,101 @@ const ReceiveItemsPage: React.FC = () => {
     }
   };
 
+  const handleHoldInvoice = () => {
+    if (!currentOutlet?.id) return;
+
+    const hasMeaningfulContent =
+      items.some((item) => item.description.trim().length > 0 && Number(item.quantity || 0) > 0) ||
+      selectedVendorId.trim().length > 0 ||
+      invoiceNumber.trim().length > 0 ||
+      notes.trim().length > 0;
+
+    if (!hasMeaningfulContent) {
+      setError('Add invoice details or line items before holding.');
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const holdId = activeHeldDraftId || createHeldDraftId();
+
+    const draft: HeldReceiveDraft = {
+      id: holdId,
+      outlet_id: currentOutlet.id,
+      vendor_id: selectedVendorId,
+      invoice_number: invoiceNumber.trim(),
+      invoice_date: invoiceDate,
+      notes: notes.trim(),
+      items: items.map((line) =>
+        makeLine({
+          ...line,
+          lineId: String(line.lineId || createLineId()),
+        })
+      ),
+      created_at: now,
+      updated_at: now,
+    };
+
+    const nextDrafts = [draft, ...heldDrafts.filter((entry) => entry.id !== holdId)];
+    persistHeldDrafts(nextDrafts);
+
+    setStep('entry');
+    setSelectedVendorId('');
+    setInvoiceNumber('');
+    setInvoiceDate(new Date().toISOString().split('T')[0]);
+    setNotes('');
+    setItems([]);
+    setReceiveResult(null);
+    setLastPrintedLabels([]);
+    setError('');
+    setQuickEntry('');
+    setQuickQuantity('1');
+    setQuickCost('');
+    setLineSearchTargetId(null);
+    setLineProductSearch('');
+    setActiveHeldDraftId(null);
+    setSelectedHistoryInvoice(null);
+    setHistoryLoadingInvoiceId(null);
+  };
+
+  const handleResumeHeldDraft = (draftId: string) => {
+    const draft = heldDrafts.find((entry) => entry.id === draftId);
+    if (!draft) return;
+
+    setStep('entry');
+    setSelectedVendorId(draft.vendor_id || '');
+    setInvoiceNumber(draft.invoice_number || '');
+    setInvoiceDate(draft.invoice_date || new Date().toISOString().split('T')[0]);
+    setNotes(draft.notes || '');
+    setItems(
+      (draft.items || []).map((line) =>
+        makeLine({
+          ...line,
+          lineId: String(line.lineId || createLineId()),
+        })
+      )
+    );
+    setReceiveResult(null);
+    setLastPrintedLabels([]);
+    setError('');
+    setQuickEntry('');
+    setQuickQuantity('1');
+    setQuickCost('');
+    setLineSearchTargetId(null);
+    setLineProductSearch('');
+    setSelectedHistoryInvoice(null);
+    setHistoryLoadingInvoiceId(null);
+    setActiveHeldDraftId(draft.id);
+
+    persistHeldDrafts(heldDrafts.filter((entry) => entry.id !== draft.id));
+  };
+
+  const handleRemoveHeldDraft = (draftId: string) => {
+    persistHeldDrafts(heldDrafts.filter((entry) => entry.id !== draftId));
+    if (activeHeldDraftId === draftId) {
+      setActiveHeldDraftId(null);
+    }
+  };
+
   const handleReceive = async () => {
     if (!currentOutlet?.id) return;
 
@@ -1150,6 +1362,7 @@ const ReceiveItemsPage: React.FC = () => {
 
       setLastPrintedLabels(printedLabels);
       setReceiveResult(result);
+      setActiveHeldDraftId(null);
       setStep('done');
       loadHistory();
     } catch (receiveError: any) {
@@ -1163,6 +1376,7 @@ const ReceiveItemsPage: React.FC = () => {
 
   const resetForm = useCallback(() => {
     setStep('entry');
+    setActiveHeldDraftId(null);
     setSelectedVendorId('');
     setInvoiceNumber('');
     setInvoiceDate(new Date().toISOString().split('T')[0]);
@@ -1396,6 +1610,57 @@ const ReceiveItemsPage: React.FC = () => {
                   </div>
                 </div>
               </div>
+
+              {heldDrafts.length > 0 && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 lg:p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-xs font-semibold tracking-[0.14em] uppercase text-amber-700">
+                      Held Invoices ({heldDrafts.length})
+                    </h2>
+                    {activeHeldDraftId && (
+                      <span className="text-[11px] font-medium text-amber-700">
+                        Editing held invoice
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    {heldDrafts.map((draft) => (
+                      <div
+                        key={draft.id}
+                        className="rounded-xl border border-amber-200 bg-white px-3 py-2.5 flex flex-wrap items-center justify-between gap-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-900 truncate">
+                            {draft.invoice_number || 'Untitled held invoice'}
+                          </p>
+                          <p className="text-[11px] text-stone-500">
+                            {draft.items.length} line{draft.items.length === 1 ? '' : 's'} ·{' '}
+                            {formatCurrency(
+                              draft.items.reduce((sum, line) => sum + getLineTotal(line), 0)
+                            )}{' '}
+                            · {new Date(draft.updated_at).toLocaleString()}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleResumeHeldDraft(draft.id)}
+                            className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-stone-100 text-xs font-semibold"
+                          >
+                            Resume
+                          </button>
+                          <button
+                            onClick={() => handleRemoveHeldDraft(draft.id)}
+                            className="px-3 py-1.5 rounded-lg border border-stone-300 bg-white hover:bg-stone-100 text-xs font-semibold text-slate-700"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="rounded-2xl border border-stone-200 bg-white overflow-hidden">
                 <div className="px-4 lg:px-5 py-3 border-b border-stone-200 flex flex-wrap items-center justify-between gap-2">
@@ -1674,15 +1939,24 @@ const ReceiveItemsPage: React.FC = () => {
                   <p className="text-xs text-stone-500">
                     Linked lines update existing stock. Unlinked lines create new products automatically.
                   </p>
-                  <button
-                    onClick={handleReceive}
-                    disabled={isCreating}
-                    className="px-5 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-stone-100 text-sm font-semibold disabled:opacity-60 inline-flex items-center gap-2"
-                  >
-                    <Truck className="w-4 h-4" />
-                    Receive Into Inventory
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={handleHoldInvoice}
+                      disabled={isCreating}
+                      className="px-4 py-3 rounded-xl border border-stone-300 bg-white hover:bg-stone-100 text-slate-800 text-sm font-semibold disabled:opacity-60"
+                    >
+                      {activeHeldDraftId ? 'Update Hold' : 'Hold Invoice'}
+                    </button>
+                    <button
+                      onClick={handleReceive}
+                      disabled={isCreating}
+                      className="px-5 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-stone-100 text-sm font-semibold disabled:opacity-60 inline-flex items-center gap-2"
+                    >
+                      <Truck className="w-4 h-4" />
+                      Receive Into Inventory
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               )}
             </>
