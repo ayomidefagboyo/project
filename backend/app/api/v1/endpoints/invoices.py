@@ -656,7 +656,6 @@ async def receive_invoice_goods(
 
                     update_fields: Dict[str, Any] = {
                         'quantity_on_hand': new_qty,
-                        'quantity': new_qty,  # legacy fallback if old schema still uses `quantity`
                         'category': category_value,
                         'updated_at': now,
                         'last_received': now
@@ -667,7 +666,6 @@ async def receive_invoice_goods(
 
                     if explicit_selling_price is not None:
                         update_fields['unit_price'] = final_selling_price
-                        update_fields['selling_price'] = final_selling_price  # legacy fallback
 
                     if override and override.get('markup_percentage') is not None:
                         update_fields['markup_percentage'] = markup_percentage
@@ -697,12 +695,16 @@ async def receive_invoice_goods(
                         'outlet_id': invoice['outlet_id'],
                         'product_id': product_id,
                         'movement_type': 'receive',
-                        'quantity': qty_units,
+                        'quantity_change': qty_units,
+                        'quantity_before': current_qty_units,
+                        'quantity_after': new_qty,
                         'reference_type': 'vendor_invoice',
                         'reference_id': invoice_id,
+                        'unit_cost': cost_price if cost_price > 0 else None,
+                        'total_value': (cost_price * qty_units) if cost_price > 0 else None,
                         'notes': f"Received from invoice {invoice['invoice_number']}",
                         'performed_by': current_user['id'],
-                        'created_at': now
+                        'movement_date': now
                     })
 
             elif receive_req.add_to_inventory:
@@ -721,11 +723,8 @@ async def receive_invoice_goods(
                     'category': category_value,
                     'cost_price': cost_price,
                     'unit_price': final_selling_price,
-                    'selling_price': final_selling_price,  # legacy fallback
                     'quantity_on_hand': qty_units,
-                    'quantity': qty_units,  # legacy fallback
                     'reorder_level': 5,
-                    'min_stock_level': 5,  # legacy fallback
                     'reorder_quantity': 0,
                     'tax_rate': 0.075,
                     'is_active': True,
@@ -765,12 +764,16 @@ async def receive_invoice_goods(
                     'outlet_id': invoice['outlet_id'],
                     'product_id': new_product_id,
                     'movement_type': 'receive',
-                    'quantity': qty_units,
+                    'quantity_change': qty_units,
+                    'quantity_before': 0,
+                    'quantity_after': qty_units,
                     'reference_type': 'vendor_invoice',
                     'reference_id': invoice_id,
+                    'unit_cost': cost_price if cost_price > 0 else None,
+                    'total_value': (cost_price * qty_units) if cost_price > 0 else None,
                     'notes': f"New product created from invoice {invoice['invoice_number']}",
                     'performed_by': current_user['id'],
-                    'created_at': now
+                    'movement_date': now
                 })
 
         # Insert all stock movements
