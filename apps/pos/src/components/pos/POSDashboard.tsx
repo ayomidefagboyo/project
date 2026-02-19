@@ -930,6 +930,9 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
    */
   const clearCart = () => {
     setCart([]);
+    // Reset tender state so held/cancelled sales don't carry payments to the next sale.
+    setActivePayments({});
+    setTenderModal(null);
     setRestoredHeldReceiptId(null);
   };
 
