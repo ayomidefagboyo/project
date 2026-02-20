@@ -20,6 +20,7 @@ import {
 import ReceiptEditor from '../components/settings/ReceiptEditor';
 import LabelDesigner from '../components/settings/LabelDesigner';
 import HardwareSetupTab from '../components/settings/HardwareSetupTab';
+import { posService } from '../lib/posService';
 import { useOutlet } from '../contexts/OutletContext';
 import { useTerminalId } from '../hooks/useTerminalId';
 import { dataService } from '../lib/dataService';
@@ -103,25 +104,63 @@ const colorMap: Record<string, { bg: string; text: string; icon: string; border:
 
 const brandColorPresets = ['#0f172a', '#1d4ed8', '#15803d', '#b45309', '#be123c', '#0f766e'];
 
+type ThemePreference = 'light' | 'dark' | 'system';
+
+const THEME_PREFERENCE_STORAGE_KEY = 'pos-theme-preference';
+
+const normalizeThemePreference = (value: unknown): ThemePreference => {
+  if (value === 'light' || value === 'dark') return value;
+  return 'system';
+};
+
+const mapBusinessThemeToPreference = (value: unknown): ThemePreference => {
+  if (value === 'light' || value === 'dark') return value;
+  return 'system';
+};
+
+const mapPreferenceToBusinessTheme = (preference: ThemePreference): 'light' | 'dark' | 'auto' => (
+  preference === 'system' ? 'auto' : preference
+);
+
+const applyThemePreferenceToDocument = (preference: ThemePreference): boolean => {
+  if (typeof document === 'undefined') return false;
+
+  const shouldUseDark =
+    preference === 'dark' ||
+    (
+      preference === 'system' &&
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches
+    );
+
+  if (shouldUseDark) {
+    document.documentElement.classList.add('dark');
+  } else {
+    document.documentElement.classList.remove('dark');
+  }
+
+  return shouldUseDark;
+};
+
 const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('receipts');
   const [darkMode, setDarkMode] = useState(false);
-  const [systemPreference, setSystemPreference] = useState<'light' | 'dark' | 'system'>('system');
+  const [systemPreference, setSystemPreference] = useState<ThemePreference>('system');
   const [brandColor, setBrandColor] = useState(DEFAULT_BRAND_COLOR);
   const [brandColorStatus, setBrandColorStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const { currentOutlet, currentUser, businessSettings, setBusinessSettings } = useOutlet();
   const { terminalId } = useTerminalId();
 
-  // Initialize theme on component mount
+  // Use local cache only as boot fallback until outlet settings hydrate.
   useEffect(() => {
-    const saved = localStorage.getItem('pos-theme-preference');
-    if (saved) {
-      setSystemPreference(saved as 'light' | 'dark' | 'system');
+    try {
+      const saved = normalizeThemePreference(localStorage.getItem(THEME_PREFERENCE_STORAGE_KEY));
+      setSystemPreference(saved);
+      setDarkMode(applyThemePreferenceToDocument(saved));
+    } catch {
+      setSystemPreference('system');
+      setDarkMode(applyThemePreferenceToDocument('system'));
     }
-
-    // Check if dark mode is currently active
-    const isDark = document.documentElement.classList.contains('dark');
-    setDarkMode(isDark);
   }, []);
 
   useEffect(() => {
@@ -130,26 +169,60 @@ const SettingsPage: React.FC = () => {
     applyBrandColorToDocument(resolved);
   }, [businessSettings]);
 
-  // Apply theme changes
-  const applyTheme = (preference: 'light' | 'dark' | 'system') => {
+  // Outlet-wide source of truth.
+  useEffect(() => {
+    if (!businessSettings) return;
+    const preference = mapBusinessThemeToPreference(businessSettings.theme);
     setSystemPreference(preference);
-    localStorage.setItem('pos-theme-preference', preference);
-
-    if (preference === 'system') {
-      const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      setDarkMode(systemDark);
-      if (systemDark) {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
-    } else if (preference === 'dark') {
-      setDarkMode(true);
-      document.documentElement.classList.add('dark');
-    } else {
-      setDarkMode(false);
-      document.documentElement.classList.remove('dark');
+    setDarkMode(applyThemePreferenceToDocument(preference));
+    try {
+      localStorage.setItem(THEME_PREFERENCE_STORAGE_KEY, preference);
+    } catch {
+      // Ignore storage errors
     }
+  }, [businessSettings]);
+
+  const withBusinessSettingDefaults = (payload: Record<string, unknown>): Record<string, unknown> => {
+    if (businessSettings || !currentOutlet) return payload;
+
+    return {
+      ...payload,
+      business_name: currentOutlet.name,
+      business_type: currentOutlet.businessType || 'retail',
+      theme: 'auto',
+      language: 'en',
+      date_format: 'MM/DD/YYYY',
+      time_format: '12h',
+      currency: currentOutlet.currency || 'NGN',
+      timezone: currentOutlet.timezone || 'Africa/Lagos',
+    };
+  };
+
+  const handleThemeChange = async (preference: ThemePreference) => {
+    setSystemPreference(preference);
+    setDarkMode(applyThemePreferenceToDocument(preference));
+
+    try {
+      localStorage.setItem(THEME_PREFERENCE_STORAGE_KEY, preference);
+    } catch {
+      // Ignore storage errors
+    }
+
+    if (!currentOutlet?.id) {
+      return;
+    }
+
+    const response = await dataService.updateBusinessSettings(
+      currentOutlet.id,
+      withBusinessSettingDefaults({ theme: mapPreferenceToBusinessTheme(preference) }) as any
+    );
+
+    if (response.error || !response.data) {
+      console.error('Could not sync outlet theme:', response.error || 'Unknown error');
+      return;
+    }
+
+    setBusinessSettings(response.data);
   };
 
   const handleBrandColorChange = (color: string) => {
@@ -169,32 +242,16 @@ const SettingsPage: React.FC = () => {
       brandColor
     );
 
-    const withDefaults = (payload: Record<string, unknown>): Record<string, unknown> => {
-      if (businessSettings) return payload;
-
-      return {
-        ...payload,
-        business_name: currentOutlet.name,
-        business_type: currentOutlet.businessType || 'retail',
-        theme: 'auto',
-        language: 'en',
-        date_format: 'MM/DD/YYYY',
-        time_format: '12h',
-        currency: currentOutlet.currency || 'NGN',
-        timezone: currentOutlet.timezone || 'Africa/Lagos',
-      };
-    };
-
     let response = await dataService.updateBusinessSettings(
       currentOutlet.id,
-      withDefaults({ brand_color: brandColor }) as any
+      withBusinessSettingDefaults({ brand_color: brandColor }) as any
     );
 
     // Backward-compatible fallback for databases using JSON settings only.
     if (response.error && response.error.toLowerCase().includes('brand_color')) {
       response = await dataService.updateBusinessSettings(
         currentOutlet.id,
-        withDefaults({ pos_terminal_settings: mergedTerminalSettings }) as any
+        withBusinessSettingDefaults({ pos_terminal_settings: mergedTerminalSettings }) as any
       );
     }
 
@@ -219,7 +276,7 @@ const SettingsPage: React.FC = () => {
           <AppearanceTab
             darkMode={darkMode}
             systemPreference={systemPreference}
-            onThemeChange={applyTheme}
+            onThemeChange={handleThemeChange}
             brandColor={brandColor}
             onBrandColorChange={handleBrandColorChange}
             onSaveBrandColor={saveBrandColor}
@@ -246,7 +303,7 @@ const SettingsPage: React.FC = () => {
       case 'staff':
         return <StaffSecurityTab />;
       case 'outlet':
-        return <OutletSettingsTab outletId={currentOutlet?.id} />;
+        return <OutletSettingsTab />;
       default:
         return <ReceiptCustomizationTab />;
     }
@@ -319,8 +376,8 @@ const LabelDesignerTab = () => (
 
 interface AppearanceTabProps {
   darkMode: boolean;
-  systemPreference: 'light' | 'dark' | 'system';
-  onThemeChange: (preference: 'light' | 'dark' | 'system') => void;
+  systemPreference: ThemePreference;
+  onThemeChange: (preference: ThemePreference) => Promise<void>;
   brandColor: string;
   onBrandColorChange: (color: string) => void;
   onSaveBrandColor: () => void;
@@ -348,7 +405,7 @@ const AppearanceTab: React.FC<AppearanceTabProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {/* Light Mode */}
           <button
-            onClick={() => onThemeChange('light')}
+            onClick={() => void onThemeChange('light')}
             className={`p-4 rounded-xl border-2 transition-all ${
               systemPreference === 'light'
                 ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
@@ -366,7 +423,7 @@ const AppearanceTab: React.FC<AppearanceTabProps> = ({
 
           {/* Dark Mode */}
           <button
-            onClick={() => onThemeChange('dark')}
+            onClick={() => void onThemeChange('dark')}
             className={`p-4 rounded-xl border-2 transition-all ${
               systemPreference === 'dark'
                 ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
@@ -384,7 +441,7 @@ const AppearanceTab: React.FC<AppearanceTabProps> = ({
 
           {/* System */}
           <button
-            onClick={() => onThemeChange('system')}
+            onClick={() => void onThemeChange('system')}
             className={`p-4 rounded-xl border-2 transition-all ${
               systemPreference === 'system'
                 ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
@@ -409,6 +466,9 @@ const AppearanceTab: React.FC<AppearanceTabProps> = ({
               Currently using <strong>{darkMode ? 'dark' : 'light'}</strong> mode
             </span>
           </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+            Theme preference is shared outlet-wide across all terminals.
+          </p>
         </div>
       </div>
 
@@ -961,56 +1021,409 @@ const StaffSecurityTab: React.FC = () => {
   );
 };
 
-interface OutletSettingsTabProps {
-  outletId?: string;
+type OutletDayKey = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+
+type OutletOperatingDay = {
+  open: string;
+  close: string;
+  isOpen: boolean;
+};
+
+type OutletOperatingHoursState = Record<OutletDayKey, OutletOperatingDay>;
+
+interface OutletSharedPreferences {
+  rounding: '0.01' | '0.05' | '1';
+  includeTaxInPrices: boolean;
+  multiCurrencySupport: boolean;
 }
 
 interface OutletSettingsState {
   businessName: string;
+  phoneNumber: string;
+  emailAddress: string;
+  website: string;
+  businessAddress: string;
   taxRate: string;
   currency: string;
+  openingHours: OutletOperatingHoursState;
+  rounding: OutletSharedPreferences['rounding'];
+  includeTaxInPrices: boolean;
+  multiCurrencySupport: boolean;
 }
 
-const defaultOutletSettings: OutletSettingsState = {
-  businessName: 'Sample Supermarket',
-  taxRate: '7.5',
-  currency: 'NGN'
+const outletDayOrder: Array<{ key: OutletDayKey; label: string }> = [
+  { key: 'monday', label: 'Monday' },
+  { key: 'tuesday', label: 'Tuesday' },
+  { key: 'wednesday', label: 'Wednesday' },
+  { key: 'thursday', label: 'Thursday' },
+  { key: 'friday', label: 'Friday' },
+  { key: 'saturday', label: 'Saturday' },
+  { key: 'sunday', label: 'Sunday' },
+];
+
+const defaultOutletOpeningHours: OutletOperatingHoursState = {
+  monday: { open: '08:00', close: '20:00', isOpen: true },
+  tuesday: { open: '08:00', close: '20:00', isOpen: true },
+  wednesday: { open: '08:00', close: '20:00', isOpen: true },
+  thursday: { open: '08:00', close: '20:00', isOpen: true },
+  friday: { open: '08:00', close: '20:00', isOpen: true },
+  saturday: { open: '08:00', close: '20:00', isOpen: true },
+  sunday: { open: '10:00', close: '18:00', isOpen: false },
 };
 
-const OutletSettingsTab: React.FC<OutletSettingsTabProps> = ({ outletId }) => {
-  const [state, setState] = useState<OutletSettingsState>(defaultOutletSettings);
+const defaultOutletSharedPreferences: OutletSharedPreferences = {
+  rounding: '0.01',
+  includeTaxInPrices: true,
+  multiCurrencySupport: false,
+};
 
-  const storageKey = outletId ? `pos_outlet_settings_${outletId}` : null;
+const normalizeCurrencyCode = (value: unknown): string => {
+  const normalized = typeof value === 'string' ? value.trim().toUpperCase() : '';
+  return normalized.length > 0 ? normalized : 'NGN';
+};
+
+const normalizeTaxRatePercent = (value: unknown): string => {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) return '0';
+  const normalized = Math.max(0, numeric);
+  return Number.isInteger(normalized) ? String(normalized) : normalized.toFixed(2).replace(/\.?0+$/, '');
+};
+
+const normalizeAddressText = (value: unknown): string => {
+  if (typeof value === 'string') return value;
+  const record = toRecord(value);
+  const lines = [
+    record.street,
+    record.city,
+    record.state,
+    record.zip,
+    record.country,
+  ]
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter((entry) => entry.length > 0);
+  return lines.join(', ');
+};
+
+const normalizeOpeningHours = (value: unknown): OutletOperatingHoursState => {
+  const source = toRecord(value);
+  const buildDay = (key: OutletDayKey): OutletOperatingDay => {
+    const raw = toRecord(source[key]);
+    return {
+      open: typeof raw.open === 'string' && raw.open.trim().length > 0
+        ? raw.open
+        : defaultOutletOpeningHours[key].open,
+      close: typeof raw.close === 'string' && raw.close.trim().length > 0
+        ? raw.close
+        : defaultOutletOpeningHours[key].close,
+      isOpen: toBoolean(raw.isOpen, defaultOutletOpeningHours[key].isOpen),
+    };
+  };
+
+  return {
+    monday: buildDay('monday'),
+    tuesday: buildDay('tuesday'),
+    wednesday: buildDay('wednesday'),
+    thursday: buildDay('thursday'),
+    friday: buildDay('friday'),
+    saturday: buildDay('saturday'),
+    sunday: buildDay('sunday'),
+  };
+};
+
+const readOutletSharedPreferences = (terminalSettings: unknown): OutletSharedPreferences => {
+  const terminalSettingsRecord = toRecord(terminalSettings);
+  const preferences = toRecord(terminalSettingsRecord.outlet_preferences);
+  const roundingRaw = typeof preferences.rounding === 'string' ? preferences.rounding : '';
+  const rounding = roundingRaw === '0.05' || roundingRaw === '1' ? roundingRaw : '0.01';
+
+  return {
+    rounding,
+    includeTaxInPrices: toBoolean(
+      preferences.includeTaxInPrices,
+      defaultOutletSharedPreferences.includeTaxInPrices
+    ),
+    multiCurrencySupport: toBoolean(
+      preferences.multiCurrencySupport,
+      defaultOutletSharedPreferences.multiCurrencySupport
+    ),
+  };
+};
+
+const mergeOutletSharedPreferencesIntoTerminalSettings = (
+  terminalSettings: unknown,
+  preferences: OutletSharedPreferences
+): Record<string, unknown> => {
+  const base = toRecord(terminalSettings);
+  const existingPreferences = toRecord(base.outlet_preferences);
+
+  return {
+    ...base,
+    outlet_preferences: {
+      ...existingPreferences,
+      rounding: preferences.rounding,
+      includeTaxInPrices: preferences.includeTaxInPrices,
+      multiCurrencySupport: preferences.multiCurrencySupport,
+    },
+  };
+};
+
+const createDefaultOutletSettings = (businessName = ''): OutletSettingsState => ({
+  businessName,
+  phoneNumber: '',
+  emailAddress: '',
+  website: '',
+  businessAddress: '',
+  taxRate: '0',
+  currency: 'NGN',
+  openingHours: defaultOutletOpeningHours,
+  rounding: defaultOutletSharedPreferences.rounding,
+  includeTaxInPrices: defaultOutletSharedPreferences.includeTaxInPrices,
+  multiCurrencySupport: defaultOutletSharedPreferences.multiCurrencySupport,
+});
+
+const OutletSettingsTab: React.FC = () => {
+  const {
+    currentOutlet,
+    userOutlets,
+    setCurrentOutlet,
+    setUserOutlets,
+    businessSettings,
+    setBusinessSettings,
+  } = useOutlet();
+  const outletId = currentOutlet?.id;
+
+  const [state, setState] = useState<OutletSettingsState>(() => createDefaultOutletSettings(currentOutlet?.name || ''));
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!storageKey) return;
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<OutletSettingsState>;
-      setState(prev => ({
-        businessName: parsed.businessName ?? prev.businessName,
-        taxRate: parsed.taxRate ?? prev.taxRate,
-        currency: parsed.currency ?? prev.currency
-      }));
-    } catch {
-      // ignore
+    if (!outletId) {
+      setState(createDefaultOutletSettings(''));
+      return;
     }
-  }, [storageKey]);
 
-  useEffect(() => {
-    if (!storageKey) return;
+    let cancelled = false;
+
+    const loadOutletSettings = async () => {
+      setIsLoading(true);
+      setLoadError(null);
+
+      try {
+        const outletInfo = await posService.getOutletInfo(outletId);
+        if (cancelled) return;
+
+        const sharedPreferences = readOutletSharedPreferences(businessSettings?.pos_terminal_settings);
+        const openingHoursSource =
+          outletInfo.opening_hours ??
+          (outletInfo as Record<string, unknown>).openingHours ??
+          (currentOutlet as unknown as Record<string, unknown> | null)?.opening_hours ??
+          currentOutlet?.openingHours;
+        const taxRateSource =
+          outletInfo.tax_rate ??
+          (outletInfo as Record<string, unknown>).taxRate ??
+          (currentOutlet as unknown as Record<string, unknown> | null)?.tax_rate ??
+          currentOutlet?.taxRate;
+
+        setState({
+          businessName:
+            (typeof outletInfo.name === 'string' && outletInfo.name.trim().length > 0)
+              ? outletInfo.name
+              : currentOutlet?.name || '',
+          phoneNumber:
+            (typeof outletInfo.phone === 'string' && outletInfo.phone.trim().length > 0)
+              ? outletInfo.phone
+              : currentOutlet?.phone || '',
+          emailAddress:
+            (typeof outletInfo.email === 'string' && outletInfo.email.trim().length > 0)
+              ? outletInfo.email
+              : currentOutlet?.email || '',
+          website: typeof outletInfo.website === 'string' ? outletInfo.website : '',
+          businessAddress: normalizeAddressText(outletInfo.address ?? currentOutlet?.address),
+          taxRate: normalizeTaxRatePercent(taxRateSource),
+          currency: normalizeCurrencyCode(outletInfo.currency ?? currentOutlet?.currency),
+          openingHours: normalizeOpeningHours(openingHoursSource),
+          rounding: sharedPreferences.rounding,
+          includeTaxInPrices: sharedPreferences.includeTaxInPrices,
+          multiCurrencySupport: sharedPreferences.multiCurrencySupport,
+        });
+      } catch (error) {
+        if (cancelled) return;
+        setLoadError(error instanceof Error ? error.message : 'Could not load latest outlet settings.');
+        const sharedPreferences = readOutletSharedPreferences(businessSettings?.pos_terminal_settings);
+        setState({
+          ...createDefaultOutletSettings(currentOutlet?.name || ''),
+          phoneNumber: currentOutlet?.phone || '',
+          emailAddress: currentOutlet?.email || '',
+          businessAddress: normalizeAddressText(currentOutlet?.address),
+          taxRate: normalizeTaxRatePercent(
+            (currentOutlet as unknown as Record<string, unknown> | null)?.tax_rate ?? currentOutlet?.taxRate
+          ),
+          currency: normalizeCurrencyCode(currentOutlet?.currency),
+          openingHours: normalizeOpeningHours(
+            (currentOutlet as unknown as Record<string, unknown> | null)?.opening_hours ??
+            currentOutlet?.openingHours
+          ),
+          rounding: sharedPreferences.rounding,
+          includeTaxInPrices: sharedPreferences.includeTaxInPrices,
+          multiCurrencySupport: sharedPreferences.multiCurrencySupport,
+        });
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void loadOutletSettings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [outletId, businessSettings?.pos_terminal_settings, currentOutlet]);
+
+  const withBusinessSettingDefaults = (payload: Record<string, unknown>): Record<string, unknown> => {
+    if (businessSettings || !currentOutlet) return payload;
+
+    return {
+      ...payload,
+      business_name: currentOutlet.name,
+      business_type: currentOutlet.businessType || 'retail',
+      theme: 'auto',
+      language: 'en',
+      date_format: 'MM/DD/YYYY',
+      time_format: '12h',
+      currency: currentOutlet.currency || 'NGN',
+      timezone: currentOutlet.timezone || 'Africa/Lagos',
+    };
+  };
+
+  const updateOpeningHours = (day: OutletDayKey, updates: Partial<OutletOperatingDay>) => {
+    setState((prev) => ({
+      ...prev,
+      openingHours: {
+        ...prev.openingHours,
+        [day]: {
+          ...prev.openingHours[day],
+          ...updates,
+        },
+      },
+    }));
+  };
+
+  const saveOutletSettings = async () => {
+    if (!outletId || !currentOutlet) return;
+
+    setSaveStatus('saving');
+    setSaveError(null);
+
+    const taxRateNumeric = Number(state.taxRate);
+    const normalizedTaxRate = Number.isFinite(taxRateNumeric) ? Math.max(0, taxRateNumeric) : 0;
+    const normalizedCurrency = normalizeCurrencyCode(state.currency);
+    const normalizedBusinessName = state.businessName.trim().length > 0 ? state.businessName.trim() : currentOutlet.name;
+
+    const outletPayload = {
+      name: normalizedBusinessName,
+      phone: state.phoneNumber.trim(),
+      email: state.emailAddress.trim(),
+      website: state.website.trim(),
+      address: state.businessAddress.trim(),
+      tax_rate: normalizedTaxRate,
+      currency: normalizedCurrency,
+      opening_hours: state.openingHours,
+    };
+
+    let outletUpdateError: string | null = null;
     try {
-      localStorage.setItem(storageKey, JSON.stringify(state));
-    } catch {
-      // ignore
+      await posService.updateOutletInfo(outletId, outletPayload as any);
+    } catch (error) {
+      outletUpdateError = error instanceof Error ? error.message : 'Could not update outlet record.';
     }
-  }, [state, storageKey]);
+
+    const mergedTerminalSettings = mergeOutletSharedPreferencesIntoTerminalSettings(
+      businessSettings?.pos_terminal_settings,
+      {
+        rounding: state.rounding,
+        includeTaxInPrices: state.includeTaxInPrices,
+        multiCurrencySupport: state.multiCurrencySupport,
+      }
+    );
+
+    const businessSettingsResponse = await dataService.updateBusinessSettings(
+      outletId,
+      withBusinessSettingDefaults({
+        currency: normalizedCurrency,
+        pos_terminal_settings: mergedTerminalSettings,
+      }) as any
+    );
+
+    if (outletUpdateError || businessSettingsResponse.error || !businessSettingsResponse.data) {
+      setSaveStatus('error');
+      setSaveError(
+        outletUpdateError ||
+        businessSettingsResponse.error ||
+        'Could not save outlet settings.'
+      );
+      return;
+    }
+
+    setBusinessSettings(businessSettingsResponse.data);
+
+    const nextOutlet = {
+      ...currentOutlet,
+      name: normalizedBusinessName,
+      phone: outletPayload.phone,
+      email: outletPayload.email,
+      address: outletPayload.address,
+      currency: normalizedCurrency,
+      taxRate: normalizedTaxRate,
+      openingHours: state.openingHours,
+    } as any;
+    setCurrentOutlet(nextOutlet);
+    setUserOutlets(userOutlets.map((outlet) => (outlet.id === outletId ? nextOutlet : outlet)));
+
+    setSaveStatus('saved');
+    setTimeout(() => setSaveStatus('idle'), 1500);
+  };
 
   return (
     <div className="p-4 sm:p-6">
       <div className="max-w-5xl">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Outlet Settings</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Outlet Settings</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              These settings sync outlet-wide across all terminals. Only the Terminal Settings tab is device-specific.
+            </p>
+          </div>
+          <button
+            onClick={saveOutletSettings}
+            disabled={!outletId || saveStatus === 'saving'}
+            className="btn-brand text-white px-4 py-2.5 rounded-lg font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {saveStatus === 'saving' ? 'Saving...' : 'Save Outlet Settings'}
+          </button>
+        </div>
+
+        {loadError && (
+          <p className="text-sm text-amber-600 dark:text-amber-400 mb-4">
+            Could not refresh from server. Showing current terminal snapshot. {loadError}
+          </p>
+        )}
+        {saveStatus === 'saved' && (
+          <p className="text-sm text-green-600 dark:text-green-400 mb-4">
+            Outlet settings synced to all terminals.
+          </p>
+        )}
+        {saveStatus === 'error' && (
+          <p className="text-sm text-red-600 dark:text-red-400 mb-4">
+            {saveError || 'Could not save outlet settings. Please retry.'}
+          </p>
+        )}
+        {isLoading && (
+          <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">Loading latest outlet settings...</p>
+        )}
 
         {/* Business Information */}
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
@@ -1036,7 +1449,8 @@ const OutletSettingsTab: React.FC<OutletSettingsTabProps> = ({ outletId }) => {
                 </label>
                 <input
                   type="tel"
-                  defaultValue="+234 800 123 4567"
+                  value={state.phoneNumber}
+                  onChange={e => setState(prev => ({ ...prev, phoneNumber: e.target.value }))}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
@@ -1046,7 +1460,8 @@ const OutletSettingsTab: React.FC<OutletSettingsTabProps> = ({ outletId }) => {
                 </label>
                 <input
                   type="email"
-                  defaultValue="info@samplemart.ng"
+                  value={state.emailAddress}
+                  onChange={e => setState(prev => ({ ...prev, emailAddress: e.target.value }))}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
@@ -1054,10 +1469,24 @@ const OutletSettingsTab: React.FC<OutletSettingsTabProps> = ({ outletId }) => {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Website
+              </label>
+              <input
+                type="url"
+                value={state.website}
+                onChange={e => setState(prev => ({ ...prev, website: e.target.value }))}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                placeholder="https://example.com"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Business Address
               </label>
               <textarea
-                defaultValue="Plot 123, Main Street&#10;Ikeja, Lagos State"
+                value={state.businessAddress}
+                onChange={e => setState(prev => ({ ...prev, businessAddress: e.target.value }))}
                 rows={3}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               />
@@ -1076,9 +1505,10 @@ const OutletSettingsTab: React.FC<OutletSettingsTabProps> = ({ outletId }) => {
               </label>
               <input
                 type="number"
-                  value={state.taxRate}
-                  onChange={e => setState(prev => ({ ...prev, taxRate: e.target.value }))}
+                value={state.taxRate}
+                onChange={e => setState(prev => ({ ...prev, taxRate: e.target.value }))}
                 step="0.1"
+                min="0"
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               />
             </div>
@@ -1088,8 +1518,8 @@ const OutletSettingsTab: React.FC<OutletSettingsTabProps> = ({ outletId }) => {
                 Currency
               </label>
               <select
-                  value={state.currency}
-                  onChange={e => setState(prev => ({ ...prev, currency: e.target.value }))}
+                value={state.currency}
+                onChange={e => setState(prev => ({ ...prev, currency: e.target.value }))}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               >
                 <option value="NGN">Nigerian Naira (₦)</option>
@@ -1103,7 +1533,11 @@ const OutletSettingsTab: React.FC<OutletSettingsTabProps> = ({ outletId }) => {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Rounding
               </label>
-              <select className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+              <select
+                value={state.rounding}
+                onChange={e => setState(prev => ({ ...prev, rounding: e.target.value as OutletSharedPreferences['rounding'] }))}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              >
                 <option value="0.01">To nearest kobo</option>
                 <option value="0.05">To nearest 5 kobo</option>
                 <option value="1">To nearest naira</option>
@@ -1113,11 +1547,21 @@ const OutletSettingsTab: React.FC<OutletSettingsTabProps> = ({ outletId }) => {
 
           <div className="mt-4 space-y-3">
             <label className="flex items-center gap-2">
-              <input type="checkbox" className="rounded border-gray-300" defaultChecked />
+              <input
+                type="checkbox"
+                className="rounded border-gray-300"
+                checked={state.includeTaxInPrices}
+                onChange={e => setState(prev => ({ ...prev, includeTaxInPrices: e.target.checked }))}
+              />
               <span className="text-sm text-gray-700 dark:text-gray-300">Include tax in product prices (tax-inclusive)</span>
             </label>
             <label className="flex items-center gap-2">
-              <input type="checkbox" className="rounded border-gray-300" />
+              <input
+                type="checkbox"
+                className="rounded border-gray-300"
+                checked={state.multiCurrencySupport}
+                onChange={e => setState(prev => ({ ...prev, multiCurrencySupport: e.target.checked }))}
+              />
               <span className="text-sm text-gray-700 dark:text-gray-300">Enable multi-currency support</span>
             </label>
           </div>
@@ -1128,28 +1572,40 @@ const OutletSettingsTab: React.FC<OutletSettingsTabProps> = ({ outletId }) => {
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Operating Hours</h3>
 
           <div className="space-y-3">
-            {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => (
-              <div key={day} className="flex flex-wrap items-center gap-3">
-                <div className="w-full sm:w-24">
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{day}</span>
+            {outletDayOrder.map((day) => {
+              const dayState = state.openingHours[day.key];
+              return (
+                <div key={day.key} className="flex flex-wrap items-center gap-3">
+                  <div className="w-full sm:w-24">
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{day.label}</span>
+                  </div>
+                  <input
+                    type="time"
+                    value={dayState.open}
+                    onChange={e => updateOpeningHours(day.key, { open: e.target.value })}
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    disabled={!dayState.isOpen}
+                  />
+                  <span className="text-gray-500">to</span>
+                  <input
+                    type="time"
+                    value={dayState.close}
+                    onChange={e => updateOpeningHours(day.key, { close: e.target.value })}
+                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    disabled={!dayState.isOpen}
+                  />
+                  <label className="flex items-center gap-2 sm:ml-auto">
+                    <input
+                      type="checkbox"
+                      className="rounded border-gray-300"
+                      checked={dayState.isOpen}
+                      onChange={e => updateOpeningHours(day.key, { isOpen: e.target.checked })}
+                    />
+                    <span className="text-sm text-gray-600 dark:text-gray-400">Open</span>
+                  </label>
                 </div>
-                <input
-                  type="time"
-                  defaultValue="08:00"
-                  className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                />
-                <span className="text-gray-500">to</span>
-                <input
-                  type="time"
-                  defaultValue={day === 'Sunday' ? '18:00' : '20:00'}
-                  className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                />
-                <label className="flex items-center gap-2 sm:ml-auto">
-                  <input type="checkbox" className="rounded border-gray-300" defaultChecked={day !== 'Sunday'} />
-                  <span className="text-sm text-gray-600 dark:text-gray-400">Open</span>
-                </label>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>

@@ -10,6 +10,9 @@ declare global {
   interface Window {
     qz?: any;
     CompazzNativePrinter?: NativeReceiptPrinter;
+    compazzDesktop?: {
+      isElectron?: boolean;
+    };
   }
 }
 
@@ -239,6 +242,8 @@ export const openReceiptPrintWindow = (
         white-space: pre-wrap;
         word-break: break-word;
         font-family: inherit;
+        color: #111827;
+        text-rendering: geometricPrecision;
       }
       .line-empty { min-height: 6px; }
       .line-rule {
@@ -252,7 +257,10 @@ export const openReceiptPrintWindow = (
         justify-content: space-between;
         gap: 8px;
       }
-      .pair-label { color: #374151; }
+      .pair-label {
+        color: #111827;
+        font-weight: 600;
+      }
       .pair-value {
         margin-left: auto;
         text-align: right;
@@ -302,6 +310,7 @@ export const printReceiptContent = async (
     style?: ReceiptPrintStyle;
   }
 ): Promise<{ success: boolean; mode: 'native' | 'browser' | 'none' }> => {
+  const isElectronDesktop = Boolean(window.compazzDesktop?.isElectron);
   const copies = Math.max(1, Math.min(5, Math.floor(options?.copies || 1)));
   const printerName = options?.printerName;
   const normalizedContent = normalizeReceiptContent(receiptContent);
@@ -316,6 +325,11 @@ export const printReceiptContent = async (
   const nativeQz = await tryQzRawPrint(normalizedContent, copies, printerName);
   if (nativeQz) {
     return { success: true, mode: 'native' };
+  }
+
+  // Desktop app should never pop browser print dialogs; fail fast instead.
+  if (isElectronDesktop) {
+    return { success: false, mode: 'none' };
   }
 
   const opened = openReceiptPrintWindow(normalizedContent, {

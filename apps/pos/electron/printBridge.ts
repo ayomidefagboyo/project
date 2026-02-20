@@ -24,6 +24,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFile } from 'node:child_process';
+import { BrowserWindow } from 'electron';
 import { buildReceiptPayload } from './escpos.js';
 
 // ---------------------------------------------------------------------------
@@ -39,7 +40,7 @@ export interface PrintRequest {
 
 export interface PrintResult {
   success: boolean;
-  mode: 'network' | 'spooler' | 'lp' | 'device' | 'none';
+  mode: 'network' | 'spooler' | 'lp' | 'device' | 'silent' | 'none';
   error?: string;
 }
 
@@ -277,12 +278,125 @@ export const listPrinters = async (): Promise<
   }
 };
 
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+
+const buildSilentPrintHtml = (content: string): string => {
+  const markup = content
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => `<div class=\"line\">${escapeHtml(line || ' ')}</div>`)
+    .join('');
+
+  return `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      @page { margin: 0; size: auto; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: #ffffff;
+        color: #111827;
+        font-family: "Courier New", Courier, monospace;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+      body { padding: 8px 6px; font-feature-settings: "tnum" 1; }
+      .line {
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: #111827;
+        font-weight: 600;
+        text-rendering: geometricPrecision;
+      }
+      @media print {
+        html, body { margin: 0; padding: 0; }
+      }
+    </style>
+  </head>
+  <body>${markup}</body>
+</html>`;
+};
+
+const printViaElectronSilent = async (
+  content: string,
+  printerName?: string,
+): Promise<boolean> => {
+  if (!_mainWindow) return false;
+
+  const attempt = async (deviceName?: string): Promise<boolean> =>
+    new Promise((resolve) => {
+      const printWindow = new BrowserWindow({
+        show: false,
+        autoHideMenuBar: true,
+        webPreferences: {
+          sandbox: true,
+          contextIsolation: true,
+          nodeIntegration: false,
+        },
+      });
+
+      let done = false;
+      const finish = (ok: boolean): void => {
+        if (done) return;
+        done = true;
+        if (!printWindow.isDestroyed()) {
+          printWindow.destroy();
+        }
+        resolve(ok);
+      };
+
+      const timeout = setTimeout(() => finish(false), 12_000);
+
+      printWindow.webContents.once('did-finish-load', () => {
+        printWindow.webContents.print(
+          {
+            silent: true,
+            printBackground: true,
+            ...(deviceName ? { deviceName } : {}),
+          },
+          (success) => {
+            clearTimeout(timeout);
+            finish(!!success);
+          },
+        );
+      });
+
+      printWindow.webContents.once('did-fail-load', () => {
+        clearTimeout(timeout);
+        finish(false);
+      });
+
+      void printWindow.webContents
+        .loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildSilentPrintHtml(content))}`)
+        .catch(() => {
+          clearTimeout(timeout);
+          finish(false);
+        });
+    });
+
+  if (printerName && printerName.trim().length > 0) {
+    const targeted = await attempt(printerName.trim());
+    if (targeted) return true;
+  }
+
+  return attempt(undefined);
+};
+
 // ---------------------------------------------------------------------------
 // Public API — called from IPC handler in main.ts
 // ---------------------------------------------------------------------------
 
 export const printReceipt = async (req: PrintRequest): Promise<PrintResult> => {
   const { content, copies = 1, printerName, openDrawer = false } = req;
+  let lastError = 'No printer available';
 
   const payload = buildReceiptPayload({
     content,
@@ -298,33 +412,33 @@ export const printReceipt = async (req: PrintRequest): Promise<PrintResult> => {
     if (addr) {
       const ok = await printViaNetwork(addr.host, addr.port, payload);
       if (ok) return { success: true, mode: 'network' };
-      return { success: false, mode: 'none', error: `Network print to ${addr.host}:${addr.port} failed` };
+      lastError = `Network print to ${addr.host}:${addr.port} failed`;
     }
 
     // 2. Try device path (Linux/macOS)
     if (printerName.startsWith('/dev/')) {
       const ok = printViaDevicePath(printerName, payload);
       if (ok) return { success: true, mode: 'device' };
-      return { success: false, mode: 'none', error: `Device write to ${printerName} failed` };
+      lastError = `Device write to ${printerName} failed`;
     }
 
     // 3. Try OS-specific spooler by printer friendly name
     if (process.platform === 'win32') {
       const ok = await printViaSpooler(printerName, payload);
       if (ok) return { success: true, mode: 'spooler' };
-      return { success: false, mode: 'none', error: `Spooler print to "${printerName}" failed` };
+      lastError = `Spooler print to "${printerName}" failed`;
     }
 
     if (process.platform === 'darwin') {
       const ok = await printViaMacLp(printerName, payload);
       if (ok) return { success: true, mode: 'lp' };
-      return { success: false, mode: 'none', error: `macOS lp print to "${printerName}" failed` };
+      lastError = `macOS lp print to "${printerName}" failed`;
     }
 
     if (process.platform === 'linux') {
       const ok = await printViaLinuxLp(printerName, payload);
       if (ok) return { success: true, mode: 'lp' };
-      return { success: false, mode: 'none', error: `Linux lp print to "${printerName}" failed` };
+      lastError = `Linux lp print to "${printerName}" failed`;
     }
   }
 
@@ -335,6 +449,7 @@ export const printReceipt = async (req: PrintRequest): Promise<PrintResult> => {
     if (defaultPrinter) {
       const ok = await printViaSpooler(defaultPrinter.name, payload);
       if (ok) return { success: true, mode: 'spooler' };
+      lastError = `Default spooler print to "${defaultPrinter.name}" failed`;
     }
   }
 
@@ -342,12 +457,23 @@ export const printReceipt = async (req: PrintRequest): Promise<PrintResult> => {
     // lp with no -d flag prints to the default printer
     const ok = await printViaMacLp(undefined, payload);
     if (ok) return { success: true, mode: 'lp' };
+    lastError = 'macOS default lp print failed';
   }
 
   if (process.platform === 'linux') {
     const ok = await printViaLinuxLp(undefined, payload);
     if (ok) return { success: true, mode: 'lp' };
+    lastError = 'Linux default lp print failed';
   }
 
-  return { success: false, mode: 'none', error: 'No printer available' };
+  // Last resort for desktop app: Chromium silent print (no dialog)
+  if (!openDrawer) {
+    const silentOk = await printViaElectronSilent(content, printerName);
+    if (silentOk) return { success: true, mode: 'silent' };
+    if (printerName) {
+      lastError = `Silent print to "${printerName}" failed`;
+    }
+  }
+
+  return { success: false, mode: 'none', error: lastError };
 };
