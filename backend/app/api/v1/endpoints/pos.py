@@ -299,6 +299,12 @@ def _update_pos_department_compat(
     )
 
 
+def _removed_department_policy_columns(removed_columns: List[str]) -> List[str]:
+    """Return removed department policy column names from a compatibility retry pass."""
+    policy_columns = {'default_markup_percentage', 'auto_pricing_enabled'}
+    return [column for column in removed_columns if column in policy_columns]
+
+
 def _insert_stocktake_session_compat(supabase, session_data: Dict[str, Any]):
     """
     Insert into pos_stocktake_sessions with backward compatibility.
@@ -954,16 +960,23 @@ async def create_department(
                     'auto_pricing_enabled': department.auto_pricing_enabled,
                     'updated_at': now_iso
                 })
-                if 'default_markup_percentage' in removed_columns or 'auto_pricing_enabled' in removed_columns:
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail="Department margin policy columns are missing. Run the latest POS migration and retry."
+                removed_policy_columns = _removed_department_policy_columns(removed_columns)
+                if removed_policy_columns:
+                    logger.warning(
+                        "Department policy columns missing during reactivation for outlet %s; "
+                        "continuing with compatibility mode (columns=%s)",
+                        department.outlet_id,
+                        ','.join(removed_policy_columns)
                     )
                 if reactivate.data:
                     row = reactivate.data[0]
 
             result_row = dict(row)
             result_row['name'] = existing_name
+            if result_row.get('default_markup_percentage') is None:
+                result_row['default_markup_percentage'] = float(department.default_markup_percentage)
+            if result_row.get('auto_pricing_enabled') is None:
+                result_row['auto_pricing_enabled'] = department.auto_pricing_enabled
             result_row['source'] = 'master'
             return DepartmentResponse(**result_row)
 
@@ -981,10 +994,13 @@ async def create_department(
             'updated_at': now_iso
         }
         result, removed_columns = _insert_pos_departments_compat(supabase, [payload])
-        if 'default_markup_percentage' in removed_columns or 'auto_pricing_enabled' in removed_columns:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Department margin policy columns are missing. Run the latest POS migration and retry."
+        removed_policy_columns = _removed_department_policy_columns(removed_columns)
+        if removed_policy_columns:
+            logger.warning(
+                "Department policy columns missing during create for outlet %s; "
+                "continuing with compatibility mode (columns=%s)",
+                department.outlet_id,
+                ','.join(removed_policy_columns)
             )
         if not result.data:
             raise HTTPException(
@@ -1074,13 +1090,13 @@ async def update_department(
         update_data['updated_at'] = datetime.utcnow().isoformat()
 
         result, removed_columns = _update_pos_department_compat(supabase, department_id, update_data)
-        if (
-            ('default_markup_percentage' in update_data and 'default_markup_percentage' in removed_columns)
-            or ('auto_pricing_enabled' in update_data and 'auto_pricing_enabled' in removed_columns)
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Department margin policy columns are missing. Run the latest POS migration and retry."
+        removed_policy_columns = _removed_department_policy_columns(removed_columns)
+        if removed_policy_columns:
+            logger.warning(
+                "Department policy columns missing during update for outlet %s; "
+                "continuing with compatibility mode (columns=%s)",
+                outlet_id,
+                ','.join(removed_policy_columns)
             )
 
         if not result.data:
@@ -1092,9 +1108,17 @@ async def update_department(
         row = dict(result.data[0])
         row['name'] = _normalize_department_name(row.get('name')) or str(existing.data[0].get('name') or '')
         if row.get('default_markup_percentage') is None:
-            row['default_markup_percentage'] = Decimal('30')
+            row['default_markup_percentage'] = (
+                update_data.get('default_markup_percentage')
+                if 'default_markup_percentage' in update_data
+                else Decimal('30')
+            )
         if row.get('auto_pricing_enabled') is None:
-            row['auto_pricing_enabled'] = True
+            row['auto_pricing_enabled'] = (
+                bool(update_data.get('auto_pricing_enabled'))
+                if 'auto_pricing_enabled' in update_data
+                else True
+            )
         row['source'] = row.get('source') or 'master'
         return DepartmentResponse(**row)
     except HTTPException:
