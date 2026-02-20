@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import POSDashboard, { type POSDashboardHandle } from './components/pos/POSDashboard';
 import ProductManagement, { type ProductManagementHandle } from './components/pos/ProductManagement';
@@ -15,12 +15,19 @@ import { Upload, Download, Plus, Wifi, WifiOff, ChevronDown, FileText, RotateCcw
 import ImportProductsModal from './components/pos/ImportProductsModal';
 import { exportProducts } from './lib/inventoryImportExport';
 import { posService, type POSProduct } from './lib/posService';
+import { dataService } from './lib/dataService';
 import { setMissingProductIntent } from './lib/missingProductIntent';
 import { getStaffSessionRaw, clearStaffSession } from './lib/staffSessionStorage';
 import { useToast } from './components/ui/Toast';
 import TerminalSetup from './components/setup/TerminalSetup';
 import StaffAuthentication from './components/auth/StaffAuthentication';
 import AuthWrapper from './components/auth/AuthWrapper';
+import {
+  buildReceiptTemplateFromSources,
+  extractReceiptTemplateFromTerminalSettings,
+  readCachedReceiptTemplate,
+  writeCachedReceiptTemplate,
+} from './lib/receiptTemplate';
 
 interface TerminalConfig {
   outlet_id: string;
@@ -49,6 +56,24 @@ interface TerminalBootState {
   staff: StaffProfile | null;
   phase: 'setup' | 'staff_auth' | 'operational';
 }
+
+const isValidStaffProfile = (value: unknown): value is StaffProfile => {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<StaffProfile>;
+  return (
+    typeof candidate.id === 'string' &&
+    candidate.id.trim().length > 0 &&
+    typeof candidate.staff_code === 'string' &&
+    candidate.staff_code.trim().length > 0 &&
+    typeof candidate.display_name === 'string' &&
+    candidate.display_name.trim().length > 0 &&
+    typeof candidate.role === 'string' &&
+    candidate.role.trim().length > 0 &&
+    Array.isArray(candidate.permissions) &&
+    typeof candidate.is_active === 'boolean' &&
+    typeof candidate.created_at === 'string'
+  );
+};
 
 const getInitialTerminalBootState = (): TerminalBootState => {
   if (typeof window === 'undefined') {
@@ -92,9 +117,11 @@ const getInitialTerminalBootState = (): TerminalBootState => {
         return { config, staff: null, phase: 'staff_auth' };
       }
 
-      if (parsedSession.staff_profile && typeof parsedSession.staff_profile.id === 'string') {
+      if (isValidStaffProfile(parsedSession.staff_profile)) {
         return { config, staff: parsedSession.staff_profile, phase: 'operational' };
       }
+
+      clearStaffSession();
     } catch (sessionError) {
       console.error('Invalid staff session:', sessionError);
       clearStaffSession();
@@ -141,6 +168,7 @@ function AppContent() {
   const searchRequestRef = useRef(0);
   const onlineSyncInFlightRef = useRef(false);
   const lastCatalogSyncAtRef = useRef(0);
+  const lastReceiptTemplateSyncAtRef = useRef(0);
 
   // Import/Export State
   const [showImportModal, setShowImportModal] = useState(false);
@@ -179,6 +207,30 @@ function AppContent() {
     activeRow.scrollIntoView({ block: 'nearest' });
   }, [showSearchDropdown, highlightedSearchIndex, searchResults.length]);
 
+  const syncOutletReceiptTemplateCache = useCallback(async (outletId: string): Promise<void> => {
+    try {
+      const [receiptSettings, outletInfo, businessSettingsResult] = await Promise.all([
+        posService.getReceiptSettings(outletId),
+        posService.getOutletInfo(outletId),
+        dataService.getBusinessSettings(outletId),
+      ]);
+
+      const persistedTemplate = extractReceiptTemplateFromTerminalSettings(
+        businessSettingsResult.data?.pos_terminal_settings
+      );
+      const cachedTemplate = readCachedReceiptTemplate(outletId);
+      const mergedTemplate = buildReceiptTemplateFromSources({
+        persistedTemplate,
+        cachedTemplate,
+        outletInfo,
+        receiptSettings,
+      });
+      writeCachedReceiptTemplate(outletId, mergedTemplate);
+    } catch (receiptTemplateError) {
+      console.warn('Receipt template sync skipped:', receiptTemplateError);
+    }
+  }, []);
+
   // Keep local outlet cache warm and sync queued offline sales while online.
   useEffect(() => {
     if (terminalPhase !== 'operational' || !terminalConfig?.outlet_id || !isOnline) return;
@@ -205,6 +257,13 @@ function AppContent() {
           }
         }
 
+        const shouldSyncReceiptTemplate =
+          forceCatalog || now - lastReceiptTemplateSyncAtRef.current >= 120_000;
+        if (shouldSyncReceiptTemplate) {
+          await syncOutletReceiptTemplateCache(outletId);
+          lastReceiptTemplateSyncAtRef.current = now;
+        }
+
         const pendingCount = await posService.getOfflineTransactionCount();
         if (pendingCount > 0 && !disposed) {
           const synced = await posService.syncOfflineTransactions();
@@ -228,7 +287,7 @@ function AppContent() {
       disposed = true;
       window.clearInterval(intervalId);
     };
-  }, [terminalPhase, terminalConfig?.outlet_id, isOnline]);
+  }, [terminalPhase, terminalConfig?.outlet_id, isOnline, syncOutletReceiptTemplateCache]);
 
   // Listen for staff logout events (from sidebar Clock Out button)
   useEffect(() => {
@@ -268,6 +327,9 @@ function AppContent() {
         });
       },
     });
+
+    onProgress?.({ stage: 'verifying', message: 'Syncing outlet receipt settings...' });
+    await syncOutletReceiptTemplateCache(config.outlet_id);
 
     onProgress?.({ stage: 'verifying', message: 'Verifying local catalog...' });
     await posService.getCachedProducts(config.outlet_id, {
@@ -498,6 +560,12 @@ function AppContent() {
   }
 
   // Header content for POS terminal page
+  const normalizedStaffDisplayName =
+    typeof currentStaff?.display_name === 'string' && currentStaff.display_name.trim().length > 0
+      ? currentStaff.display_name.trim()
+      : 'Staff';
+  const staffDisplayFirstName = normalizedStaffDisplayName.split(/\s+/)[0] || normalizedStaffDisplayName;
+
   const posTerminalHeader = (
     <div className="flex flex-col xl:flex-row xl:items-center xl:justify-end w-full gap-3 xl:gap-3">
       {/* Search Bar with Dropdown */}
@@ -658,7 +726,7 @@ function AppContent() {
           >
             {currentStaff.role}:{' '}
             <span className="font-semibold">
-              {currentStaff.display_name.split(' ')[0] || currentStaff.display_name}
+              {staffDisplayFirstName}
             </span>
           </button>
         )}
@@ -862,7 +930,17 @@ function AppContent() {
         <Route path="/patients" element={isPharmacist ? <PharmacyPatientsPage /> : <Navigate to="/" replace />} />
         <Route path="/eod" element={canAccessEod ? <POSEODDashboard /> : <Navigate to="/" replace />} />
         <Route path="/settings" element={canAccessSettings ? <SettingsPage /> : <Navigate to="/" replace />} />
-        <Route path="/auth" element={<AuthWrapper onAuthSuccess={() => window.location.href = '/'} />} />
+        <Route
+          path="/auth"
+          element={
+            <AuthWrapper
+              onAuthSuccess={() => {
+                reInitAuth();
+                navigate('/', { replace: true });
+              }}
+            />
+          }
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
@@ -884,12 +962,14 @@ function AppContent() {
 }
 
 function App() {
+  const Router = typeof window !== 'undefined' && window.location.protocol === 'file:' ? HashRouter : BrowserRouter;
+
   return (
-    <BrowserRouter>
+    <Router>
       <OutletProvider>
         <AppContent />
       </OutletProvider>
-    </BrowserRouter>
+    </Router>
   );
 }
 

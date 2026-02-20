@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
   Plus,
@@ -48,6 +49,7 @@ import {
   resolveReceiptPolicy,
   resolveReceiptPrinter,
 } from '../../lib/hardwareProfiles';
+import { readCachedReceiptTemplate } from '../../lib/receiptTemplate';
 import { resolveAdapterCapabilities, supportsHardwareAction } from '../../lib/hardwareAdapters';
 import { printReceiptContent } from '../../lib/receiptPrinter';
 import type { ReceiptPrintStyle } from '../../lib/receiptPrinter';
@@ -102,20 +104,10 @@ interface LocalReceiptPayload {
   pendingSync: boolean;
 }
 
-const readCachedReceiptTemplate = (outletId?: string): ReceiptTemplate | null => {
-  if (!outletId) return null;
-  try {
-    const scopedRaw = localStorage.getItem(`pos-receipt-template:${outletId}`);
-    if (!scopedRaw) return null;
-    return JSON.parse(scopedRaw) as ReceiptTemplate;
-  } catch {
-    return null;
-  }
-};
-
 const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) => {
   // Context and state
   const { currentUser, currentOutlet } = useOutlet();
+  const navigate = useNavigate();
   const { terminalId } = useTerminalId();
   const { toasts, success, error, warning, removeToast } = useToast();
 
@@ -215,7 +207,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     value.length <= maxLength ? value : `${value.slice(0, Math.max(0, maxLength - 3))}...`;
 
   const buildLocalReceiptContent = (payload: LocalReceiptPayload): string => {
-    const template = readCachedReceiptTemplate(currentOutlet?.id);
+    const template = currentOutlet?.id ? readCachedReceiptTemplate(currentOutlet.id) : null;
     const lines: string[] = [];
     const createdAt = new Date(payload.createdAtIso);
     const overpayAmount = Math.max(0, payload.totalPaid - payload.total);
@@ -326,7 +318,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     }
 
     // Read template styling for the print window
-    const template = readCachedReceiptTemplate(currentOutlet?.id);
+    const template = currentOutlet?.id ? readCachedReceiptTemplate(currentOutlet.id) : null;
     const printStyle: ReceiptPrintStyle | undefined = template?.styling
       ? {
           fontSize: template.styling.fontSize,
@@ -403,7 +395,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
       copies,
     });
     if (!opened) {
-      warning('Receipt print failed. Allow pop-ups or configure native printer bridge (Compazz/QZ).', 5000);
+      warning('Receipt print failed. Verify printer connection/mapping in Hardware Setup.', 5000);
     }
     return opened;
   };
@@ -1699,8 +1691,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
         <LoginForm
           onSuccess={handleManagerLoginSuccess}
           onSwitchToSignup={() => {
-            // Redirect to signup page or show signup
-            window.location.href = '/signup';
+            navigate('/auth?mode=signup');
           }}
         />
       </div>
@@ -2194,7 +2185,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                 onSuccess={handleManagerLoginSuccess}
                 onSwitchToSignup={() => {
                   setShowManagerLogin(false);
-                  window.location.href = '/signup';
+                  navigate('/auth?mode=signup');
                 }}
               />
             </div>

@@ -11,7 +11,7 @@ import { useToast } from '../components/ui/Toast';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
 import { printReceiptContent } from '../lib/receiptPrinter';
 import type { ReceiptPrintStyle } from '../lib/receiptPrinter';
-import type { ReceiptTemplate } from '../components/settings/ReceiptEditor';
+import { readCachedReceiptTemplate } from '../lib/receiptTemplate';
 
 // Extend base transaction type with UI-specific fields returned by API
 interface ExtendedTransaction extends POSTransaction {
@@ -527,20 +527,15 @@ const TransactionsPage: React.FC = () => {
       // Read template styling for the print window
       let printStyle: ReceiptPrintStyle | undefined;
       if (currentOutlet?.id) {
-        try {
-          const scopedRaw = localStorage.getItem(`pos-receipt-template:${currentOutlet.id}`);
-          if (scopedRaw) {
-            const tpl = JSON.parse(scopedRaw) as ReceiptTemplate;
-            if (tpl?.styling) {
-              printStyle = {
-                fontSize: tpl.styling.fontSize,
-                fontFamily: tpl.styling.fontFamily,
-                lineSpacing: tpl.styling.lineSpacing,
-                paperWidth: tpl.styling.paperWidth,
-              };
-            }
-          }
-        } catch { /* ignore parse errors */ }
+        const tpl = readCachedReceiptTemplate(currentOutlet.id);
+        if (tpl?.styling) {
+          printStyle = {
+            fontSize: tpl.styling.fontSize,
+            fontFamily: tpl.styling.fontFamily,
+            lineSpacing: tpl.styling.lineSpacing,
+            paperWidth: tpl.styling.paperWidth,
+          };
+        }
       }
 
       const printed = await printReceiptContent(printResult.receipt_content, {
@@ -549,7 +544,7 @@ const TransactionsPage: React.FC = () => {
         style: printStyle,
       });
       if (!printed.success) {
-        showError('Receipt print failed. Allow pop-ups or configure native printer bridge (Compazz/QZ).');
+        showError('Receipt print failed. Verify printer connection/mapping in Hardware Setup.');
         return;
       }
       success('Receipt print started.');
