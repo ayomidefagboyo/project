@@ -125,6 +125,61 @@ def _insert_invoice_items_compat(supabase, items_data: List[Dict[str, Any]]):
     )
 
 
+_STOCK_MOVEMENT_SAFE_OPTIONAL_COLUMNS = {
+    'id',
+    'reference_type',
+    'reference_id',
+    'unit_cost',
+    'total_value',
+    'notes',
+    'performed_by',
+    'movement_date',
+    'created_at',
+}
+
+
+def _insert_stock_movements_compat(supabase, movements: List[Dict[str, Any]]):
+    """Insert stock movements with minimal-return + safe optional-column retries."""
+    if not movements:
+        return None
+
+    payload_rows = [dict(row) for row in movements]
+    removed_columns: List[str] = []
+
+    for _ in range(20):
+        try:
+            # Avoid representation column-mapping edge cases in stale PostgREST caches.
+            return supabase.table('pos_stock_movements').insert(
+                payload_rows,
+                returning='minimal'
+            ).execute()
+        except Exception as exc:
+            missing_column = _extract_missing_column_name(exc)
+            if missing_column and missing_column in _STOCK_MOVEMENT_SAFE_OPTIONAL_COLUMNS:
+                removed_any = False
+                next_rows: List[Dict[str, Any]] = []
+                for row in payload_rows:
+                    if missing_column in row:
+                        removed_any = True
+                        row = dict(row)
+                        row.pop(missing_column, None)
+                    next_rows.append(row)
+                if removed_any:
+                    payload_rows = next_rows
+                    removed_columns.append(missing_column)
+                    logger.warning(
+                        "pos_stock_movements.%s missing in schema cache during insert; retrying without it",
+                        missing_column
+                    )
+                    continue
+            raise
+
+    raise Exception(
+        "Failed to insert pos_stock_movements after compatibility retries; "
+        f"removed columns={removed_columns}"
+    )
+
+
 def _has_received_marker(notes: Optional[str]) -> bool:
     text = str(notes or '')
     return '[Received on ' in text
@@ -138,6 +193,15 @@ def _append_received_marker(notes: Optional[str], now_iso: str, staff_name: str)
     if not base:
         return marker
     return f"{base}\n{marker}"
+
+
+def _upsert_note_marker(notes: Optional[str], marker_prefix: str, marker_line: Optional[str]) -> str:
+    """Replace note marker line by prefix; append when marker_line is provided."""
+    lines = [line.strip() for line in str(notes or '').splitlines() if line.strip()]
+    filtered = [line for line in lines if not line.startswith(marker_prefix)]
+    if marker_line:
+        filtered.append(marker_line.strip())
+    return '\n'.join(filtered)
 
 
 # ===============================================
@@ -181,6 +245,8 @@ class ReceiveInvoiceRequest(BaseModel):
     """When receiving goods from a vendor invoice, optionally create new products"""
     add_to_inventory: bool = True
     update_cost_prices: bool = True
+    payment_status: Optional[str] = None  # paid | unpaid
+    payment_date: Optional[str] = None  # YYYY-MM-DD; required when unpaid
     items_received: Optional[List[Dict[str, Any]]] = None  # Override quantities if partial receipt
 
 
@@ -565,6 +631,27 @@ async def receive_invoice_goods(
         products_updated = []
         stock_movements = []
         now = datetime.utcnow().isoformat()
+        payment_status_raw = str(receive_req.payment_status or '').strip().lower()
+        if payment_status_raw and payment_status_raw not in ('paid', 'unpaid'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="payment_status must be 'paid' or 'unpaid'"
+            )
+        payment_status = payment_status_raw or 'paid'
+        payment_date_iso: Optional[str] = None
+        if receive_req.payment_date:
+            try:
+                payment_date_iso = date.fromisoformat(str(receive_req.payment_date)).isoformat()
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="payment_date must be in YYYY-MM-DD format"
+                )
+        if payment_status == 'unpaid' and not payment_date_iso:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="payment_date is required when payment_status is unpaid"
+            )
         override_by_item_id: Dict[str, Dict[str, Any]] = {}
         if receive_req.items_received:
             for row in receive_req.items_received:
@@ -793,37 +880,58 @@ async def receive_invoice_goods(
 
         # Insert all stock movements
         if stock_movements:
-            supabase.table('pos_stock_movements').insert(stock_movements).execute()
+            _insert_stock_movements_compat(supabase, stock_movements)
 
         received_notes = _append_received_marker(
             invoice.get('notes'),
             now,
             str(current_user.get('name', 'Staff'))
         )
+        received_notes = _upsert_note_marker(
+            received_notes,
+            '[Payment status:',
+            f"[Payment status: {payment_status}]"
+        )
+        received_notes = _upsert_note_marker(
+            received_notes,
+            '[Payment date:',
+            f"[Payment date: {payment_date_iso}]" if payment_date_iso else None
+        )
+        invoice_status_target = 'paid' if payment_status == 'paid' else 'received'
+        invoice_update_payload: Dict[str, Any] = {
+            'status': invoice_status_target,
+            'notes': received_notes,
+            'updated_at': now
+        }
+        if payment_status == 'unpaid' and payment_date_iso:
+            invoice_update_payload['due_date'] = payment_date_iso
 
         try:
             supabase.table(Tables.INVOICES)\
-                .update({
-                    'status': 'received',
-                    'notes': received_notes,
-                    'updated_at': now
-                })\
+                .update(invoice_update_payload)\
                 .eq('id', invoice_id)\
                 .execute()
         except Exception as status_error:
             message = str(status_error).lower()
             # Backward compatibility for databases that have not added "received" to invoice_status yet.
-            if 'invalid input value for enum' in message and 'received' in message:
+            if (
+                invoice_status_target == 'received'
+                and 'invalid input value for enum' in message
+                and 'received' in message
+            ):
                 logger.warning(
                     "invoice_status enum missing 'received'; falling back to 'pending' for invoice %s",
                     invoice_id
                 )
+                fallback_payload: Dict[str, Any] = {
+                    'status': 'pending',
+                    'notes': received_notes,
+                    'updated_at': now
+                }
+                if payment_status == 'unpaid' and payment_date_iso:
+                    fallback_payload['due_date'] = payment_date_iso
                 supabase.table(Tables.INVOICES)\
-                    .update({
-                        'status': 'pending',
-                        'notes': received_notes,
-                        'updated_at': now
-                    })\
+                    .update(fallback_payload)\
                     .eq('id', invoice_id)\
                     .execute()
             else:
@@ -832,12 +940,15 @@ async def receive_invoice_goods(
         # Log audit
         _log_audit(supabase, invoice['outlet_id'], current_user, 'receive', 'invoice', invoice_id,
                    f"Received invoice {invoice['invoice_number']}: "
-                   f"{len(products_created)} new products, {len(products_updated)} updated")
+                   f"{len(products_created)} new products, {len(products_updated)} updated; "
+                   f"payment_status={payment_status}")
 
         return {
             "message": "Invoice goods received successfully",
             "invoice_id": invoice_id,
             "invoice_number": invoice['invoice_number'],
+            "payment_status": payment_status,
+            "payment_date": payment_date_iso,
             "products_created": products_created,
             "products_updated": products_updated,
             "stock_movements_count": len(stock_movements)
