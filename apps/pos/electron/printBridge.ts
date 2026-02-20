@@ -278,6 +278,55 @@ export const listPrinters = async (): Promise<
   }
 };
 
+const normalizePrinterToken = (value: string): string => value.trim().toLowerCase();
+
+const isVirtualPrinter = (name: string): boolean => {
+  const token = normalizePrinterToken(name);
+  return (
+    token.includes('print to pdf') ||
+    token.includes('pdf') ||
+    token.includes('xps') ||
+    token.includes('fax') ||
+    token.includes('onenote') ||
+    token.includes('document writer')
+  );
+};
+
+const resolvePreferredPrinterName = (
+  printers: Array<{ name: string; isDefault: boolean }>,
+  requestedName?: string,
+): string | undefined => {
+  const normalizedRequested = typeof requestedName === 'string' ? requestedName.trim() : '';
+  const candidatePrinters = printers.filter((printer) => printer.name.trim().length > 0);
+  if (candidatePrinters.length === 0) return undefined;
+
+  if (normalizedRequested.length > 0) {
+    const requestedToken = normalizePrinterToken(normalizedRequested);
+    const exactMatch = candidatePrinters.find(
+      (printer) => normalizePrinterToken(printer.name) === requestedToken,
+    );
+    if (exactMatch) return exactMatch.name;
+
+    const fuzzyMatch = candidatePrinters.find((printer) =>
+      normalizePrinterToken(printer.name).includes(requestedToken),
+    );
+    if (fuzzyMatch) return fuzzyMatch.name;
+  }
+
+  const defaultPhysical = candidatePrinters.find(
+    (printer) => printer.isDefault && !isVirtualPrinter(printer.name),
+  );
+  if (defaultPhysical) return defaultPhysical.name;
+
+  const firstPhysical = candidatePrinters.find((printer) => !isVirtualPrinter(printer.name));
+  if (firstPhysical) return firstPhysical.name;
+
+  const defaultAny = candidatePrinters.find((printer) => printer.isDefault);
+  if (defaultAny) return defaultAny.name;
+
+  return candidatePrinters[0].name;
+};
+
 const escapeHtml = (value: string): string =>
   value
     .replace(/&/g, '&amp;')
@@ -397,6 +446,15 @@ const printViaElectronSilent = async (
 export const printReceipt = async (req: PrintRequest): Promise<PrintResult> => {
   const { content, copies = 1, printerName, openDrawer = false } = req;
   let lastError = 'No printer available';
+  const availablePrinters = await listPrinters();
+  const hasNamedTarget = typeof printerName === 'string' && printerName.trim().length > 0;
+  const networkTarget = hasNamedTarget ? parseNetworkAddress(printerName.trim()) : null;
+  const deviceTarget =
+    hasNamedTarget && printerName.trim().startsWith('/dev/') ? printerName.trim() : null;
+  const resolvedDesktopPrinterName =
+    process.platform === 'win32' || process.platform === 'darwin' || process.platform === 'linux'
+      ? resolvePreferredPrinterName(availablePrinters, printerName)
+      : undefined;
 
   const payload = buildReceiptPayload({
     content,
@@ -406,50 +464,61 @@ export const printReceipt = async (req: PrintRequest): Promise<PrintResult> => {
     feedBeforeCut: 3,
   });
 
+  // On desktop receipts, prefer Chromium silent print first.
+  // This matches the browser rendering path and works for many GDI/CUPS printers.
+  if (!openDrawer && !networkTarget && !deviceTarget) {
+    const preferredSilentPrinter =
+      networkTarget || deviceTarget ? undefined : resolvedDesktopPrinterName;
+    const silentFirst = await printViaElectronSilent(content, preferredSilentPrinter);
+    if (silentFirst) return { success: true, mode: 'silent' };
+    if (preferredSilentPrinter) {
+      lastError = `Silent print to "${preferredSilentPrinter}" failed`;
+    } else {
+      lastError = 'Silent print to default printer failed';
+    }
+  }
+
   // 1. Try network (if printerName looks like an IP address)
-  if (printerName) {
-    const addr = parseNetworkAddress(printerName);
-    if (addr) {
-      const ok = await printViaNetwork(addr.host, addr.port, payload);
-      if (ok) return { success: true, mode: 'network' };
-      lastError = `Network print to ${addr.host}:${addr.port} failed`;
-    }
+  if (networkTarget) {
+    const ok = await printViaNetwork(networkTarget.host, networkTarget.port, payload);
+    if (ok) return { success: true, mode: 'network' };
+    lastError = `Network print to ${networkTarget.host}:${networkTarget.port} failed`;
+  }
 
-    // 2. Try device path (Linux/macOS)
-    if (printerName.startsWith('/dev/')) {
-      const ok = printViaDevicePath(printerName, payload);
-      if (ok) return { success: true, mode: 'device' };
-      lastError = `Device write to ${printerName} failed`;
-    }
+  if (deviceTarget) {
+    const ok = printViaDevicePath(deviceTarget, payload);
+    if (ok) return { success: true, mode: 'device' };
+    lastError = `Device write to ${deviceTarget} failed`;
+  }
 
-    // 3. Try OS-specific spooler by printer friendly name
+  // 3. Try OS-specific spooler/lp by resolved printer friendly name
+  if (resolvedDesktopPrinterName) {
     if (process.platform === 'win32') {
-      const ok = await printViaSpooler(printerName, payload);
+      const ok = await printViaSpooler(resolvedDesktopPrinterName, payload);
       if (ok) return { success: true, mode: 'spooler' };
-      lastError = `Spooler print to "${printerName}" failed`;
+      lastError = `Spooler print to "${resolvedDesktopPrinterName}" failed`;
     }
 
     if (process.platform === 'darwin') {
-      const ok = await printViaMacLp(printerName, payload);
+      const ok = await printViaMacLp(resolvedDesktopPrinterName, payload);
       if (ok) return { success: true, mode: 'lp' };
-      lastError = `macOS lp print to "${printerName}" failed`;
+      lastError = `macOS lp print to "${resolvedDesktopPrinterName}" failed`;
     }
 
     if (process.platform === 'linux') {
-      const ok = await printViaLinuxLp(printerName, payload);
+      const ok = await printViaLinuxLp(resolvedDesktopPrinterName, payload);
       if (ok) return { success: true, mode: 'lp' };
-      lastError = `Linux lp print to "${printerName}" failed`;
+      lastError = `Linux lp print to "${resolvedDesktopPrinterName}" failed`;
     }
   }
 
   // No printer name given — try default printer on each platform
   if (process.platform === 'win32') {
-    const printers = await listPrinters();
-    const defaultPrinter = printers.find((p) => p.isDefault);
+    const defaultPrinter = resolvePreferredPrinterName(availablePrinters);
     if (defaultPrinter) {
-      const ok = await printViaSpooler(defaultPrinter.name, payload);
+      const ok = await printViaSpooler(defaultPrinter, payload);
       if (ok) return { success: true, mode: 'spooler' };
-      lastError = `Default spooler print to "${defaultPrinter.name}" failed`;
+      lastError = `Default spooler print to "${defaultPrinter}" failed`;
     }
   }
 
@@ -467,11 +536,11 @@ export const printReceipt = async (req: PrintRequest): Promise<PrintResult> => {
   }
 
   // Last resort for desktop app: Chromium silent print (no dialog)
-  if (!openDrawer) {
-    const silentOk = await printViaElectronSilent(content, printerName);
+  if (!openDrawer && !networkTarget && !deviceTarget) {
+    const silentOk = await printViaElectronSilent(content, resolvedDesktopPrinterName);
     if (silentOk) return { success: true, mode: 'silent' };
-    if (printerName) {
-      lastError = `Silent print to "${printerName}" failed`;
+    if (resolvedDesktopPrinterName) {
+      lastError = `Silent print to "${resolvedDesktopPrinterName}" failed`;
     }
   }
 

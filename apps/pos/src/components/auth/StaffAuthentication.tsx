@@ -247,25 +247,25 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
 
   return (
     <div
-      className="h-screen w-screen bg-background px-4 py-4 lg:px-6 lg:py-5 xl:p-8 flex flex-col overflow-hidden"
+      className="h-screen w-screen bg-background px-3 py-3 lg:px-5 lg:py-4 xl:px-6 xl:py-5 flex flex-col overflow-hidden"
       onKeyDown={handleKeyPress}
       tabIndex={0}
     >
       {/* Header */}
-      <div className="text-center mb-4 lg:mb-6">
-        <h1 className="text-2xl lg:text-3xl font-light text-foreground tracking-tight mb-2">
+      <div className="text-center mb-3 lg:mb-4">
+        <h1 className="text-xl lg:text-2xl font-light text-foreground tracking-tight mb-1.5 truncate">
           Welcome to {terminalConfig.outlet_name}
         </h1>
-        <p className="text-sm lg:text-base text-muted-foreground">
+        <p className="text-xs lg:text-sm text-muted-foreground">
           Select your profile and enter your PIN to clock in
         </p>
       </div>
 
       {/* Staff Profiles + PIN Entry */}
-      <div className="flex-1 min-h-0 flex flex-col items-center overflow-y-auto pb-3 lg:pb-4">
-        <div className="max-w-6xl w-full mb-4 lg:mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-medium text-foreground">Staff Profiles</h2>
+      <div className="flex-1 min-h-0 flex flex-col items-center overflow-hidden pb-2">
+        <div className="max-w-6xl w-full mb-3 lg:mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-base lg:text-lg font-medium text-foreground">Staff Profiles</h2>
           </div>
 
           <div className="relative">
@@ -299,7 +299,7 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
 
             <div
               ref={profilesSliderRef}
-              className="flex gap-4 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent"
+              className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent"
             >
               {staffProfiles.map((staff) => (
                 <button
@@ -309,14 +309,14 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
                     setPin('');
                     setError('');
                   }}
-                  className={`snap-start shrink-0 w-36 sm:w-40 lg:w-44 p-3 lg:p-4 border-2 rounded-lg transition-all duration-200 text-center ${
+                  className={`snap-start shrink-0 w-32 sm:w-36 lg:w-40 p-3 border-2 rounded-lg transition-all duration-200 text-center ${
                     selectedStaffCode === staff.staff_code
                       ? 'border-primary bg-primary/5'
                       : 'border-border bg-card hover:border-border/60'
                   }`}
                 >
-                  <div className="flex flex-col items-center space-y-3">
-                    <div className={`w-12 h-12 lg:w-16 lg:h-16 rounded-full flex items-center justify-center font-medium text-base lg:text-lg ${
+                  <div className="flex flex-col items-center space-y-2.5">
+                    <div className={`w-10 h-10 lg:w-12 lg:h-12 rounded-full flex items-center justify-center font-medium text-sm lg:text-base ${
                       selectedStaffCode === staff.staff_code
                         ? 'bg-primary text-primary-foreground'
                         : 'bg-secondary text-secondary-foreground'
@@ -324,7 +324,7 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
                       {staff.display_name.charAt(0).toUpperCase()}
                     </div>
                     <div className="min-w-0 w-full">
-                      <h3 className="font-medium text-foreground truncate">{staff.display_name}</h3>
+                      <h3 className="font-medium text-sm text-foreground truncate">{staff.display_name}</h3>
                       <span className="text-xs px-2 py-1 bg-secondary text-secondary-foreground rounded font-medium mt-1 inline-block">
                         {staff.role}
                       </span>
@@ -337,14 +337,14 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
         </div>
 
         {/* PIN Entry Section */}
-        <div className="w-full max-w-sm relative mt-2 lg:mt-4">
-          <div className="text-center mb-4 lg:mb-6">
+        <div className="w-full max-w-sm relative mt-1 lg:mt-2">
+          <div className="text-center mb-3 lg:mb-4">
             {/* PIN Display */}
-            <div className="flex justify-center space-x-2.5 lg:space-x-3">
+            <div className="flex justify-center space-x-2">
               {[...Array(6)].map((_, index) => (
                 <div
                   key={index}
-                  className={`w-10 h-10 lg:w-12 lg:h-12 border-2 rounded-lg flex items-center justify-center transition-all duration-200 ${
+                  className={`w-9 h-9 lg:w-10 lg:h-10 border-2 rounded-lg flex items-center justify-center transition-all duration-200 ${
                     pin.length > index
                       ? 'border-primary bg-primary/10'
                       : 'border-border bg-card'
@@ -369,12 +369,12 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
 
           {/* PIN Pad */}
           <div>
-            <div className="grid grid-cols-3 gap-3 lg:gap-4 mb-3 lg:mb-4">
+            <div className="grid grid-cols-3 gap-2.5 lg:gap-3 mb-2.5 lg:mb-3">
               {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
                 <button
                   key={num}
                   onClick={() => handlePinInput(num.toString())}
-                  className="h-14 lg:h-16 bg-card border border-border hover:bg-accent hover:border-accent-foreground/20 rounded-lg font-medium text-lg lg:text-xl transition-all duration-200 active:scale-95"
+                  className="h-12 lg:h-14 bg-card border border-border hover:bg-accent hover:border-accent-foreground/20 rounded-lg font-medium text-base lg:text-lg transition-all duration-200 active:scale-95"
                   disabled={isAuthenticating || !selectedStaffCode}
                 >
                   {num}
@@ -383,17 +383,17 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
             </div>
 
             {/* Bottom row */}
-            <div className="grid grid-cols-3 gap-3 lg:gap-4">
+            <div className="grid grid-cols-3 gap-2.5 lg:gap-3">
               <button
                 onClick={handlePinDelete}
-                className="h-14 lg:h-16 bg-card border border-border hover:bg-accent hover:border-accent-foreground/20 rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center"
+                className="h-12 lg:h-14 bg-card border border-border hover:bg-accent hover:border-accent-foreground/20 rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center"
                 disabled={isAuthenticating || pin.length === 0 || !selectedStaffCode}
               >
                 <Trash2 className="w-6 h-6 text-muted-foreground" />
               </button>
               <button
                 onClick={() => handlePinInput('0')}
-                className="h-14 lg:h-16 bg-card border border-border hover:bg-accent hover:border-accent-foreground/20 rounded-lg font-medium text-lg lg:text-xl transition-all duration-200 active:scale-95"
+                className="h-12 lg:h-14 bg-card border border-border hover:bg-accent hover:border-accent-foreground/20 rounded-lg font-medium text-base lg:text-lg transition-all duration-200 active:scale-95"
                 disabled={isAuthenticating || !selectedStaffCode}
               >
                 0
@@ -401,7 +401,7 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
               <button
                 onClick={handleAuthentication}
                 disabled={pin.length !== 6 || isAuthenticating || !selectedStaffCode}
-                className="h-14 lg:h-16 bg-primary hover:bg-primary/90 disabled:bg-muted disabled:cursor-not-allowed text-primary-foreground rounded-lg font-medium transition-all duration-200 active:scale-95 flex items-center justify-center disabled:text-muted-foreground"
+                className="h-12 lg:h-14 bg-primary hover:bg-primary/90 disabled:bg-muted disabled:cursor-not-allowed text-primary-foreground rounded-lg font-medium transition-all duration-200 active:scale-95 flex items-center justify-center disabled:text-muted-foreground"
               >
                 {isAuthenticating ? (
                   <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary-foreground border-t-transparent"></div>
@@ -418,7 +418,7 @@ const StaffAuthentication: React.FC<StaffAuthenticationProps> = ({
       </div>
 
       {/* Footer */}
-      <div className="text-center pt-3 lg:pt-5">
+      <div className="text-center pt-2 lg:pt-3">
         <button
           onClick={onReconfigure}
           className="inline-flex items-center gap-2 px-4 py-2 bg-secondary text-secondary-foreground rounded-lg hover:bg-secondary/80 transition-all duration-200 text-sm font-medium"

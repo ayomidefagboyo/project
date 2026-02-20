@@ -433,24 +433,31 @@ const ReceiptEditor: React.FC = () => {
         })
       ]);
 
-      if (
-        businessSettingsSave.status === 'rejected' ||
-        businessSettingsSave.value.error ||
-        !businessSettingsSave.value.data
-      ) {
-        const message =
+      const businessSettingsSynced =
+        businessSettingsSave.status === 'fulfilled' &&
+        !businessSettingsSave.value.error &&
+        !!businessSettingsSave.value.data;
+      const legacyReceiptSynced = legacyReceiptSave.status === 'fulfilled';
+
+      if (!businessSettingsSynced && !legacyReceiptSynced) {
+        const businessSettingsError =
           businessSettingsSave.status === 'rejected'
             ? businessSettingsSave.reason instanceof Error
               ? businessSettingsSave.reason.message
               : 'Failed to save receipt settings'
             : businessSettingsSave.value.error || 'Failed to save receipt settings';
-        throw new Error(message);
+        throw new Error(businessSettingsError);
       }
 
-      setBusinessSettings(businessSettingsSave.value.data);
+      if (businessSettingsSynced) {
+        setBusinessSettings(businessSettingsSave.value.data!);
+      }
 
       const warnings: string[] = [];
-      if (legacyReceiptSave.status === 'rejected') {
+      if (!businessSettingsSynced) {
+        warnings.push('Full outlet sync unavailable on this terminal; saved compatibility receipt profile');
+      }
+      if (!legacyReceiptSynced) {
         warnings.push('Legacy receipt profile sync failed');
       }
       if (outletInfoSave.status === 'rejected') {
