@@ -46,6 +46,7 @@ interface VendorOption {
 }
 
 type Step = 'entry' | 'receiving' | 'done';
+type ReceivePaymentStatus = 'paid' | 'unpaid';
 
 interface ReceiveLine extends InvoiceItem {
   lineId: string;
@@ -61,6 +62,8 @@ interface HeldReceiveDraft {
   vendor_id: string;
   invoice_number: string;
   invoice_date: string;
+  payment_status: ReceivePaymentStatus;
+  payment_date: string;
   notes: string;
   items: ReceiveLine[];
   created_at: string;
@@ -72,6 +75,8 @@ const createLineId = (): string =>
 
 const createHeldDraftId = (): string =>
   `receive-hold-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const todayIsoDate = (): string => new Date().toISOString().split('T')[0];
 
 const makeLine = (seed: Partial<ReceiveLine> = {}): ReceiveLine => ({
   lineId: createLineId(),
@@ -194,15 +199,34 @@ const getInvoiceStatusDisplay = (
   const rawStatus = String(invoice.status || '').trim().toLowerCase();
   const receivedMeta = parseReceivedMeta(invoice.notes);
   const isVendorInvoice = Boolean(invoice.vendor_id);
-  const isReceivedLike =
-    rawStatus === 'received' ||
-    (isVendorInvoice && (rawStatus === 'paid' || rawStatus === 'pending') && receivedMeta !== null);
 
-  if (isReceivedLike) {
+  if (rawStatus === 'paid') {
     return {
-      key: 'received',
-      label: 'received',
-      badgeClass: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+      key: 'paid',
+      label: 'paid',
+      badgeClass: 'bg-blue-100 text-blue-700 border border-blue-200',
+    };
+  }
+
+  if (rawStatus === 'received') {
+    return isVendorInvoice
+      ? {
+          key: 'unpaid',
+          label: 'unpaid',
+          badgeClass: 'bg-amber-100 text-amber-700 border border-amber-200',
+        }
+      : {
+          key: 'received',
+          label: 'received',
+          badgeClass: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+        };
+  }
+
+  if (isVendorInvoice && rawStatus === 'pending' && receivedMeta !== null) {
+    return {
+      key: 'unpaid',
+      label: 'unpaid',
+      badgeClass: 'bg-amber-100 text-amber-700 border border-amber-200',
     };
   }
 
@@ -219,14 +243,6 @@ const getInvoiceStatusDisplay = (
       key: 'pending',
       label: 'pending',
       badgeClass: 'bg-amber-100 text-amber-700 border border-amber-200',
-    };
-  }
-
-  if (rawStatus === 'paid') {
-    return {
-      key: 'paid',
-      label: 'paid',
-      badgeClass: 'bg-blue-100 text-blue-700 border border-blue-200',
     };
   }
 
@@ -264,7 +280,9 @@ const ReceiveItemsPage: React.FC = () => {
   const [vendors, setVendors] = useState<VendorOption[]>([]);
   const [selectedVendorId, setSelectedVendorId] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
-  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
+  const [invoiceDate, setInvoiceDate] = useState(todayIsoDate());
+  const [paymentStatus, setPaymentStatus] = useState<ReceivePaymentStatus>('paid');
+  const [paymentDate, setPaymentDate] = useState(todayIsoDate());
   const [notes, setNotes] = useState('');
 
   const [items, setItems] = useState<ReceiveLine[]>([]);
@@ -618,7 +636,12 @@ const ReceiveItemsPage: React.FC = () => {
                 outlet_id: String(entry.outlet_id || currentOutlet.id),
                 vendor_id: String(entry.vendor_id || ''),
                 invoice_number: String(entry.invoice_number || ''),
-                invoice_date: String(entry.invoice_date || new Date().toISOString().split('T')[0]),
+                invoice_date: String(entry.invoice_date || todayIsoDate()),
+                payment_status:
+                  String(entry.payment_status || '').trim().toLowerCase() === 'unpaid'
+                    ? 'unpaid'
+                    : 'paid',
+                payment_date: String(entry.payment_date || entry.invoice_date || todayIsoDate()),
                 notes: String(entry.notes || ''),
                 items: entryItems,
                 created_at: String(entry.created_at || nowIso),
@@ -1147,6 +1170,8 @@ const ReceiveItemsPage: React.FC = () => {
       vendor_id: selectedVendorId,
       invoice_number: invoiceNumber.trim(),
       invoice_date: invoiceDate,
+      payment_status: paymentStatus,
+      payment_date: paymentDate,
       notes: notes.trim(),
       items: items.map((line) =>
         makeLine({
@@ -1164,7 +1189,9 @@ const ReceiveItemsPage: React.FC = () => {
     setStep('entry');
     setSelectedVendorId('');
     setInvoiceNumber('');
-    setInvoiceDate(new Date().toISOString().split('T')[0]);
+    setInvoiceDate(todayIsoDate());
+    setPaymentStatus('paid');
+    setPaymentDate(todayIsoDate());
     setNotes('');
     setItems([]);
     setReceiveResult(null);
@@ -1185,7 +1212,9 @@ const ReceiveItemsPage: React.FC = () => {
     setStep('entry');
     setSelectedVendorId(draft.vendor_id || '');
     setInvoiceNumber(draft.invoice_number || '');
-    setInvoiceDate(draft.invoice_date || new Date().toISOString().split('T')[0]);
+    setInvoiceDate(draft.invoice_date || todayIsoDate());
+    setPaymentStatus(draft.payment_status === 'unpaid' ? 'unpaid' : 'paid');
+    setPaymentDate(draft.payment_date || draft.invoice_date || todayIsoDate());
     setNotes(draft.notes || '');
     setItems(
       (draft.items || []).map((line) =>
@@ -1217,6 +1246,12 @@ const ReceiveItemsPage: React.FC = () => {
 
   const handleReceive = async () => {
     if (!currentOutlet?.id) return;
+    const normalizedPaymentDate = paymentDate.trim();
+
+    if (paymentStatus === 'unpaid' && !normalizedPaymentDate) {
+      setError('Select a payment date for unpaid invoices before receiving.');
+      return;
+    }
 
     const validLines = items
       .filter((item) => item.description.trim() && item.quantity > 0)
@@ -1268,6 +1303,7 @@ const ReceiveItemsPage: React.FC = () => {
         invoice_number: invoiceNumber || undefined,
         invoice_type: 'vendor',
         issue_date: invoiceDate,
+        due_date: paymentStatus === 'unpaid' ? normalizedPaymentDate : invoiceDate,
         notes,
         items: validItems,
       });
@@ -1300,6 +1336,8 @@ const ReceiveItemsPage: React.FC = () => {
       const result = await invoiceService.receiveGoods(invoice.id, {
         addToInventory: true,
         updateCostPrices: true,
+        paymentStatus,
+        paymentDate: paymentStatus === 'unpaid' ? normalizedPaymentDate : undefined,
         itemsReceived: itemOverrides,
       });
 
@@ -1360,7 +1398,9 @@ const ReceiveItemsPage: React.FC = () => {
     setActiveHeldDraftId(null);
     setSelectedVendorId('');
     setInvoiceNumber('');
-    setInvoiceDate(new Date().toISOString().split('T')[0]);
+    setInvoiceDate(todayIsoDate());
+    setPaymentStatus('paid');
+    setPaymentDate(todayIsoDate());
     setNotes('');
     setItems([]);
     setReceiveResult(null);
@@ -1421,7 +1461,7 @@ const ReceiveItemsPage: React.FC = () => {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-stone-500 mb-1">Supplier / Vendor</label>
                     <select
@@ -1464,6 +1504,30 @@ const ReceiveItemsPage: React.FC = () => {
                       value={notes}
                       onChange={(event) => setNotes(event.target.value)}
                       placeholder="Optional"
+                      className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-stone-500 mb-1">Payment Status</label>
+                    <select
+                      value={paymentStatus}
+                      onChange={(event) => setPaymentStatus(event.target.value as ReceivePaymentStatus)}
+                      className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                    >
+                      <option value="paid">Paid</option>
+                      <option value="unpaid">Unpaid</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-stone-500 mb-1">
+                      Payment Date{paymentStatus === 'unpaid' ? ' *' : ''}
+                    </label>
+                    <input
+                      type="date"
+                      value={paymentDate}
+                      onChange={(event) => setPaymentDate(event.target.value)}
                       className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
                     />
                   </div>
@@ -2062,6 +2126,8 @@ const ReceiveItemsPage: React.FC = () => {
           );
           const invoiceTaxAmount = Number(selectedHistoryInvoice.tax_amount || 0);
           const invoiceSubtotal = Number(selectedHistoryInvoice.subtotal || lineSubtotal);
+          const dueDateLabel =
+            selectedStatusDisplay.key === 'unpaid' ? 'Payment Date' : 'Due Date';
           return (
         <div className="fixed inset-0 z-50 bg-black/45 flex items-center justify-center p-4">
           <div className="w-full max-w-5xl max-h-[90vh] rounded-2xl border border-stone-200 bg-white shadow-2xl overflow-hidden">
@@ -2102,7 +2168,7 @@ const ReceiveItemsPage: React.FC = () => {
                   </p>
                 </div>
                 <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-wide text-stone-500">Due Date</p>
+                  <p className="text-[11px] uppercase tracking-wide text-stone-500">{dueDateLabel}</p>
                   <p className="text-sm font-semibold text-slate-800">
                     {formatDisplayDate(selectedHistoryInvoice.due_date)}
                   </p>

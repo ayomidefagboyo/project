@@ -12,8 +12,6 @@ import {
   Users,
   Activity,
   AlertTriangle,
-  CheckCircle,
-  Clock,
   ArrowRight
 } from 'lucide-react';
 import DashboardCard from '@/components/dashboard/DashboardCard';
@@ -23,6 +21,7 @@ import { useOutlet } from '@/contexts/OutletContext';
 import { vendorInvoiceService } from '@/lib/vendorInvoiceService';
 import { eodService } from '@/lib/eodServiceNew';
 import { currencyService } from '@/lib/currencyService';
+import { apiClient } from '@/lib/apiClient';
 import { VendorInvoice, DashboardView, Outlet } from '@/types';
 import VendorInvoiceTable from '@/components/invoice/VendorInvoiceTable';
 import { FeatureGate } from '@/components/subscription/FeatureGate';
@@ -56,6 +55,12 @@ const Dashboard: React.FC = () => {
 
   const [vendorInvoices, setVendorInvoices] = useState<VendorInvoice[]>([]);
   const [eodStats, setEodStats] = useState<any>(null);
+  const [invoiceStatsSummary, setInvoiceStatsSummary] = useState({
+    total: 0,
+    unpaidCount: 0,
+    unpaidAmount: 0,
+    paidCount: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedDateRange, setSelectedDateRange] = useState('this_month');
@@ -401,6 +406,44 @@ const Dashboard: React.FC = () => {
   };
 
   // Load vendor invoices and EOD data
+  const loadInvoiceStatsSummary = async (outletIds: string[]) => {
+    if (outletIds.length === 0) {
+      setInvoiceStatsSummary({ total: 0, unpaidCount: 0, unpaidAmount: 0, paidCount: 0 });
+      return;
+    }
+
+    try {
+      const responses = await Promise.all(
+        outletIds.map((outletId) =>
+          apiClient.get<any>(`/invoices/stats/summary?outlet_id=${outletId}`)
+        )
+      );
+
+      let total = 0;
+      let unpaidCount = 0;
+      let unpaidAmount = 0;
+      let paidCount = 0;
+
+      responses.forEach((response) => {
+        if (response.error || !response.data) return;
+        const vendorStats = response.data.vendor_invoices || {};
+        total += Number(vendorStats.total || 0);
+        paidCount += Number(vendorStats.paid || 0);
+        unpaidCount +=
+          Number(vendorStats.draft || 0) +
+          Number(vendorStats.pending || 0) +
+          Number(vendorStats.received || 0) +
+          Number(vendorStats.overdue || 0);
+        unpaidAmount += Number(vendorStats.unpaid_amount || 0);
+      });
+
+      setInvoiceStatsSummary({ total, unpaidCount, unpaidAmount, paidCount });
+    } catch (summaryError) {
+      console.warn('Failed to load invoice status summary:', summaryError);
+      setInvoiceStatsSummary({ total: 0, unpaidCount: 0, unpaidAmount: 0, paidCount: 0 });
+    }
+  };
+
   const loadDashboardData = async () => {
     try {
       setLoading(true);
@@ -410,6 +453,7 @@ const Dashboard: React.FC = () => {
       if (outletIds.length === 0) {
         setVendorInvoices([]);
         setEodStats(null);
+        setInvoiceStatsSummary({ total: 0, unpaidCount: 0, unpaidAmount: 0, paidCount: 0 });
         setLoading(false);
         return;
       }
@@ -422,6 +466,8 @@ const Dashboard: React.FC = () => {
       } else if (data) {
         setVendorInvoices(data);
       }
+
+      await loadInvoiceStatsSummary(outletIds);
 
       // Load EOD statistics for the selected date range
       try {
@@ -1004,11 +1050,10 @@ const Dashboard: React.FC = () => {
             change={{ value: 12.5, isPositive: false }}
           />
           <DashboardCard
-            title="Approved Reports"
-            value={eodStats?.reports_by_status?.approved || 0}
-            icon={<CheckCircle className="w-5 h-5" />}
-            subtitle={`${currentDateRange.label} completed`}
-            change={{ value: 8.1, isPositive: true }}
+            title="Unpaid Invoices"
+            value={invoiceStatsSummary.unpaidCount}
+            icon={<AlertTriangle className="w-5 h-5" />}
+            subtitle={`${currencyService.formatCurrency(invoiceStatsSummary.unpaidAmount)} outstanding`}
           />
           <DashboardCard
             title="Net Profit"

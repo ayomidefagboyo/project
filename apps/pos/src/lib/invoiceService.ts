@@ -36,6 +36,8 @@ export interface Invoice {
   subtotal: number;
   tax_amount: number;
   total: number;
+  payment_status?: 'paid' | 'unpaid';
+  payment_date?: string;
   payment_method?: string;
   created_by: string;
   created_at: string;
@@ -60,6 +62,8 @@ export interface ReceiveGoodsResponse {
   message: string;
   invoice_id: string;
   invoice_number: string;
+  payment_status?: 'paid' | 'unpaid';
+  payment_date?: string;
   products_created: Array<{
     product_id: string;
     name: string;
@@ -146,6 +150,8 @@ class InvoiceService {
   async receiveGoods(invoiceId: string, options: {
     addToInventory?: boolean;
     updateCostPrices?: boolean;
+    paymentStatus?: 'paid' | 'unpaid';
+    paymentDate?: string;
     itemsReceived?: Array<{
       item_id: string;
       quantity?: number;
@@ -162,6 +168,8 @@ class InvoiceService {
       {
         add_to_inventory: options.addToInventory ?? true,
         update_cost_prices: options.updateCostPrices ?? true,
+        payment_status: options.paymentStatus,
+        payment_date: options.paymentDate,
         items_received: options.itemsReceived,
       }
     );
