@@ -24,6 +24,13 @@ const DEFAULT_DEPARTMENTS = [
 
 const normalizeDepartmentName = (value?: string | null): string => String(value || '').trim();
 
+const formatDepartmentError = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message.replace(/^Error:\s*/i, '').replace(/^POS Error:\s*/i, '');
+  }
+  return fallback;
+};
+
 const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSuccess }) => {
   const { currentOutlet } = useOutlet();
   const { success, error: showError } = useToast();
@@ -187,7 +194,7 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
       setShowDepartmentForm(false);
     } catch (err) {
       console.error('Failed to create department from Add Product modal:', err);
-      showError('Failed to create department. Ensure migration is applied and try again.');
+      showError(formatDepartmentError(err, 'Failed to create department. Please try again.'));
     } finally {
       setIsCreatingDepartment(false);
     }

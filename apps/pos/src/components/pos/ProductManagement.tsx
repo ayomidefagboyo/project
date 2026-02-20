@@ -57,6 +57,13 @@ const normalizeDepartmentName = (value?: string | null): string => {
   return normalized;
 };
 
+const formatDepartmentError = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message.replace(/^Error:\s*/i, '').replace(/^POS Error:\s*/i, '');
+  }
+  return fallback;
+};
+
 const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementProps>(({ onShowNewRow }, ref) => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -463,7 +470,9 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
       setError(null);
     } catch (err) {
       console.error('Failed to create department:', err);
-      setDepartmentModalError('Failed to create department. Ensure migration is applied and try again.');
+      setDepartmentModalError(
+        formatDepartmentError(err, 'Failed to create department. Please try again.')
+      );
     }
   };
 
@@ -526,7 +535,9 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
       setError(null);
     } catch (err) {
       console.error('Failed to save department policy:', err);
-      setDepartmentModalError('Could not save department margin policy. Please retry.');
+      setDepartmentModalError(
+        formatDepartmentError(err, 'Could not save department margin policy. Please retry.')
+      );
     } finally {
       setDepartmentSavingId(null);
     }
