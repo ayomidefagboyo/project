@@ -1,6 +1,6 @@
 // Common types used throughout the application
 
-export type Status = 'pending' | 'paid' | 'overdue' | 'cancelled' | 'draft';
+export type Status = 'pending' | 'received' | 'paid' | 'overdue' | 'cancelled' | 'draft';
 
 export type PaymentStatus = 'pending' | 'partially_paid' | 'paid' | 'needs_clarification' | 'overdue';
 

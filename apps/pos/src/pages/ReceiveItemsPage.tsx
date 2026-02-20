@@ -169,6 +169,90 @@ const productMatchesLookup = (product: POSProduct, query: string): boolean => {
   );
 };
 
+const parseReceivedMeta = (
+  notes?: string | null
+): { date: string; receivedBy: string } | null => {
+  const text = String(notes || '');
+  const match = text.match(/\[Received on (\d{4}-\d{2}-\d{2}) by ([^\]]+)\]/i);
+  if (!match) return null;
+  return {
+    date: match[1],
+    receivedBy: match[2].trim() || 'Staff',
+  };
+};
+
+const formatDisplayDate = (value?: string | null): string => {
+  if (!value) return 'N/A';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString();
+};
+
+const getInvoiceStatusDisplay = (
+  invoice: Pick<Invoice, 'status' | 'vendor_id' | 'notes'>
+): { key: string; label: string; badgeClass: string } => {
+  const rawStatus = String(invoice.status || '').trim().toLowerCase();
+  const receivedMeta = parseReceivedMeta(invoice.notes);
+  const isVendorInvoice = Boolean(invoice.vendor_id);
+  const isReceivedLike =
+    rawStatus === 'received' ||
+    (isVendorInvoice && (rawStatus === 'paid' || rawStatus === 'pending') && receivedMeta !== null);
+
+  if (isReceivedLike) {
+    return {
+      key: 'received',
+      label: 'received',
+      badgeClass: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    };
+  }
+
+  if (rawStatus === 'draft') {
+    return {
+      key: 'draft',
+      label: 'draft',
+      badgeClass: 'bg-stone-100 text-stone-700 border border-stone-200',
+    };
+  }
+
+  if (rawStatus === 'pending') {
+    return {
+      key: 'pending',
+      label: 'pending',
+      badgeClass: 'bg-amber-100 text-amber-700 border border-amber-200',
+    };
+  }
+
+  if (rawStatus === 'paid') {
+    return {
+      key: 'paid',
+      label: 'paid',
+      badgeClass: 'bg-blue-100 text-blue-700 border border-blue-200',
+    };
+  }
+
+  if (rawStatus === 'overdue') {
+    return {
+      key: 'overdue',
+      label: 'overdue',
+      badgeClass: 'bg-red-100 text-red-700 border border-red-200',
+    };
+  }
+
+  if (rawStatus === 'cancelled') {
+    return {
+      key: 'cancelled',
+      label: 'cancelled',
+      badgeClass: 'bg-stone-200 text-stone-700 border border-stone-300',
+    };
+  }
+
+  return {
+    key: rawStatus || 'unknown',
+    label: rawStatus || 'unknown',
+    badgeClass: 'bg-stone-100 text-stone-700 border border-stone-200',
+  };
+};
+
 const ReceiveItemsPage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -227,12 +311,42 @@ const ReceiveItemsPage: React.FC = () => {
     [currentOutlet?.id]
   );
 
+  const vendorNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    vendors.forEach((vendor) => {
+      if (!vendor.id) return;
+      map.set(vendor.id, vendor.name || 'Vendor');
+    });
+    return map;
+  }, [vendors]);
+
   const formatCurrency = (amount: number): string =>
     new Intl.NumberFormat('en-NG', {
       style: 'currency',
       currency: 'NGN',
       minimumFractionDigits: 2,
     }).format(amount);
+
+  const getInvoiceVendorName = useCallback(
+    (invoice: Invoice): string => {
+      const vendorRecord =
+        invoice.vendors && typeof invoice.vendors === 'object'
+          ? (invoice.vendors as Record<string, unknown>)
+          : null;
+      const directName = String(
+        vendorRecord?.name ||
+          vendorRecord?.business_name ||
+          vendorRecord?.contact_person ||
+          ''
+      ).trim();
+      if (directName) return directName;
+      if (invoice.vendor_id && vendorNameById.has(invoice.vendor_id)) {
+        return vendorNameById.get(invoice.vendor_id) as string;
+      }
+      return 'Walk-in / No Vendor';
+    },
+    [vendorNameById]
+  );
 
   const persistHeldDrafts = useCallback(
     (nextDrafts: HeldReceiveDraft[]) => {
@@ -1428,9 +1542,6 @@ const ReceiveItemsPage: React.FC = () => {
 
                   </div>
 
-                  <div className="mt-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-xs text-stone-600">
-                    Tip: Scan continuously and press Enter. You can append quantity in the scan input using `x6`.
-                  </div>
                 </div>
               </div>
 
@@ -1897,16 +2008,24 @@ const ReceiveItemsPage: React.FC = () => {
               ) : (
                 <div className="divide-y divide-stone-100">
                   {invoiceHistory.map((invoice) => (
+                    (() => {
+                      const statusDisplay = getInvoiceStatusDisplay(invoice);
+                      const vendorName = getInvoiceVendorName(invoice);
+                      return (
                     <div
                       key={invoice.id}
                       className="px-4 lg:px-5 py-3 flex flex-wrap items-center justify-between gap-2 text-sm"
                     >
                       <div>
                         <p className="font-medium text-slate-900">{invoice.invoice_number}</p>
-                        <p className="text-xs text-stone-500">{invoice.issue_date}</p>
+                        <p className="text-xs text-stone-500">
+                          {formatDisplayDate(invoice.issue_date)} · {vendorName}
+                        </p>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="text-xs text-stone-500">{invoice.status}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${statusDisplay.badgeClass}`}>
+                          {statusDisplay.label}
+                        </span>
                         <span className="font-semibold text-slate-800">{formatCurrency(invoice.total)}</span>
                         <button
                           onClick={() => handleOpenHistoryInvoice(invoice.id)}
@@ -1917,6 +2036,8 @@ const ReceiveItemsPage: React.FC = () => {
                         </button>
                       </div>
                     </div>
+                      );
+                    })()
                   ))}
                 </div>
               )}
@@ -1926,6 +2047,22 @@ const ReceiveItemsPage: React.FC = () => {
       </div>
 
       {selectedHistoryInvoice && (
+        (() => {
+          const selectedStatusDisplay = getInvoiceStatusDisplay(selectedHistoryInvoice);
+          const selectedVendorName = getInvoiceVendorName(selectedHistoryInvoice);
+          const selectedReceiveMeta = parseReceivedMeta(selectedHistoryInvoice.notes);
+          const lineItems = selectedHistoryInvoice.invoice_items || [];
+          const lineSubtotal = lineItems.reduce(
+            (sum, item) =>
+              sum +
+              (typeof item.total === 'number'
+                ? Number(item.total)
+                : Number(item.quantity || 0) * Number(item.unit_price || 0)),
+            0
+          );
+          const invoiceTaxAmount = Number(selectedHistoryInvoice.tax_amount || 0);
+          const invoiceSubtotal = Number(selectedHistoryInvoice.subtotal || lineSubtotal);
+          return (
         <div className="fixed inset-0 z-50 bg-black/45 flex items-center justify-center p-4">
           <div className="w-full max-w-5xl max-h-[90vh] rounded-2xl border border-stone-200 bg-white shadow-2xl overflow-hidden">
             <div className="px-5 py-4 border-b border-stone-200 flex items-start justify-between gap-3">
@@ -1933,10 +2070,16 @@ const ReceiveItemsPage: React.FC = () => {
                 <h3 className="text-lg font-semibold text-slate-900">
                   Invoice {selectedHistoryInvoice.invoice_number}
                 </h3>
-                <p className="text-sm text-stone-500 mt-0.5">
-                  {selectedHistoryInvoice.issue_date} • {selectedHistoryInvoice.status} •{' '}
-                  {formatCurrency(selectedHistoryInvoice.total)}
-                </p>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${selectedStatusDisplay.badgeClass}`}>
+                    {selectedStatusDisplay.label}
+                  </span>
+                  <span className="text-sm text-stone-500">{selectedVendorName}</span>
+                  <span className="text-sm text-stone-400">•</span>
+                  <span className="text-sm font-semibold text-slate-800">
+                    {formatCurrency(selectedHistoryInvoice.total)}
+                  </span>
+                </div>
               </div>
               <button
                 onClick={() => setSelectedHistoryInvoice(null)}
@@ -1947,6 +2090,48 @@ const ReceiveItemsPage: React.FC = () => {
             </div>
 
             <div className="p-5 overflow-y-auto max-h-[58vh]">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-4">
+                <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-stone-500">Vendor</p>
+                  <p className="text-sm font-semibold text-slate-800 truncate">{selectedVendorName}</p>
+                </div>
+                <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-stone-500">Invoice Date</p>
+                  <p className="text-sm font-semibold text-slate-800">
+                    {formatDisplayDate(selectedHistoryInvoice.issue_date)}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-stone-500">Due Date</p>
+                  <p className="text-sm font-semibold text-slate-800">
+                    {formatDisplayDate(selectedHistoryInvoice.due_date)}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-stone-500">Created</p>
+                  <p className="text-sm font-semibold text-slate-800">
+                    {formatDisplayDate(selectedHistoryInvoice.created_at)}
+                  </p>
+                </div>
+              </div>
+
+              {selectedReceiveMeta && (
+                <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+                  <p className="text-xs text-emerald-700">
+                    Received on {selectedReceiveMeta.date} by {selectedReceiveMeta.receivedBy}.
+                  </p>
+                </div>
+              )}
+
+              {selectedHistoryInvoice.notes && selectedHistoryInvoice.notes.trim() && (
+                <div className="mb-4 rounded-lg border border-stone-200 bg-white px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-stone-500 mb-1">Notes</p>
+                  <p className="text-xs text-stone-700 whitespace-pre-wrap">
+                    {selectedHistoryInvoice.notes}
+                  </p>
+                </div>
+              )}
+
               {(selectedHistoryInvoice.invoice_items || []).length === 0 ? (
                 <p className="text-sm text-stone-500">No line items found on this invoice.</p>
               ) : (
@@ -1969,11 +2154,41 @@ const ReceiveItemsPage: React.FC = () => {
                             {formatCurrency(item.unit_price)}
                           </td>
                           <td className="px-3 py-2 text-right font-semibold text-slate-800">
-                            {formatCurrency(item.quantity * item.unit_price)}
+                            {formatCurrency(
+                              typeof item.total === 'number'
+                                ? item.total
+                                : item.quantity * item.unit_price
+                            )}
                           </td>
                         </tr>
                       ))}
                     </tbody>
+                    <tfoot className="bg-stone-50 border-t border-stone-200">
+                      <tr>
+                        <td className="px-3 py-2 text-xs font-semibold text-stone-600" colSpan={3}>
+                          Subtotal
+                        </td>
+                        <td className="px-3 py-2 text-right text-sm font-semibold text-slate-800">
+                          {formatCurrency(invoiceSubtotal)}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="px-3 py-2 text-xs font-semibold text-stone-600" colSpan={3}>
+                          Tax
+                        </td>
+                        <td className="px-3 py-2 text-right text-sm font-semibold text-slate-800">
+                          {formatCurrency(invoiceTaxAmount)}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="px-3 py-2 text-xs font-semibold text-stone-700" colSpan={3}>
+                          Total
+                        </td>
+                        <td className="px-3 py-2 text-right text-sm font-bold text-slate-900">
+                          {formatCurrency(selectedHistoryInvoice.total)}
+                        </td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               )}
@@ -2026,6 +2241,8 @@ const ReceiveItemsPage: React.FC = () => {
             </div>
           </div>
         </div>
+          );
+        })()
       )}
 
       {showVendorModal && (

@@ -125,6 +125,21 @@ def _insert_invoice_items_compat(supabase, items_data: List[Dict[str, Any]]):
     )
 
 
+def _has_received_marker(notes: Optional[str]) -> bool:
+    text = str(notes or '')
+    return '[Received on ' in text
+
+
+def _append_received_marker(notes: Optional[str], now_iso: str, staff_name: str) -> str:
+    marker = f"[Received on {now_iso[:10]} by {staff_name}]"
+    base = str(notes or '').strip()
+    if marker in base:
+        return base
+    if not base:
+        return marker
+    return f"{base}\n{marker}"
+
+
 # ===============================================
 # SCHEMAS
 # ===============================================
@@ -533,7 +548,7 @@ async def receive_invoice_goods(
                 detail="Only vendor invoices can be received into inventory"
             )
 
-        if invoice['status'] == 'received':
+        if invoice['status'] == 'received' or _has_received_marker(invoice.get('notes')):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invoice has already been received"
@@ -780,16 +795,39 @@ async def receive_invoice_goods(
         if stock_movements:
             supabase.table('pos_stock_movements').insert(stock_movements).execute()
 
-        # Update invoice status to 'received' (custom status beyond the enum)
-        # If the DB enum doesn't have 'received', we use 'paid' as closest match
-        supabase.table(Tables.INVOICES)\
-            .update({
-                'status': 'paid',
-                'notes': (invoice.get('notes') or '') + f"\n[Received on {now[:10]} by {current_user.get('name', 'Staff')}]",
-                'updated_at': now
-            })\
-            .eq('id', invoice_id)\
-            .execute()
+        received_notes = _append_received_marker(
+            invoice.get('notes'),
+            now,
+            str(current_user.get('name', 'Staff'))
+        )
+
+        try:
+            supabase.table(Tables.INVOICES)\
+                .update({
+                    'status': 'received',
+                    'notes': received_notes,
+                    'updated_at': now
+                })\
+                .eq('id', invoice_id)\
+                .execute()
+        except Exception as status_error:
+            message = str(status_error).lower()
+            # Backward compatibility for databases that have not added "received" to invoice_status yet.
+            if 'invalid input value for enum' in message and 'received' in message:
+                logger.warning(
+                    "invoice_status enum missing 'received'; falling back to 'pending' for invoice %s",
+                    invoice_id
+                )
+                supabase.table(Tables.INVOICES)\
+                    .update({
+                        'status': 'pending',
+                        'notes': received_notes,
+                        'updated_at': now
+                    })\
+                    .eq('id', invoice_id)\
+                    .execute()
+            else:
+                raise
 
         # Log audit
         _log_audit(supabase, invoice['outlet_id'], current_user, 'receive', 'invoice', invoice_id,
@@ -940,15 +978,17 @@ async def get_invoice_stats(
                 "total": len(vendor_invoices),
                 "draft": len([i for i in vendor_invoices if i['status'] == 'draft']),
                 "pending": len([i for i in vendor_invoices if i['status'] == 'pending']),
+                "received": len([i for i in vendor_invoices if i['status'] == 'received']),
                 "paid": len([i for i in vendor_invoices if i['status'] == 'paid']),
                 "overdue": len([i for i in vendor_invoices if i['status'] == 'overdue']),
                 "total_amount": sum(float(i.get('total', 0)) for i in vendor_invoices),
-                "unpaid_amount": sum(float(i.get('total', 0)) for i in vendor_invoices if i['status'] in ('draft', 'pending', 'overdue'))
+                "unpaid_amount": sum(float(i.get('total', 0)) for i in vendor_invoices if i['status'] in ('draft', 'pending', 'received', 'overdue'))
             },
             "customer_invoices": {
                 "total": len(customer_invoices),
                 "draft": len([i for i in customer_invoices if i['status'] == 'draft']),
                 "pending": len([i for i in customer_invoices if i['status'] == 'pending']),
+                "received": len([i for i in customer_invoices if i['status'] == 'received']),
                 "paid": len([i for i in customer_invoices if i['status'] == 'paid']),
                 "total_amount": sum(float(i.get('total', 0)) for i in customer_invoices)
             }
