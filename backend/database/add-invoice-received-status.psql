@@ -1,0 +1,23 @@
+-- Add "received" to invoice_status enum for vendor receiving workflows.
+-- Safe to run multiple times.
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_type t
+    WHERE t.typname = 'invoice_status'
+  ) THEN
+    ALTER TYPE invoice_status ADD VALUE IF NOT EXISTS 'received';
+  END IF;
+END
+$$;
+
+-- Optional backfill:
+-- Convert vendor invoices that were previously marked as paid by the
+-- receive endpoint marker into received.
+UPDATE invoices
+SET status = 'received'
+WHERE status = 'paid'
+  AND notes ILIKE '%[Received on %]%'
+  AND vendor_id IS NOT NULL;

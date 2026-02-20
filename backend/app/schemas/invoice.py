@@ -13,6 +13,7 @@ class InvoiceStatus(str, Enum):
     """Invoice status enumeration"""
     DRAFT = "draft"
     PENDING = "pending"
+    RECEIVED = "received"
     APPROVED = "approved"
     PAID = "paid"
     OVERDUE = "overdue"
@@ -170,7 +171,6 @@ class InvoiceWithOCRResponse(BaseModel):
     ocr_processing_id: str = Field(..., description="OCR processing ID")
     requires_manual_review: bool = Field(..., description="Whether manual review is required")
     suggested_actions: List[str] = Field(..., description="Suggested actions for the invoice")
-
 
 
 
