@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Monitor, Plus, Printer, Trash2, Wifi } from 'lucide-react';
 import { posService } from '../../lib/posService';
 import { printProductLabels } from '../../lib/labelPrinter';
+import { resolveLabelTemplate } from '../../lib/labelTemplate';
 import { printReceiptContent } from '../../lib/receiptPrinter';
 import { ToastContainer, useToast } from '../ui/Toast';
 import {
@@ -38,6 +39,7 @@ interface HardwareSetupTabProps {
   outletId?: string;
   terminalId?: string;
   currentUserId?: string;
+  terminalSettings?: unknown;
 }
 
 interface ScanTestResult {
@@ -115,7 +117,12 @@ const capabilitySummary = (
   return labels.length > 0 ? labels.join(', ') : 'none';
 };
 
-const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalId, currentUserId }) => {
+const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({
+  outletId,
+  terminalId,
+  currentUserId,
+  terminalSettings,
+}) => {
   const [state, setState] = useState<HardwareState>(() => createDefaultHardwareState());
   const { printers, scanners, cashDrawers, profiles } = state;
   const [lastPrintTestAt, setLastPrintTestAt] = useState<Record<string, string>>({});
@@ -132,6 +139,14 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
 
   const storageKey = getHardwareStorageKey(outletId, terminalId);
   const selectedPolicy = resolveHardwarePolicy(state, selectedPolicyId || state.terminalDefaultProfileId);
+  const activeLabelTemplate = useMemo(
+    () =>
+      resolveLabelTemplate({
+        outletId,
+        terminalSettings,
+      }),
+    [outletId, terminalSettings]
+  );
 
   useEffect(() => {
     if (!storageKey) {
@@ -589,6 +604,8 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
     }
 
     if (printAction === 'print-label') {
+      const footerFallback = `${outletId || 'COMPAZZ'} • ${terminalId || 'TERMINAL'}`;
+      const footerText = activeLabelTemplate.footerText.trim() || footerFallback;
       const opened = printProductLabels(
         [
           {
@@ -601,8 +618,9 @@ const HardwareSetupTab: React.FC<HardwareSetupTabProps> = ({ outletId, terminalI
         {
           title: `Label Test - ${printer.name}`,
           copiesPerProduct: 1,
-          showPrice: true,
-          footerText: `${outletId || 'COMPAZZ'} • ${terminalId || 'TERMINAL'}`,
+          showPrice: activeLabelTemplate.defaultShowPrice,
+          footerText,
+          template: activeLabelTemplate,
         }
       );
 
