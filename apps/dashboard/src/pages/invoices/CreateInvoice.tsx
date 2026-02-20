@@ -4,9 +4,9 @@ import { ArrowLeft, Plus, Trash2, Upload, FileText, Building2, Calendar, DollarS
 import { Button } from '@/components/ui/Button';
 import { useOutlet } from '@/contexts/OutletContext';
 import { vendorInvoiceService } from '@/lib/vendorInvoiceService';
-import { vendorService } from '@/lib/vendorService';
 import { ocrService } from '@/lib/services';
-import { Vendor, VendorInvoiceItem, ExpenseCategory } from '@/types';
+import { apiClient } from '@/lib/apiClient';
+import { Vendor, VendorInvoiceItem } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import Toast from '@/components/ui/Toast';
 
@@ -260,38 +260,52 @@ const CreateInvoice: React.FC = () => {
     
     try {
       setLoading(true);
-      
-      const { data, error } = await vendorInvoiceService.createVendorInvoice(
-        {
-          vendorId: formData.vendorId,
-          amount: formData.totalAmount,
-          dueDate: formData.dueDate,
-          description: formData.description,
-          notes: formData.notes,
-          items: formData.items.length > 0 ? formData.items : [{
-            description: formData.description || 'Invoice total',
-            quantity: 1,
-            unitPrice: formData.totalAmount,
-            total: formData.totalAmount,
-            category: 'outlet_operational' as ExpenseCategory
-          }],
-          attachments: formData.attachments
-        },
-        currentOutlet.id,
-        currentUser.id
-      );
-      
-      if (error) {
-        showToast(`Failed to create invoice: ${error}`, 'error');
-      } else if (data) {
-        showToast('Vendor invoice created successfully! It has been submitted for approval.', 'success');
+
+      const lineItems =
+        formData.items.length > 0
+          ? formData.items.map((item) => ({
+              description: item.description,
+              quantity: item.quantity,
+              unit_price: item.unitPrice,
+              category: item.category
+            }))
+          : [
+              {
+                description: formData.description || 'Invoice total',
+                quantity: 1,
+                unit_price: formData.totalAmount,
+                category: 'outlet_operational'
+              }
+            ];
+
+      const notes = [formData.description.trim(), formData.notes.trim()]
+        .filter(Boolean)
+        .join('\n');
+
+      const response = await apiClient.post<any>('/invoices/', {
+        outlet_id: currentOutlet.id,
+        vendor_id: formData.vendorId,
+        invoice_type: 'vendor',
+        invoice_number: formData.invoiceNumber?.trim() || undefined,
+        issue_date: formData.invoiceDate,
+        due_date: formData.dueDate,
+        notes: notes || undefined,
+        tax_rate: 0,
+        items: lineItems,
+        attachments: formData.attachments
+      });
+
+      if (response.error || !response.data) {
+        showToast(`Failed to create invoice: ${response.error || 'Unknown error'}`, 'error');
+      } else {
+        showToast('Vendor invoice created successfully.', 'success');
         setTimeout(() => {
           navigate('/dashboard/invoices');
-        }, 2000);
+        }, 1200);
       }
     } catch (err) {
-      console.error('Error creating vendor invoice:', err);
-      showToast('Failed to create vendor invoice. Please try again.', 'error');
+      console.error('Error creating invoice:', err);
+      showToast('Failed to create invoice. Please try again.', 'error');
     } finally {
       setLoading(false);
     }
