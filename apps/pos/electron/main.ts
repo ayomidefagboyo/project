@@ -14,8 +14,8 @@
 
 import { app, BrowserWindow, ipcMain, Menu, dialog } from 'electron';
 import * as path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { autoUpdater } from 'electron-updater';
 import { printReceipt, listPrinters, setMainWindow } from './printBridge.js';
 
 // ---------------------------------------------------------------------------
@@ -24,6 +24,8 @@ import { printReceipt, listPrinters, setMainWindow } from './printBridge.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
+const { autoUpdater } = require('electron-updater') as typeof import('electron-updater');
 
 // ---------------------------------------------------------------------------
 // Paths
