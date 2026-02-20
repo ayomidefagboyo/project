@@ -42,7 +42,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: apps/pos
-        run: npm ci
+        run: npm install --include=optional --no-audit --no-fund
 
       - name: Build desktop app
         working-directory: apps/pos
