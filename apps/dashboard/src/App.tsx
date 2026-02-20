@@ -18,7 +18,6 @@ import FutureEODReporting from '@/pages/blog/FutureEODReporting';
 import ROICalculatorGuide from '@/pages/blog/ROICalculatorGuide';
 import Dashboard from '@/pages/Dashboard';
 import Invoices from '@/pages/invoices/Invoices';
-import CreateInvoice from '@/pages/invoices/CreateInvoice';
 import InvoiceDetail from '@/pages/invoices/InvoiceDetail';
 import Expenses from '@/pages/expenses/Expenses';
 import CreateExpense from '@/pages/expenses/CreateExpense';
@@ -108,7 +107,6 @@ const AppRoutes = () => {
       }>
         <Route index element={<Dashboard />} />
         <Route path="invoices" element={<Invoices />} />
-        <Route path="invoices/create" element={<CreateInvoice />} />
         <Route path="invoices/:id" element={<InvoiceDetail />} />
         <Route path="expenses" element={<Expenses />} />
         <Route path="expenses/create" element={<CreateExpense />} />
