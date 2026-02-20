@@ -1,7 +1,7 @@
 {
   "name": "compazz-pos",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "main": "electron-dist/main.js",
   "scripts": {
@@ -15,6 +15,9 @@
     "electron:build:win": "vite build && npm run electron:compile && electron-builder --config electron-builder.json --win",
     "electron:build:mac": "vite build && npm run electron:compile && electron-builder --config electron-builder.json --mac",
     "electron:build:all": "vite build && npm run electron:compile && electron-builder --config electron-builder.json --win --mac",
+    "electron:publish:win": "vite build && npm run electron:compile && electron-builder --config electron-builder.json --win --publish always",
+    "electron:publish:mac": "vite build && npm run electron:compile && electron-builder --config electron-builder.json --mac --publish always",
+    "electron:publish:all": "vite build && npm run electron:compile && electron-builder --config electron-builder.json --win --mac --publish always",
     "electron:pack": "vite build && npm run electron:compile && electron-builder --config electron-builder.json --dir"
   },
   "dependencies": {

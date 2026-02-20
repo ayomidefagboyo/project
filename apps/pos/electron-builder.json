@@ -28,7 +28,7 @@
       }
     ],
     "icon": "build/icon.ico",
-    "artifactName": "${productName}-Setup-${version}.${ext}"
+    "artifactName": "Compazz-POS-Setup-${version}.${ext}"
   },
   "nsis": {
     "oneClick": false,
