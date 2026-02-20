@@ -15,6 +15,16 @@ import type {
 import { apiClient } from './apiClient';
 import { DataServiceBase } from '../../../../shared/services/dataServiceBase';
 
+const parseMissingSchemaColumn = (errorMessage: string): string | null => {
+  const pgrstMatch = errorMessage.match(/Could not find the ['"]([^'"]+)['"] column/i);
+  if (pgrstMatch && pgrstMatch[1]) return pgrstMatch[1];
+
+  const postgresMatch = errorMessage.match(/column ['"]([^'"]+)['"] does not exist/i);
+  if (postgresMatch && postgresMatch[1]) return postgresMatch[1];
+
+  return null;
+};
+
 export class DataService extends DataServiceBase {
   constructor() {
     super(supabase);
@@ -396,14 +406,34 @@ export class DataService extends DataServiceBase {
 
   async updateBusinessSettings(outletId: string, settings: Partial<BusinessSettings>): Promise<{ data: BusinessSettings | null; error: string | null }> {
     try {
-      const { data, error } = await supabase
-        .from(TABLES.BUSINESS_SETTINGS)
-        .upsert({ ...settings, outlet_id: outletId })
-        .select()
-        .single();
+      const payload: Record<string, unknown> = { ...(settings as Record<string, unknown>), outlet_id: outletId };
+      const strippedColumns = new Set<string>();
 
-      if (error) throw error;
-      return { data: data as BusinessSettings, error: null };
+      while (true) {
+        const { data, error } = await supabase
+          .from(TABLES.BUSINESS_SETTINGS)
+          .upsert(payload)
+          .select()
+          .single();
+
+        if (!error) {
+          return { data: data as BusinessSettings, error: null };
+        }
+
+        const errorMessage = error.message || 'Failed to update business settings';
+        const missingColumn = parseMissingSchemaColumn(errorMessage);
+        if (
+          !missingColumn ||
+          missingColumn === 'outlet_id' ||
+          strippedColumns.has(missingColumn) ||
+          !(missingColumn in payload)
+        ) {
+          throw error;
+        }
+
+        strippedColumns.add(missingColumn);
+        delete payload[missingColumn];
+      }
     } catch (error) {
       console.error('Update business settings error:', error);
       return {
