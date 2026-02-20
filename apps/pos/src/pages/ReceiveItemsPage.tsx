@@ -2,7 +2,7 @@
  * Receive Items Page
  * High-throughput receiving flow:
  * - Fast scan/search add
- * - Spreadsheet-style bulk paste
+ * - Inline line-item editing
  * - Inline product linking
  * - Quick supplier/vendor creation
  */
@@ -12,9 +12,7 @@ import {
   AlertCircle,
   ArrowRight,
   Check,
-  ClipboardPaste,
   Package,
-  Plus,
   ScanLine,
   Search,
   Sparkles,
@@ -35,6 +33,7 @@ import { vendorService, type CreateVendorData } from '../lib/vendorService';
 import { posService, type POSProduct, type POSDepartment } from '../lib/posService';
 import { useTerminalId } from '../hooks/useTerminalId';
 import { printProductLabels, type ProductLabelData } from '../lib/labelPrinter';
+import { resolveLabelTemplate } from '../lib/labelTemplate';
 import { loadHardwareState, resolveLabelPrinter } from '../lib/hardwareProfiles';
 import { resolveAdapterCapabilities, supportsHardwareAction } from '../lib/hardwareAdapters';
 import { clearMissingProductIntent, peekMissingProductIntent } from '../lib/missingProductIntent';
@@ -173,7 +172,7 @@ const productMatchesLookup = (product: POSProduct, query: string): boolean => {
 const ReceiveItemsPage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { currentOutlet } = useOutlet();
+  const { currentOutlet, businessSettings } = useOutlet();
   const { terminalId } = useTerminalId();
 
   const [step, setStep] = useState<Step>('entry');
@@ -194,12 +193,8 @@ const ReceiveItemsPage: React.FC = () => {
   const [lineSearchLoading, setLineSearchLoading] = useState(false);
 
   const [quickEntry, setQuickEntry] = useState('');
-  const [quickQuantity, setQuickQuantity] = useState('1');
-  const [quickCost, setQuickCost] = useState('');
   const [quickMatches, setQuickMatches] = useState<POSProduct[]>([]);
   const [quickMatchLoading, setQuickMatchLoading] = useState(false);
-  const [bulkText, setBulkText] = useState('');
-  const [showBulkModal, setShowBulkModal] = useState(false);
   const quickEntryInputRef = useRef<HTMLInputElement | null>(null);
 
   const [showVendorModal, setShowVendorModal] = useState(false);
@@ -417,6 +412,15 @@ const ReceiveItemsPage: React.FC = () => {
       reason: '',
     };
   }, [currentOutlet?.id, terminalId]);
+
+  const activeLabelTemplate = useMemo(
+    () =>
+      resolveLabelTemplate({
+        outletId: currentOutlet?.id,
+        terminalSettings: businessSettings?.pos_terminal_settings,
+      }),
+    [currentOutlet?.id, businessSettings?.pos_terminal_settings]
+  );
 
   const getInvoiceLabelData = useCallback((invoice: Invoice): ProductLabelData[] => {
     const itemsForLabels = invoice.invoice_items || [];
@@ -708,10 +712,6 @@ const ReceiveItemsPage: React.FC = () => {
     });
   };
 
-  const addBlankLine = () => {
-    setItems((prev) => [...prev, makeLine()]);
-  };
-
   const updateLine = <K extends keyof ReceiveLine>(lineId: string, field: K, value: ReceiveLine[K]) => {
     setItems((prev) =>
       prev.map((line) => {
@@ -791,17 +791,6 @@ const ReceiveItemsPage: React.FC = () => {
     setLineProductSearch('');
   };
 
-  const getQuickQuantity = (quickTokenQty?: number | null): number => {
-    const fallbackQty = parseNumber(quickQuantity || '1', 1);
-    const computed = quickTokenQty ?? fallbackQty;
-    return Math.max(1, computed);
-  };
-
-  const getQuickUnitPrice = (): number | undefined => {
-    const parsed = parseNumber(quickCost || '0', 0);
-    return parsed > 0 ? parsed : undefined;
-  };
-
   const focusQuickEntry = () => {
     requestAnimationFrame(() => {
       quickEntryInputRef.current?.focus();
@@ -813,8 +802,8 @@ const ReceiveItemsPage: React.FC = () => {
     const query = token.identifier;
     if (!query) return;
 
-    const qty = getQuickQuantity(token.quantity);
-    const unitPrice = getQuickUnitPrice();
+    const qty = Math.max(1, token.quantity ?? 1);
+    const unitPrice = undefined;
 
     const exact = findProductExact(query);
     if (exact) {
@@ -865,7 +854,7 @@ const ReceiveItemsPage: React.FC = () => {
     ]);
     setQuickEntry('');
     focusQuickEntry();
-  }, [findProductExact, quickMatches, quickCost, quickQuantity, resolveDepartmentPricing, searchProductsFast]);
+  }, [findProductExact, quickMatches, resolveDepartmentPricing, searchProductsFast]);
 
   const handleQuickAdd = async () => {
     await addQuickEntryToken(quickEntry);
@@ -887,134 +876,6 @@ const ReceiveItemsPage: React.FC = () => {
       navigate('/receive', { replace: true });
     }
   }, [location.search, navigate, addQuickEntryToken]);
-
-  const parseBulkRows = (input: string): ReceiveLine[] => {
-    const rows = input
-      .split(/\r?\n/)
-      .map((row) => row.trim())
-      .filter(Boolean);
-
-    if (rows.length === 0) return [];
-
-    const first = rows[0].toLowerCase();
-    const hasHeader =
-      first.includes('qty') ||
-      first.includes('quantity') ||
-      first.includes('price') ||
-      first.includes('description') ||
-      first.includes('item');
-
-    const dataRows = hasHeader ? rows.slice(1) : rows;
-
-    const parsed: ReceiveLine[] = [];
-
-    for (const row of dataRows) {
-      const cols = (row.includes('\t') ? row.split('\t') : row.split(',')).map((col) =>
-        col.trim()
-      );
-
-      if (cols.length === 0) continue;
-
-      const identifier = cols[0] || '';
-      const qty = Math.max(0, parseNumber(cols[1] || '1', 1));
-      if (!identifier || qty <= 0) continue;
-
-      const price = Math.max(0, parseNumber(cols[2] || '0', 0));
-      const category = cols[3] || '';
-      const barcode = cols[4] || '';
-      const sku = cols[5] || '';
-
-      const matched =
-        findProductExact(identifier) ||
-        findProductExact(barcode) ||
-        findProductExact(sku) ||
-        products.find(
-          (product) =>
-            product.name.toLowerCase().includes(identifier.toLowerCase()) ||
-            product.sku.toLowerCase() === identifier.toLowerCase() ||
-            (product.barcode || '').toLowerCase() === identifier.toLowerCase()
-        );
-
-      if (matched) {
-        const costPrice = price > 0 ? price : matched.cost_price || 0;
-        parsed.push(
-          makeLine({
-            description: matched.name,
-            quantity: qty,
-            unit_price: costPrice,
-            line_total: roundMoney(costPrice * qty),
-            selling_price: matched.unit_price || costPrice,
-            auto_pricing_enabled: false,
-            markup_percentage: matched.markup_percentage ?? 0,
-            product_id: matched.id,
-            sku: matched.sku || undefined,
-            barcode: matched.barcode || undefined,
-            category: category || matched.category || '',
-          })
-        );
-      } else {
-        const pricing = resolveDepartmentPricing(category);
-        const costPrice = Math.max(0, price);
-        parsed.push(
-          makeLine({
-            description: identifier,
-            quantity: qty,
-            unit_price: costPrice,
-            line_total: roundMoney(costPrice * qty),
-            selling_price: pricing.autoPricingEnabled
-              ? computeSellingFromMargin(costPrice, pricing.markup)
-              : costPrice,
-            auto_pricing_enabled: pricing.autoPricingEnabled,
-            markup_percentage: pricing.markup,
-            product_id: null,
-            category,
-            barcode: barcode || undefined,
-            sku: sku || undefined,
-          })
-        );
-      }
-    }
-
-    return parsed;
-  };
-
-  const mergeLines = (base: ReceiveLine[], incoming: ReceiveLine[]): ReceiveLine[] => {
-    if (incoming.length === 0) return base;
-
-    const next = [...base];
-    incoming.forEach((line) => {
-      if (line.product_id) {
-        const existingIndex = next.findIndex((item) => item.product_id === line.product_id);
-        if (existingIndex >= 0) {
-          const nextQty = next[existingIndex].quantity + line.quantity;
-          const nextUnit = line.unit_price > 0 ? line.unit_price : next[existingIndex].unit_price;
-          next[existingIndex] = {
-            ...next[existingIndex],
-            quantity: nextQty,
-            unit_price: nextUnit,
-            line_total: roundMoney(nextQty * nextUnit),
-            selling_price: line.selling_price || next[existingIndex].selling_price || 0,
-          };
-          return;
-        }
-      }
-      next.push(line);
-    });
-
-    return next;
-  };
-
-  const handleImportBulk = () => {
-    const parsed = parseBulkRows(bulkText);
-    if (parsed.length === 0) {
-      setError('No valid rows found in pasted data.');
-      return;
-    }
-
-    setItems((prev) => mergeLines(prev, parsed));
-    setBulkText('');
-    setShowBulkModal(false);
-  };
 
   const handleCreateVendor = async () => {
     if (!currentOutlet?.id) return;
@@ -1107,11 +968,14 @@ const ReceiveItemsPage: React.FC = () => {
     }
 
     const copies = Math.max(1, Math.min(50, Math.floor(parseNumber(labelCopies, 1))));
+    const footerFallback = `${currentOutlet?.name || 'Compazz'} • ${labelPrinterRuntime.printer?.name || 'Label Printer'}`;
+    const footerText = activeLabelTemplate.footerText.trim() || footerFallback;
     const opened = printProductLabels(labels, {
       title: `Invoice Labels - ${invoice.invoice_number || 'Invoice'}`,
       copiesPerProduct: copies,
       showPrice: includePriceOnLabels,
-      footerText: `${currentOutlet?.name || 'Compazz'} • ${labelPrinterRuntime.printer?.name || 'Label Printer'}`,
+      footerText,
+      template: activeLabelTemplate,
     });
 
     if (!opened) {
@@ -1131,11 +995,14 @@ const ReceiveItemsPage: React.FC = () => {
     }
 
     const copies = Math.max(1, Math.min(50, Math.floor(parseNumber(labelCopies, 1))));
+    const footerFallback = `${currentOutlet?.name || 'Compazz'} • ${labelPrinterRuntime.printer?.name || 'Label Printer'}`;
+    const footerText = activeLabelTemplate.footerText.trim() || footerFallback;
     const opened = printProductLabels(lastPrintedLabels, {
       title: `Receive Labels - ${receiveResult?.invoice_number || 'Invoice'}`,
       copiesPerProduct: copies,
       showPrice: includePriceOnLabels,
-      footerText: `${currentOutlet?.name || 'Compazz'} • ${labelPrinterRuntime.printer?.name || 'Label Printer'}`,
+      footerText,
+      template: activeLabelTemplate,
     });
 
     if (!opened) {
@@ -1190,8 +1057,6 @@ const ReceiveItemsPage: React.FC = () => {
     setLastPrintedLabels([]);
     setError('');
     setQuickEntry('');
-    setQuickQuantity('1');
-    setQuickCost('');
     setLineSearchTargetId(null);
     setLineProductSearch('');
     setActiveHeldDraftId(null);
@@ -1220,8 +1085,6 @@ const ReceiveItemsPage: React.FC = () => {
     setLastPrintedLabels([]);
     setError('');
     setQuickEntry('');
-    setQuickQuantity('1');
-    setQuickCost('');
     setLineSearchTargetId(null);
     setLineProductSearch('');
     setSelectedHistoryInvoice(null);
@@ -1374,6 +1237,10 @@ const ReceiveItemsPage: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    setIncludePriceOnLabels(activeLabelTemplate.defaultShowPrice);
+  }, [activeLabelTemplate.defaultShowPrice]);
+
   const resetForm = useCallback(() => {
     setStep('entry');
     setActiveHeldDraftId(null);
@@ -1386,15 +1253,13 @@ const ReceiveItemsPage: React.FC = () => {
     setLastPrintedLabels([]);
     setError('');
     setQuickEntry('');
-    setQuickQuantity('1');
-    setQuickCost('');
     setLabelCopies('1');
-    setIncludePriceOnLabels(true);
+    setIncludePriceOnLabels(activeLabelTemplate.defaultShowPrice);
     setLineSearchTargetId(null);
     setLineProductSearch('');
     setSelectedHistoryInvoice(null);
     setHistoryLoadingInvoiceId(null);
-  }, []);
+  }, [activeLabelTemplate.defaultShowPrice]);
 
   useEffect(() => {
     const handleHeaderAction = (event: Event) => {
@@ -1536,8 +1401,7 @@ const ReceiveItemsPage: React.FC = () => {
                               onClick={() => {
                                 upsertLineFromProduct(
                                   product,
-                                  getQuickQuantity(quickToken.quantity),
-                                  getQuickUnitPrice()
+                                  Math.max(1, quickToken.quantity ?? 1)
                                 );
                                 setQuickEntry('');
                                 focusQuickEntry();
@@ -1562,51 +1426,10 @@ const ReceiveItemsPage: React.FC = () => {
                       )}
                     </div>
 
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                      <div>
-                        <label className="block text-[11px] font-medium text-stone-500 mb-1">Quick Qty</label>
-                        <input
-                          type="number"
-                          min="1"
-                          value={quickQuantity}
-                          onChange={(event) => setQuickQuantity(event.target.value)}
-                          className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-medium text-stone-500 mb-1">Quick Cost (optional)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={quickCost}
-                          onChange={(event) => setQuickCost(event.target.value)}
-                          className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                        />
-                      </div>
-                      <div className="self-end">
-                        <button
-                          onClick={addBlankLine}
-                          className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white hover:bg-stone-100 text-xs font-medium text-slate-700 inline-flex items-center justify-center gap-1.5"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          Blank Row
-                        </button>
-                      </div>
-                      <div className="self-end">
-                        <button
-                          onClick={() => setShowBulkModal(true)}
-                          className="w-full px-3 py-2.5 rounded-lg border border-stone-300 bg-white hover:bg-stone-100 text-xs font-medium text-slate-700 inline-flex items-center justify-center gap-1.5"
-                        >
-                          <ClipboardPaste className="w-3.5 h-3.5" />
-                          Paste Table
-                        </button>
-                      </div>
-                    </div>
                   </div>
 
                   <div className="mt-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 text-xs text-stone-600">
-                    Tip: Scan continuously and press Enter. You can also append quantity like `x6`, or paste rows from Excel/Sheets.
+                    Tip: Scan continuously and press Enter. You can append quantity in the scan input using `x6`.
                   </div>
                 </div>
               </div>
@@ -1678,7 +1501,7 @@ const ReceiveItemsPage: React.FC = () => {
                     <Package className="w-10 h-10 mx-auto text-stone-300 mb-2" />
                     <p className="text-sm font-medium text-slate-700">No items added yet</p>
                     <p className="text-xs text-stone-500 mt-1">
-                      Scan/search inventory or paste rows to begin receiving.
+                      Scan/search inventory to begin receiving.
                     </p>
                   </div>
                 ) : (
@@ -2200,48 +2023,6 @@ const ReceiveItemsPage: React.FC = () => {
                   Print Invoice Labels
                 </button>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showBulkModal && (
-        <div className="fixed inset-0 z-50 bg-black/45 flex items-center justify-center p-4">
-          <div className="w-full max-w-3xl rounded-2xl border border-stone-200 bg-white shadow-2xl">
-            <div className="px-5 py-4 border-b border-stone-200 flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-900">Paste Rows from Spreadsheet</h3>
-                <p className="text-xs text-stone-500 mt-0.5">
-                  Format: Item/Barcode, Qty, Cost, Category (optional), Barcode (optional), SKU (optional)
-                </p>
-              </div>
-              <button onClick={() => setShowBulkModal(false)} className="text-stone-500 hover:text-slate-900">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-5">
-              <textarea
-                value={bulkText}
-                onChange={(event) => setBulkText(event.target.value)}
-                placeholder={`Item Name\tQty\tCost\tCategory\n1234567890123\t12\t950\tBeverages\nSKU-001\t4\t2800\tGroceries`}
-                className="w-full min-h-[220px] rounded-xl border border-stone-300 bg-white px-3 py-3 text-sm text-slate-800 font-mono focus:outline-none focus:ring-2 focus:ring-slate-300"
-              />
-            </div>
-
-            <div className="px-5 py-4 border-t border-stone-200 flex items-center justify-end gap-2">
-              <button
-                onClick={() => setShowBulkModal(false)}
-                className="px-4 py-2.5 rounded-lg border border-stone-300 bg-white hover:bg-stone-100 text-sm font-medium text-slate-700"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleImportBulk}
-                className="px-4 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-stone-100 text-sm font-semibold"
-              >
-                Import Rows
-              </button>
             </div>
           </div>
         </div>

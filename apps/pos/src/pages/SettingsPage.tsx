@@ -11,12 +11,14 @@ import {
   Monitor,
   Users,
   Store,
+  Tag,
   Moon,
   Sun,
   Laptop,
   CheckCircle
 } from 'lucide-react';
 import ReceiptEditor from '../components/settings/ReceiptEditor';
+import LabelDesigner from '../components/settings/LabelDesigner';
 import HardwareSetupTab from '../components/settings/HardwareSetupTab';
 import { useOutlet } from '../contexts/OutletContext';
 import { useTerminalId } from '../hooks/useTerminalId';
@@ -44,6 +46,13 @@ const settingsTabs: SettingsTab[] = [
     label: 'Receipt Customization',
     icon: Receipt,
     description: 'Customize receipt layout and branding',
+    color: 'blue'
+  },
+  {
+    id: 'labels',
+    label: 'Label Designer',
+    icon: Tag,
+    description: 'Customize product label layout and defaults',
     color: 'blue'
   },
   {
@@ -203,6 +212,8 @@ const SettingsPage: React.FC = () => {
     switch (activeTab) {
       case 'receipts':
         return <ReceiptCustomizationTab />;
+      case 'labels':
+        return <LabelDesignerTab />;
       case 'appearance':
         return (
           <AppearanceTab
@@ -222,6 +233,7 @@ const SettingsPage: React.FC = () => {
             outletId={currentOutlet?.id}
             terminalId={terminalId || undefined}
             currentUserId={currentUser?.id}
+            terminalSettings={businessSettings?.pos_terminal_settings}
           />
         );
       case 'terminal':
@@ -296,6 +308,12 @@ const ReceiptCustomizationTab = () => (
         <ReceiptEditor />
       </div>
     </div>
+  </div>
+);
+
+const LabelDesignerTab = () => (
+  <div className="h-full">
+    <LabelDesigner />
   </div>
 );
 

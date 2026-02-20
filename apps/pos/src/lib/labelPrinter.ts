@@ -1,3 +1,9 @@
+import {
+  defaultLabelTemplate,
+  mergeLabelTemplate,
+  type LabelTemplate,
+} from './labelTemplate';
+
 export interface ProductLabelData {
   name: string;
   sku?: string;
@@ -11,6 +17,7 @@ export interface ProductLabelPrintOptions {
   copiesPerProduct?: number;
   showPrice?: boolean;
   footerText?: string;
+  template?: Partial<LabelTemplate>;
 }
 
 const escapeHtml = (value: string): string =>
@@ -34,6 +41,20 @@ const normalizeCopies = (value: unknown, fallback = 1): number => {
   return Math.min(200, Math.floor(parsed));
 };
 
+const resolveMetaText = (label: ProductLabelData, template: LabelTemplate): string => {
+  if (!template.showCode) return '';
+
+  if (template.codeSource === 'barcode') {
+    return label.barcode || label.sku || 'NO-CODE';
+  }
+
+  if (template.codeSource === 'sku') {
+    return label.sku || label.barcode || 'NO-CODE';
+  }
+
+  return label.barcode || label.sku || 'NO-CODE';
+};
+
 const expandLabelCopies = (
   labels: ProductLabelData[],
   copiesPerProduct: number
@@ -54,10 +75,18 @@ export const printProductLabels = (
   labels: ProductLabelData[],
   options: ProductLabelPrintOptions = {}
 ): boolean => {
+  const template = mergeLabelTemplate(defaultLabelTemplate, options.template);
   const title = options.title || 'Product Labels';
   const copiesPerProduct = normalizeCopies(options.copiesPerProduct, 1);
-  const showPrice = options.showPrice ?? false;
-  const footerText = options.footerText || 'Compazz POS';
+  const showPrice = options.showPrice ?? template.defaultShowPrice;
+  const footerText = options.footerText ?? template.footerText;
+  const showFooter = template.showFooter && footerText.trim().length > 0;
+  const fontScale = Math.max(0.7, template.fontScalePercent / 100);
+
+  const nameFontSize = Number((14 * fontScale).toFixed(2));
+  const priceFontSize = Number((13 * fontScale).toFixed(2));
+  const metaFontSize = Number((11 * fontScale).toFixed(2));
+  const footerFontSize = Number((10 * fontScale).toFixed(2));
 
   const validLabels = labels
     .map((label) => ({
@@ -78,18 +107,24 @@ export const printProductLabels = (
 
   const labelsHtml = printableLabels
     .map((label) => {
-      const skuOrBarcode = label.barcode || label.sku || '';
+      const metaText = resolveMetaText(label, template);
       const priceLine =
         showPrice && typeof label.price === 'number'
           ? `<div class="price">${escapeHtml(formatCurrency(label.price))}</div>`
           : '';
+      const metaLine = template.showCode
+        ? `<div class="meta">${escapeHtml(metaText)}</div>`
+        : '';
+      const footerLine = showFooter
+        ? `<div class="footer">${escapeHtml(footerText)}</div>`
+        : '';
 
       return `
         <div class="label">
           <div class="name">${escapeHtml(label.name)}</div>
           ${priceLine}
-          <div class="meta">${escapeHtml(skuOrBarcode || 'NO-CODE')}</div>
-          <div class="footer">${escapeHtml(footerText)}</div>
+          ${metaLine}
+          ${footerLine}
         </div>
       `;
     })
@@ -102,49 +137,50 @@ export const printProductLabels = (
         <title>${escapeHtml(title)}</title>
         <meta charset="utf-8" />
         <style>
-          @page { margin: 6mm; }
+          @page { margin: ${template.pageMarginMm}mm; }
           body {
             margin: 0;
-            padding: 10px;
+            padding: ${template.pageMarginMm}mm;
             font-family: "Segoe UI", Arial, sans-serif;
             background: #fff;
             color: #111827;
           }
           .sheet {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-            gap: 8px;
+            grid-template-columns: repeat(${template.columns}, minmax(0, 1fr));
+            gap: ${template.gapMm}mm;
           }
           .label {
-            min-height: 88px;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            padding: 8px 9px;
+            min-height: ${template.minHeightMm}mm;
+            border: ${template.showBorder ? `1px solid ${template.borderColor}` : '1px solid transparent'};
+            border-radius: ${template.borderRadiusPx}px;
+            padding: ${template.paddingMm}mm;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
             box-sizing: border-box;
+            overflow: hidden;
           }
           .name {
-            font-size: 14px;
+            font-size: ${nameFontSize}px;
             font-weight: 700;
             line-height: 1.2;
             word-break: break-word;
           }
           .price {
             margin-top: 2px;
-            font-size: 13px;
+            font-size: ${priceFontSize}px;
             font-weight: 700;
           }
           .meta {
             margin-top: 4px;
             font-family: "Courier New", monospace;
-            font-size: 11px;
+            font-size: ${metaFontSize}px;
             letter-spacing: 0.04em;
           }
           .footer {
             margin-top: 4px;
-            font-size: 10px;
+            font-size: ${footerFontSize}px;
             color: #6b7280;
             text-transform: uppercase;
             letter-spacing: 0.06em;
