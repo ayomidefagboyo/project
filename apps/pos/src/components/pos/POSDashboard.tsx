@@ -37,7 +37,6 @@ import ReceiveStockModal from './modals/ReceiveStockModal';
 import StockTransferModal from './modals/StockTransferModal';
 import StockAdjustmentModal from './modals/StockAdjustmentModal';
 import StockReportModal from './modals/StockReportModal';
-import ItemHistoryModal from './modals/ItemHistoryModal';
 
 // Staff Management Modals
 import StaffManagementModal from './modals/StaffManagementModal';
@@ -67,7 +66,6 @@ export interface POSDashboardHandle {
   addToCart: (product: POSProduct, quantity?: number) => void;
   openCustomerSearch: () => void;
   openTransactionHistory: () => void;
-  openItemHistory: (product: POSProduct) => void;
 }
 
 interface HeldSale {
@@ -156,7 +154,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   const [showStockTransferModal, setShowStockTransferModal] = useState(false);
   const [showStockAdjustmentModal, setShowStockAdjustmentModal] = useState(false);
   const [showStockReportModal, setShowStockReportModal] = useState(false);
-  const [itemHistoryProduct, setItemHistoryProduct] = useState<POSProduct | null>(null);
 
   // Transaction History
   const [showTransactionHistory, setShowTransactionHistory] = useState(false);
@@ -880,7 +877,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
     addToCart,
     openCustomerSearch: () => setShowCustomerSearch(true),
     openTransactionHistory: () => setShowTransactionHistory(true),
-    openItemHistory: (product: POSProduct) => setItemHistoryProduct(product),
   }));
 
   /**
@@ -1715,7 +1711,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
                 onUpdateDiscount={updateCartItemDiscount}
                 onRemoveItem={removeFromCart}
                 onClearCart={clearCart}
-                onViewItemHistory={setItemHistoryProduct}
               />
             </div>
           </div>
@@ -2144,12 +2139,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
         <StockReportModal
           isOpen={showStockReportModal}
           onClose={() => setShowStockReportModal(false)}
-        />
-
-        <ItemHistoryModal
-          isOpen={!!itemHistoryProduct}
-          onClose={() => setItemHistoryProduct(null)}
-          product={itemHistoryProduct}
         />
 
         {/* Transaction History Modal */}

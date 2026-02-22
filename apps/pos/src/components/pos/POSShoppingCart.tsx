@@ -9,10 +9,8 @@ import {
   Plus,
   Minus,
   Trash2,
-  History,
 } from 'lucide-react';
 import type { CartItem } from './POSDashboard';
-import type { POSProduct } from '../../lib/posService';
 
 interface CartTotals {
   subtotal: number;
@@ -28,14 +26,12 @@ interface POSShoppingCartProps {
   onUpdateDiscount: (productId: string, discount: number) => void;
   onRemoveItem: (productId: string) => void;
   onClearCart: () => void;
-  onViewItemHistory?: (product: POSProduct) => void;
 }
 
 const POSShoppingCart: React.FC<POSShoppingCartProps> = ({
   cart,
   onUpdateQuantity,
   onRemoveItem,
-  onViewItemHistory,
 }) => {
   const formatCurrency = (amount: number): string => {
     return new Intl.NumberFormat('en-NG', {
@@ -109,19 +105,6 @@ const POSShoppingCart: React.FC<POSShoppingCartProps> = ({
           <div className="font-bold text-base text-slate-900 px-2 flex-shrink-0 min-w-[7rem] text-right">
             {formatCurrency(calculateItemTotal(item))}
           </div>
-
-          {onViewItemHistory && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onViewItemHistory(item.product);
-              }}
-              className="ml-1 w-9 h-9 flex items-center justify-center text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors flex-shrink-0"
-              title="View item history"
-            >
-              <History className="h-4 w-4" />
-            </button>
-          )}
 
           <button
             onClick={() => onRemoveItem(item.product.id)}
