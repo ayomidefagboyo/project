@@ -18,9 +18,11 @@ import {
   MoreHorizontal,
   ArrowLeft,
   X,
-  Building2
+  Building2,
+  History,
 } from 'lucide-react';
 import { posService, type POSProduct, type POSDepartment } from '../../lib/posService';
+import ItemHistoryModal from './modals/ItemHistoryModal';
 import { clearMissingProductIntent, peekMissingProductIntent } from '../../lib/missingProductIntent';
 import { useOutlet } from '../../contexts/OutletContext';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -82,6 +84,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
   const [showNewRow, setShowNewRow] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
   const [showDepartmentModal, setShowDepartmentModal] = useState(false);
+  const [itemHistoryProduct, setItemHistoryProduct] = useState<POSProduct | null>(null);
   const [departmentModalError, setDepartmentModalError] = useState<string | null>(null);
   const [departmentCreateForm, setDepartmentCreateForm] = useState({
     name: '',
@@ -863,13 +866,22 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                     </button>
                   </>
                 ) : (
-                  <button
-                    onClick={() => startEditingProduct(product.id)}
-                    className="p-1 text-slate-600 hover:bg-slate-100 rounded transition-colors"
-                    title="Edit"
-                  >
-                    <Edit3 className="w-4 h-4" />
-                  </button>
+                  <>
+                    <button
+                      onClick={() => startEditingProduct(product.id)}
+                      className="p-1 text-slate-600 hover:bg-slate-100 rounded transition-colors"
+                      title="Edit"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => setItemHistoryProduct(product)}
+                      className="p-1 text-blue-500 hover:bg-blue-100 rounded transition-colors"
+                      title="View item history"
+                    >
+                      <History className="w-4 h-4" />
+                    </button>
+                  </>
                 )}
               </div>
             </td>
@@ -1363,6 +1375,12 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
             </div>
           </div>
         )}
+
+        <ItemHistoryModal
+          isOpen={!!itemHistoryProduct}
+          onClose={() => setItemHistoryProduct(null)}
+          product={itemHistoryProduct}
+        />
       </div>
     </div>
   );

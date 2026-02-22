@@ -11,7 +11,7 @@ import TransferToOutletPage from './pages/TransferToOutletPage';
 import PharmacyPatientsPage from './pages/PharmacyPatientsPage';
 import AppLayout from './components/layout/AppLayout';
 import { OutletProvider, useOutlet } from './contexts/OutletContext';
-import { Upload, Download, Plus, Wifi, WifiOff, ChevronDown, FileText, RotateCcw, History } from 'lucide-react';
+import { Upload, Download, Plus, Wifi, WifiOff, ChevronDown, FileText, RotateCcw } from 'lucide-react';
 import ImportProductsModal from './components/pos/ImportProductsModal';
 import { exportProducts } from './lib/inventoryImportExport';
 import { posService, type POSProduct } from './lib/posService';
@@ -661,63 +661,45 @@ function AppContent() {
               className="absolute top-full left-0 right-0 bg-white border border-stone-200 rounded-xl shadow-lg z-20 mt-1 max-h-80 overflow-y-auto"
             >
               {searchResults.map((product, index) => (
-                <div
+                <button
                   key={product.id}
                   ref={(el) => {
                     searchResultItemRefs.current[index] = el;
                   }}
+                  onClick={() => addProductFromSearch(product)}
                   onMouseEnter={() => setHighlightedSearchIndex(index)}
-                  className={`flex items-center border-b border-stone-100 last:border-b-0 ${
+                  className={`w-full flex items-center px-3 py-2.5 transition-colors text-left border-b border-stone-100 last:border-b-0 ${
                     index === highlightedSearchIndex
                       ? 'bg-brand-soft border-brand-soft'
                       : 'hover:bg-stone-50'
                   }`}
                 >
-                  <button
-                    onClick={() => addProductFromSearch(product)}
-                    className="flex-1 flex items-center px-3 py-2.5 transition-colors text-left"
-                  >
-                    <div className="flex items-center justify-between w-full space-x-3">
-                      {/* Left: name + identifiers, single line with ellipsis */}
-                      <div className="flex-1 min-w-0 text-sm text-stone-600">
-                        <span className="font-semibold text-slate-900 truncate inline-block max-w-[52%] align-middle">
-                          {product.name}
-                        </span>
-                        <span className="mx-1 text-stone-400">·</span>
-                        <span className="truncate inline-block max-w-[20%] align-middle">
-                          {product.sku}
-                        </span>
-                        {product.barcode && (
-                          <>
-                            <span className="mx-1 text-stone-400">·</span>
-                            <span className="truncate inline-block max-w-[20%] align-middle text-stone-500">
-                              {product.barcode}
-                            </span>
-                          </>
-                        )}
-                      </div>
-
-                      {/* Right: price */}
-                      <div className="flex-shrink-0 text-base font-bold text-slate-900">
-                        {formatCurrency(product.unit_price)}
-                      </div>
+                  <div className="flex items-center justify-between w-full space-x-3">
+                    {/* Left: name + identifiers, single line with ellipsis */}
+                    <div className="flex-1 min-w-0 text-sm text-stone-600">
+                      <span className="font-semibold text-slate-900 truncate inline-block max-w-[52%] align-middle">
+                        {product.name}
+                      </span>
+                      <span className="mx-1 text-stone-400">·</span>
+                      <span className="truncate inline-block max-w-[20%] align-middle">
+                        {product.sku}
+                      </span>
+                      {product.barcode && (
+                        <>
+                          <span className="mx-1 text-stone-400">·</span>
+                          <span className="truncate inline-block max-w-[20%] align-middle text-stone-500">
+                            {product.barcode}
+                          </span>
+                        </>
+                      )}
                     </div>
-                  </button>
 
-                  {/* Item History Button */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowSearchDropdown(false);
-                      setSearchQuery('');
-                      posDashboardRef.current?.openItemHistory(product);
-                    }}
-                    className="flex-shrink-0 w-10 h-10 flex items-center justify-center text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors mr-1"
-                    title="View item history"
-                  >
-                    <History className="h-4 w-4" />
-                  </button>
-                </div>
+                    {/* Right: price */}
+                    <div className="flex-shrink-0 text-base font-bold text-slate-900">
+                      {formatCurrency(product.unit_price)}
+                    </div>
+                  </div>
+                </button>
               ))}
             </div>
           </>
