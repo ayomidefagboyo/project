@@ -2551,7 +2551,9 @@ async def get_stock_movements(
         if date_from:
             query = query.gte('movement_date', date_from.isoformat())
         if date_to:
-            query = query.lte('movement_date', date_to.isoformat())
+            # Keep date_to inclusive for the full calendar day by querying
+            # movement_date < (date_to + 1 day) at midnight.
+            query = query.lt('movement_date', (date_to + timedelta(days=1)).isoformat())
 
         query = query.limit(limit).order('movement_date', desc=True)
 

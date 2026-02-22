@@ -367,13 +367,6 @@ const ReceiptEditor: React.FC = () => {
     void loadSettings();
   }, [currentOutlet?.id, businessSettings?.pos_terminal_settings]);
 
-  // Cache template to localStorage whenever it changes (for offline fallback)
-  useEffect(() => {
-    if (template && currentOutlet?.id) {
-      writeCachedReceiptTemplate(currentOutlet.id, template);
-    }
-  }, [template, currentOutlet?.id]);
-
   // Save template changes to backend
   const saveTemplate = async () => {
     if (!currentOutlet?.id) {
