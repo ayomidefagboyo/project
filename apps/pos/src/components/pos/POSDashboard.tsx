@@ -12,6 +12,7 @@ import {
   X,
   User,
   Check,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface TerminalConfig {
@@ -113,6 +114,12 @@ interface LocalReceiptPayload {
   pendingSync: boolean;
 }
 
+interface DiscountOverrideGrant {
+  sessionToken: string;
+  expiresAt: string;
+  approver: Pick<StaffProfile, 'id' | 'display_name' | 'role' | 'permissions'>;
+}
+
 const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ terminalConfig }, ref) => {
   // Context and state
   const { currentUser, currentOutlet } = useOutlet();
@@ -174,6 +181,12 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
   const [showClockOutModal, setShowClockOutModal] = useState(false);
   const [showStaffManagement, setShowStaffManagement] = useState(false);
   const [showManagerLogin, setShowManagerLogin] = useState(false);
+  const [showDiscountApprovalModal, setShowDiscountApprovalModal] = useState(false);
+  const [discountApprovalStaffCode, setDiscountApprovalStaffCode] = useState('');
+  const [discountApprovalPin, setDiscountApprovalPin] = useState('');
+  const [discountApprovalError, setDiscountApprovalError] = useState<string | null>(null);
+  const [isDiscountApprovalLoading, setIsDiscountApprovalLoading] = useState(false);
+  const [discountOverrideGrant, setDiscountOverrideGrant] = useState<DiscountOverrideGrant | null>(null);
 
   // Simple staff loading function
   const loadStaffProfiles = async () => {
@@ -193,6 +206,11 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
       loadStaffProfiles();
     }
   }, [currentOutlet?.id]);
+
+  useEffect(() => {
+    // Discount approvals are transaction-scoped for safety.
+    setDiscountOverrideGrant(null);
+  }, [currentOutlet?.id, currentStaff?.id]);
 
   // Helper function to format currency
   const formatCurrency = (amount: number): string => {
@@ -776,6 +794,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     // Clear cart and reset POS state
     setCart([]);
     setSelectedCustomer(null);
+    setDiscountOverrideGrant(null);
   };
 
   // Handle manager login success
@@ -783,6 +802,81 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     setShowManagerLogin(false);
     // The OutletContext will update currentUser automatically
     // This will trigger a re-render with proper authentication state
+  };
+
+  const closeDiscountApprovalModal = () => {
+    setShowDiscountApprovalModal(false);
+    setDiscountApprovalError(null);
+    setDiscountApprovalStaffCode('');
+    setDiscountApprovalPin('');
+    setIsDiscountApprovalLoading(false);
+  };
+
+  const requestDiscountApproval = () => {
+    setDiscountApprovalError(null);
+    setShowDiscountApprovalModal(true);
+  };
+
+  const authorizeDiscountForCurrentSale = async () => {
+    if (!currentOutlet?.id) return;
+
+    const staffCode = discountApprovalStaffCode.trim().toUpperCase();
+    const pin = discountApprovalPin.trim();
+    if (!staffCode || !pin) {
+      setDiscountApprovalError('Staff code and PIN are required.');
+      return;
+    }
+
+    setIsDiscountApprovalLoading(true);
+    setDiscountApprovalError(null);
+    try {
+      const authResponse = await staffService.authenticateWithPin({
+        staff_code: staffCode,
+        pin,
+        outlet_id: currentOutlet.id,
+      });
+
+      const approverRole = String(authResponse.staff_profile.role || '').toLowerCase();
+      const approverPermissions = (authResponse.staff_profile.permissions || []).map((permission) =>
+        String(permission || '').trim().toLowerCase()
+      );
+      const allowedRoles = new Set([
+        'manager',
+        'pharmacist',
+        'accountant',
+        'outlet_admin',
+        'business_owner',
+        'super_admin',
+        'admin',
+      ]);
+      const canApproveDiscount =
+        allowedRoles.has(approverRole) ||
+        approverPermissions.includes('apply_discounts') ||
+        approverPermissions.includes('manage_discounts');
+
+      if (!canApproveDiscount) {
+        setDiscountApprovalError('Selected staff cannot authorize discounts.');
+        return;
+      }
+
+      setDiscountOverrideGrant({
+        sessionToken: authResponse.session_token,
+        expiresAt: authResponse.expires_at,
+        approver: {
+          id: authResponse.staff_profile.id,
+          display_name: authResponse.staff_profile.display_name,
+          role: authResponse.staff_profile.role,
+          permissions: authResponse.staff_profile.permissions,
+        },
+      });
+      closeDiscountApprovalModal();
+      success(`Discount approved by ${authResponse.staff_profile.display_name}`);
+    } catch (err) {
+      logger.error('Discount approval failed:', err);
+      setDiscountApprovalError('Invalid staff code or PIN.');
+    } finally {
+      setIsDiscountApprovalLoading(false);
+    }
   };
 
   /**
@@ -939,6 +1033,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     setActivePayments({});
     setTenderModal(null);
     setRestoredHeldReceiptId(null);
+    setDiscountOverrideGrant(null);
   };
 
   /**
@@ -1412,6 +1507,16 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
 
     try {
       const totals = calculateCartTotals();
+      const hasDiscountedItems = cart.some((item) => item.discount > 0);
+      if (hasDiscountedItems && !canApplyDiscount) {
+        error('Discount approval is required from manager/pharmacist before payment.', 5000);
+        requestDiscountApproval();
+        return;
+      }
+      const discountAuthorizerSessionToken =
+        hasDiscountedItems && !hasRoleDiscountPrivilege
+          ? discountOverrideGrant?.sessionToken
+          : undefined;
 
       // Prepare transaction items
       const items = cart.map(item => ({
@@ -1430,7 +1535,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
         payment_method: paymentMethod,
         tendered_amount: tenderedAmount,
         // We already send per-line discounts; keep transaction-level discount 0 for now
-        discount_amount: 0
+        discount_amount: 0,
+        discount_authorizer_session_token: discountAuthorizerSessionToken,
       };
 
       // Process transaction (online or offline)
@@ -1467,6 +1573,16 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     const hardwarePolicy = terminalHardware.policy;
 
     const totals = calculateCartTotals();
+    const hasDiscountedItems = cart.some((item) => item.discount > 0);
+    if (hasDiscountedItems && !canApplyDiscount) {
+      error('Discount approval is required from manager/pharmacist before completing sale.', 5000);
+      requestDiscountApproval();
+      return;
+    }
+    const discountAuthorizerSessionToken =
+      hasDiscountedItems && !hasRoleDiscountPrivilege
+        ? discountOverrideGrant?.sessionToken
+        : undefined;
     const totalPaid = (activePayments.cash || 0) + (activePayments.card || 0) + (activePayments.transfer || 0);
 
     if (totalPaid < totals.total) {
@@ -1529,6 +1645,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
       payment_method: primaryPaymentMethod,
       tendered_amount: totalPaid,
       discount_amount: 0,
+      discount_authorizer_session_token: discountAuthorizerSessionToken,
       split_payments: splitPaymentPayload,
       customer_id: selectedCustomer?.id,
       customer_name: selectedCustomer?.name,
@@ -1645,6 +1762,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
   // Get unique categories for filter
 
   const cartTotals = calculateCartTotals();
+  const isElectronDesktop = typeof window !== 'undefined' && Boolean(window.compazzDesktop?.isElectron);
+  const [desktopUpdateStatus, setDesktopUpdateStatus] = useState<DesktopUpdateStatus>({ state: 'idle' });
   const effectiveStaffRole = String(currentStaff?.role || currentUser?.role || '').toLowerCase();
   const discountPrivilegedRoles = new Set([
     'manager',
@@ -1658,10 +1777,55 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
   const staffPermissions = (currentStaff?.permissions || []).map((permission) =>
     String(permission || '').trim().toLowerCase()
   );
-  const canApplyDiscount =
+  const hasRoleDiscountPrivilege =
     discountPrivilegedRoles.has(effectiveStaffRole) ||
     staffPermissions.includes('apply_discounts') ||
     staffPermissions.includes('manage_discounts');
+  const hasValidDiscountOverride = Boolean(
+    discountOverrideGrant && new Date(discountOverrideGrant.expiresAt).getTime() > Date.now()
+  );
+  const canApplyDiscount = hasRoleDiscountPrivilege || hasValidDiscountOverride;
+
+  useEffect(() => {
+    if (!isElectronDesktop || !window.compazzDesktop) return;
+
+    let active = true;
+    window.compazzDesktop
+      .getUpdateStatus()
+      .then((status) => {
+        if (active) setDesktopUpdateStatus(status);
+      })
+      .catch((err) => {
+        logger.warn('Failed to fetch desktop update status:', err);
+      });
+
+    const listenerId = window.compazzDesktop.onUpdateStatus((status) => {
+      setDesktopUpdateStatus(status);
+    });
+
+    return () => {
+      active = false;
+      window.compazzDesktop?.offUpdateStatus(listenerId);
+    };
+  }, [isElectronDesktop]);
+
+  const triggerDesktopUpdateCheck = async () => {
+    if (!isElectronDesktop || !window.compazzDesktop) return;
+    const result = await window.compazzDesktop.checkForUpdates();
+    if (!result.ok) {
+      error(result.error || 'Update check failed.', 5000);
+      return;
+    }
+    success('Checking for desktop updates...', 3000);
+  };
+
+  const installDesktopUpdateNow = async () => {
+    if (!isElectronDesktop || !window.compazzDesktop) return;
+    const ok = await window.compazzDesktop.installUpdate();
+    if (!ok) {
+      warning('No downloaded update ready yet.', 4000);
+    }
+  };
 
   // Handle search with Debounce and Hybrid Strategy (Memory + Dexie)
   useEffect(() => {
@@ -1738,8 +1902,10 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                 cart={cart}
                 totals={cartTotals}
                 canApplyDiscount={canApplyDiscount}
+                discountApprovalActive={hasValidDiscountOverride}
                 onUpdateQuantity={updateCartItemQuantity}
                 onUpdateDiscount={updateCartItemDiscount}
+                onRequestDiscountApproval={requestDiscountApproval}
                 onRemoveItem={removeFromCart}
                 onClearCart={clearCart}
               />
@@ -1854,6 +2020,51 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                   </div>
                 );
               })()}
+
+              {hasValidDiscountOverride && !hasRoleDiscountPrivilege && discountOverrideGrant && (
+                <div className="text-xs font-semibold text-blue-700">
+                  Discount approved by {discountOverrideGrant.approver.display_name}
+                  <button
+                    type="button"
+                    onClick={() => setDiscountOverrideGrant(null)}
+                    className="ml-2 text-blue-800 hover:text-blue-900 underline"
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+
+              {isElectronDesktop && (
+                <div className="text-xs text-stone-600 flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-stone-700">
+                    App Update:
+                    {' '}
+                    {desktopUpdateStatus.state === 'checking' && 'Checking...'}
+                    {desktopUpdateStatus.state === 'available' && `Downloading v${desktopUpdateStatus.version}...`}
+                    {desktopUpdateStatus.state === 'downloading' && `Downloading ${Math.round(desktopUpdateStatus.percent || 0)}%`}
+                    {desktopUpdateStatus.state === 'downloaded' && `Ready v${desktopUpdateStatus.version}`}
+                    {desktopUpdateStatus.state === 'not-available' && 'Up to date'}
+                    {desktopUpdateStatus.state === 'error' && desktopUpdateStatus.message}
+                    {desktopUpdateStatus.state === 'idle' && 'Idle'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={triggerDesktopUpdateCheck}
+                    className="px-2.5 py-1 rounded-md border border-stone-300 bg-white hover:bg-stone-100 text-stone-700 font-semibold"
+                  >
+                    Check Now
+                  </button>
+                  {desktopUpdateStatus.state === 'downloaded' && (
+                    <button
+                      type="button"
+                      onClick={installDesktopUpdateNow}
+                      className="px-2.5 py-1 rounded-md border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold"
+                    >
+                      Restart & Install
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {tenderModal && (() => {
@@ -2198,6 +2409,76 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
           onConfirm={confirmStaffLogout}
           staffName={currentStaff?.display_name || 'staff member'}
         />
+
+        {/* Discount Approval Modal (cashier override) */}
+        {showDiscountApprovalModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-base font-bold text-slate-900 inline-flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-blue-600" />
+                  Discount Approval
+                </h3>
+                <button
+                  type="button"
+                  onClick={closeDiscountApprovalModal}
+                  className="text-stone-500 hover:text-stone-700"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-xs text-stone-600 mb-3">
+                Manager/Pharmacist should enter staff code and PIN to authorize this sale discount.
+              </p>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-stone-600 mb-1">Staff Code</label>
+                  <input
+                    type="text"
+                    value={discountApprovalStaffCode}
+                    onChange={(event) => setDiscountApprovalStaffCode(event.target.value.toUpperCase())}
+                    className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm"
+                    placeholder="STF001"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-stone-600 mb-1">PIN</label>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    value={discountApprovalPin}
+                    onChange={(event) => setDiscountApprovalPin(event.target.value)}
+                    className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm"
+                    placeholder="••••••"
+                  />
+                </div>
+                {discountApprovalError && (
+                  <p className="text-xs text-red-600">{discountApprovalError}</p>
+                )}
+              </div>
+
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeDiscountApprovalModal}
+                  className="px-3 py-2 text-sm rounded-lg border border-stone-300 bg-white hover:bg-stone-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={authorizeDiscountForCurrentSale}
+                  disabled={isDiscountApprovalLoading}
+                  className="px-3 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+                >
+                  {isDiscountApprovalLoading ? 'Authorizing...' : 'Authorize Discount'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Manager Login Modal */}
         {showManagerLogin && (

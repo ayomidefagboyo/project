@@ -102,6 +102,7 @@ export interface CreateTransactionRequest {
   tendered_amount?: number;
   payment_reference?: string;
   discount_amount?: number;
+  discount_authorizer_session_token?: string;
   split_payments?: SplitPaymentLine[];
   notes?: string;
   offline_id?: string;

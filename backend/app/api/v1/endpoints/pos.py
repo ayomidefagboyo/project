@@ -1697,11 +1697,62 @@ async def create_transaction(
 
         has_line_discount = any((item.discount_amount or Decimal(0)) > Decimal(0) for item in transaction.items)
         has_transaction_discount = (transaction.discount_amount or Decimal(0)) > Decimal(0)
-        if (has_line_discount or has_transaction_discount) and not _can_apply_discount(actor_context):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only manager or pharmacist roles can apply discounts during sales"
-            )
+        has_any_discount = has_line_discount or has_transaction_discount
+        discount_authorizer_staff_profile_id: Optional[str] = None
+        discount_authorizer_name: Optional[str] = None
+        if has_any_discount and not _can_apply_discount(actor_context):
+            authorizer_token = str(transaction.discount_authorizer_session_token or "").strip()
+            if not authorizer_token:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Discount approval is required from manager/pharmacist"
+                )
+
+            authorizer_payload = StaffService.parse_session_token(authorizer_token)
+            if not authorizer_payload:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Discount approval session is invalid or expired"
+                )
+
+            authorizer_profile_id = str(authorizer_payload.get('staff_profile_id') or '').strip()
+            if not authorizer_profile_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Invalid discount approval payload"
+                )
+
+            authorizer_result = supabase.table(Tables.STAFF_PROFILES)\
+                .select('id,outlet_id,role,permissions,display_name,is_active')\
+                .eq('id', authorizer_profile_id)\
+                .execute()
+            authorizer_profile = authorizer_result.data[0] if authorizer_result.data else None
+
+            if not authorizer_profile or not authorizer_profile.get('is_active'):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Discount approver is not active"
+                )
+
+            profile_outlet_id = authorizer_profile.get('outlet_id')
+            if profile_outlet_id and profile_outlet_id != transaction.outlet_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Discount approver does not belong to this outlet"
+                )
+
+            authorizer_context = {
+                'role': _normalize_role(authorizer_profile.get('role')),
+                'permissions': _normalize_permissions(authorizer_profile.get('permissions')),
+            }
+            if not _can_apply_discount(authorizer_context):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Only manager or pharmacist roles can authorize discounts"
+                )
+
+            discount_authorizer_staff_profile_id = str(authorizer_profile.get('id') or '').strip() or None
+            discount_authorizer_name = str(authorizer_profile.get('display_name') or '').strip() or None
 
         # Persist user-id in pos_transactions.cashier_id (FK -> users.id).
         # Staff session is still used for role enforcement and cashier_name display.
@@ -1828,10 +1879,19 @@ async def create_transaction(
                     detail="Insufficient payment amount"
                 )
 
+        notes_metadata: Dict[str, Any] = {}
+        if staff_profile_id:
+            notes_metadata["cashier_staff_profile_id"] = staff_profile_id
+        if discount_authorizer_staff_profile_id:
+            notes_metadata["discount_authorized_by_staff_profile_id"] = discount_authorizer_staff_profile_id
+            notes_metadata["discount_authorized_at"] = datetime.utcnow().isoformat()
+            if discount_authorizer_name:
+                notes_metadata["discount_authorized_by_name"] = discount_authorizer_name
+
         persisted_notes = _build_persisted_transaction_notes(
             transaction.notes,
             split_payments if len(split_payments) > 1 else [],
-            {"cashier_staff_profile_id": staff_profile_id} if staff_profile_id else None
+            notes_metadata or None
         )
 
         # Get cashier's name for display (prefer staff_profiles, then users).

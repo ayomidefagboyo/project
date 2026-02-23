@@ -363,6 +363,10 @@ class POSTransactionCreate(BaseModel):
     receipt_type: ReceiptType = Field(ReceiptType.SALE, description="Type of receipt")
     notes: Optional[str] = Field(None, description="Transaction notes")
     offline_id: Optional[str] = Field(None, description="Offline transaction ID")
+    discount_authorizer_session_token: Optional[str] = Field(
+        None,
+        description="Optional POS staff session token from manager/pharmacist authorizing discounts"
+    )
     split_payments: Optional[List[SplitPaymentEntry]] = Field(
         None,
         description="Split payment breakdown for mixed payments"
