@@ -556,10 +556,33 @@ def _normalize_optional_uuid(value: Optional[str], field_name: str) -> Optional[
 MANAGER_LEVEL_ROLES = {'manager', 'admin', 'business_owner', 'outlet_admin', 'super_admin'}
 PHARMACY_ONLY_ROLES = {'pharmacist', 'accountant'}
 INVENTORY_EDITOR_ROLES = MANAGER_LEVEL_ROLES | {'pharmacist', 'accountant', 'inventory_staff'}
+DISCOUNT_ALLOWED_ROLES = MANAGER_LEVEL_ROLES | PHARMACY_ONLY_ROLES
+DISCOUNT_PERMISSION_KEYS = {'apply_discounts', 'manage_discounts'}
 
 
 def _normalize_role(role: Any) -> str:
     return str(role or '').strip().lower()
+
+
+def _normalize_permissions(permissions: Any) -> List[str]:
+    if not isinstance(permissions, list):
+        return []
+    normalized: List[str] = []
+    for value in permissions:
+        if isinstance(value, str):
+            cleaned = value.strip().lower()
+            if cleaned:
+                normalized.append(cleaned)
+    return normalized
+
+
+def _can_apply_discount(context: Dict[str, Any]) -> bool:
+    role = _normalize_role(context.get('role'))
+    if role in DISCOUNT_ALLOWED_ROLES:
+        return True
+
+    permissions = set(_normalize_permissions(context.get('permissions')))
+    return any(key in permissions for key in DISCOUNT_PERMISSION_KEYS)
 
 
 def _resolve_staff_context(
@@ -578,7 +601,8 @@ def _resolve_staff_context(
         'role': _normalize_role(current_user.get('role')),
         'source': 'api_user',
         'staff_profile_id': None,
-        'outlet_id': outlet_id
+        'outlet_id': outlet_id,
+        'permissions': _normalize_permissions(current_user.get('permissions'))
     }
 
     if not staff_session_token:
@@ -599,7 +623,7 @@ def _resolve_staff_context(
         )
 
     profile_result = supabase.table(Tables.STAFF_PROFILES)\
-        .select('id,outlet_id,role,is_active')\
+        .select('id,outlet_id,role,permissions,is_active')\
         .eq('id', staff_profile_id)\
         .execute()
     profile = profile_result.data[0] if profile_result.data else None
@@ -621,7 +645,8 @@ def _resolve_staff_context(
         'role': _normalize_role(profile.get('role')),
         'source': 'staff_session',
         'staff_profile_id': profile.get('id'),
-        'outlet_id': profile_outlet_id or outlet_id
+        'outlet_id': profile_outlet_id or outlet_id,
+        'permissions': _normalize_permissions(profile.get('permissions'))
     }
 
 
@@ -1669,6 +1694,14 @@ async def create_transaction(
             x_pos_staff_session
         )
         authenticated_user_id = _resolve_actor_user_id(current_user)
+
+        has_line_discount = any((item.discount_amount or Decimal(0)) > Decimal(0) for item in transaction.items)
+        has_transaction_discount = (transaction.discount_amount or Decimal(0)) > Decimal(0)
+        if (has_line_discount or has_transaction_discount) and not _can_apply_discount(actor_context):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only manager or pharmacist roles can apply discounts during sales"
+            )
 
         # Persist user-id in pos_transactions.cashier_id (FK -> users.id).
         # Staff session is still used for role enforcement and cashier_name display.

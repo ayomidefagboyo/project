@@ -22,6 +22,7 @@ interface CartTotals {
 interface POSShoppingCartProps {
   cart: CartItem[];
   totals: CartTotals;
+  canApplyDiscount: boolean;
   onUpdateQuantity: (productId: string, quantity: number) => void;
   onUpdateDiscount: (productId: string, discount: number) => void;
   onRemoveItem: (productId: string) => void;
@@ -30,7 +31,9 @@ interface POSShoppingCartProps {
 
 const POSShoppingCart: React.FC<POSShoppingCartProps> = ({
   cart,
+  canApplyDiscount,
   onUpdateQuantity,
+  onUpdateDiscount,
   onRemoveItem,
 }) => {
   const formatCurrency = (amount: number): string => {
@@ -45,6 +48,21 @@ const POSShoppingCart: React.FC<POSShoppingCartProps> = ({
     const lineSubtotal = item.unitPrice * item.quantity;
     const lineDiscount = item.discount * item.quantity;
     return lineSubtotal - lineDiscount;
+  };
+
+  const clampDiscount = (discount: number, max: number) =>
+    Math.max(0, Math.min(max, Number.isFinite(discount) ? discount : 0));
+
+  const handleDiscountChange = (productId: string, rawValue: string, unitPrice: number) => {
+    if (!canApplyDiscount) return;
+    const parsed = parseFloat(rawValue);
+    const next = Number.isNaN(parsed) ? 0 : clampDiscount(parsed, unitPrice);
+    onUpdateDiscount(productId, next);
+  };
+
+  const adjustDiscount = (productId: string, current: number, delta: number, unitPrice: number) => {
+    if (!canApplyDiscount) return;
+    onUpdateDiscount(productId, clampDiscount(current + delta, unitPrice));
   };
 
   if (cart.length === 0) {
@@ -70,6 +88,11 @@ const POSShoppingCart: React.FC<POSShoppingCartProps> = ({
 
   return (
     <div className="space-y-2">
+      {!canApplyDiscount && (
+        <div className="px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 text-[11px] text-amber-800">
+          Discounts are restricted to Manager or Pharmacist.
+        </div>
+      )}
       {cart.map((item) => (
         <div
           key={item.product.id}
@@ -81,6 +104,37 @@ const POSShoppingCart: React.FC<POSShoppingCartProps> = ({
               {formatCurrency(item.unitPrice)} each
               {item.product.sku ? ` · ${item.product.sku}` : ''}
             </p>
+            <div className="mt-1.5 flex items-center gap-1.5">
+              <span className="text-[10px] font-semibold text-stone-500 uppercase tracking-wide">Disc</span>
+              <button
+                onClick={() => adjustDiscount(item.product.id, item.discount, -1, item.unitPrice)}
+                disabled={!canApplyDiscount || item.discount <= 0}
+                className="w-6 h-6 rounded-md border border-stone-300 bg-white text-slate-700 text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Decrease discount"
+              >
+                -
+              </button>
+              <input
+                type="number"
+                min={0}
+                max={item.unitPrice}
+                step="0.01"
+                value={item.discount > 0 ? item.discount : ''}
+                placeholder="0.00"
+                onChange={(e) => handleDiscountChange(item.product.id, e.target.value, item.unitPrice)}
+                disabled={!canApplyDiscount}
+                className="w-20 h-7 rounded-md border border-stone-300 bg-white px-2 text-xs font-semibold text-slate-900 disabled:bg-stone-100 disabled:text-stone-500"
+              />
+              <button
+                onClick={() => adjustDiscount(item.product.id, item.discount, 1, item.unitPrice)}
+                disabled={!canApplyDiscount || item.discount >= item.unitPrice}
+                className="w-6 h-6 rounded-md border border-stone-300 bg-white text-slate-700 text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Increase discount"
+              >
+                +
+              </button>
+              <span className="text-[10px] text-stone-500">/unit</span>
+            </div>
           </div>
 
           <div className="flex items-center justify-center space-x-1.5 flex-shrink-0 w-32">

@@ -1645,6 +1645,23 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
   // Get unique categories for filter
 
   const cartTotals = calculateCartTotals();
+  const effectiveStaffRole = String(currentStaff?.role || currentUser?.role || '').toLowerCase();
+  const discountPrivilegedRoles = new Set([
+    'manager',
+    'pharmacist',
+    'accountant',
+    'outlet_admin',
+    'business_owner',
+    'super_admin',
+    'admin',
+  ]);
+  const staffPermissions = (currentStaff?.permissions || []).map((permission) =>
+    String(permission || '').trim().toLowerCase()
+  );
+  const canApplyDiscount =
+    discountPrivilegedRoles.has(effectiveStaffRole) ||
+    staffPermissions.includes('apply_discounts') ||
+    staffPermissions.includes('manage_discounts');
 
   // Handle search with Debounce and Hybrid Strategy (Memory + Dexie)
   useEffect(() => {
@@ -1720,6 +1737,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
               <POSShoppingCart
                 cart={cart}
                 totals={cartTotals}
+                canApplyDiscount={canApplyDiscount}
                 onUpdateQuantity={updateCartItemQuantity}
                 onUpdateDiscount={updateCartItemDiscount}
                 onRemoveItem={removeFromCart}
