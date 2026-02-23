@@ -320,14 +320,14 @@ export async function parseImportFile(
         sku = `${sku}-${i + 1}`;
       }
 
-      // For Busy21, calculate prices from closing amount and quantity
+      // For Busy21, calculate cost price from closing amount and quantity
       if (qty > 0) {
         // Since both unit_price and cost_price map to 'Cl. Amt.', we get the closing amount directly
         const closingAmt = unitPrice; // This is actually the closing amount from 'Cl. Amt.'
         if (closingAmt > 0) {
           const avgCostPrice = Math.round(closingAmt / qty);
           costPrice = avgCostPrice;
-          unitPrice = Math.round(avgCostPrice * 1.3); // Add 30% margin for selling price
+          unitPrice = 0; // Leave selling price empty for manual entry
         } else {
           // If no closing amount, set defaults
           costPrice = 0;
