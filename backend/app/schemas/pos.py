@@ -275,7 +275,9 @@ class DepartmentResponse(BaseModel):
 
 class ProductImportItem(POSProductBase):
     """Product payload used by bulk import."""
-    pass
+    # Keep import resilient: allow unit_price=0 at request-parse stage
+    # so endpoint logic can return row-level errors instead of whole-request 422s.
+    unit_price: Decimal = Field(..., ge=0, description="Selling price in Naira")
 
 
 class ProductBulkImportRequest(BaseModel):

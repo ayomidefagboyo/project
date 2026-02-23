@@ -1333,6 +1333,23 @@ async def bulk_import_products(
                 row_data['category'] = _normalize_department_name(row_data.get('category'))
                 category_values_to_ensure.append(row_data.get('category'))
 
+                # Validate required commercial constraint at row level so
+                # one invalid line does not fail the entire import request.
+                try:
+                    unit_price = Decimal(str(row_data.get('unit_price') or 0))
+                except Exception:
+                    unit_price = Decimal(0)
+
+                if unit_price <= 0:
+                    errors.append(ProductBulkImportError(
+                        row=index,
+                        sku=getattr(row, 'sku', None),
+                        barcode=getattr(row, 'barcode', None),
+                        name=getattr(row, 'name', None),
+                        message='Selling price must be greater than 0'
+                    ))
+                    continue
+
                 sku_key = norm_sku(row_data.get('sku'))
                 barcode_key = norm_barcode(row_data.get('barcode'))
 
