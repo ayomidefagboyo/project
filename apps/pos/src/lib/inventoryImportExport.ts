@@ -133,7 +133,7 @@ const FIELD_MAPS: Record<string, FieldMapping> = {
     barcode:           [], // Not available in Busy21 export
     description:       ['Item Details'],
     category:          ['Parent Group'],
-    unit_price:        ['Cl. Amt.', 'Cl Amt', 'Closing Amt'], // Calculate from closing values
+    unit_price:        ['Amt.Out', 'AmtOut', 'Amount Out'], // Sales amount for calculating selling price
     cost_price:        ['Cl. Amt.', 'Cl Amt', 'Closing Amt'], // Calculate from closing values
     quantity_on_hand:  ['Cl. Qty', 'Cl Qty', 'Closing Qty'], // Closing Quantity
     reorder_level:     [], // Not available
@@ -320,19 +320,24 @@ export async function parseImportFile(
         sku = `${sku}-${i + 1}`;
       }
 
-      // For Busy21, calculate cost price from closing amount and quantity
-      if (qty > 0) {
-        // Since both unit_price and cost_price map to 'Cl. Amt.', we get the closing amount directly
-        const closingAmt = unitPrice; // This is actually the closing amount from 'Cl. Amt.'
-        if (closingAmt > 0) {
-          const avgCostPrice = Math.round(closingAmt / qty);
-          costPrice = avgCostPrice;
-          unitPrice = 0; // Leave selling price empty for manual entry
-        } else {
-          // If no closing amount, set defaults
-          costPrice = 0;
-          unitPrice = 0;
-        }
+      // For Busy21, calculate prices from available data
+      const salesAmount = unitPrice; // Maps to 'Amt.Out' (total sales amount)
+      const closingAmount = costPrice; // Maps to 'Cl. Amt.' (total closing value)
+      const salesQty = parseNumber(getValue('Sale') || getValue('Sales')); // Sales quantity
+
+      // Calculate cost price from closing amount
+      if (closingAmount > 0 && qty > 0) {
+        costPrice = Math.round(closingAmount / qty);
+      } else {
+        costPrice = 0;
+      }
+
+      // Calculate selling price from sales data if available
+      if (salesAmount > 0 && salesQty > 0) {
+        unitPrice = Math.round(salesAmount / salesQty);
+      } else {
+        // If no sales data, leave selling price empty for manual entry
+        unitPrice = 0;
       }
     }
 
