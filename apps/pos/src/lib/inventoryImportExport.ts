@@ -133,8 +133,8 @@ const FIELD_MAPS: Record<string, FieldMapping> = {
     barcode:           [], // Not available in Busy21 export
     description:       ['Item Details'],
     category:          ['Parent Group'],
-    unit_price:        [], // Not directly available, will calculate from closing values
-    cost_price:        [], // Not directly available
+    unit_price:        ['Cl. Amt.', 'Cl Amt', 'Closing Amt'], // Calculate from closing values
+    cost_price:        ['Cl. Amt.', 'Cl Amt', 'Closing Amt'], // Calculate from closing values
     quantity_on_hand:  ['Cl. Qty', 'Cl Qty', 'Closing Qty'], // Closing Quantity
     reorder_level:     [], // Not available
     reorder_quantity:  [], // Not available
@@ -320,13 +320,18 @@ export async function parseImportFile(
         sku = `${sku}-${i + 1}`;
       }
 
-      // For Busy21, try to estimate prices from closing amount and quantity
-      if (unitPrice === 0 || costPrice === 0) {
-        const closingAmt = parseNumber(getValue('Cl. Amt.') || getValue('Cl Amt') || getValue('Closing Amt'));
-        if (closingAmt > 0 && qty > 0) {
-          const avgPrice = closingAmt / qty;
-          if (unitPrice === 0) unitPrice = Math.round(avgPrice * 1.3); // Add 30% margin
-          if (costPrice === 0) costPrice = avgPrice;
+      // For Busy21, calculate prices from closing amount and quantity
+      if (qty > 0) {
+        // Since both unit_price and cost_price map to 'Cl. Amt.', we get the closing amount directly
+        const closingAmt = unitPrice; // This is actually the closing amount from 'Cl. Amt.'
+        if (closingAmt > 0) {
+          const avgCostPrice = Math.round(closingAmt / qty);
+          costPrice = avgCostPrice;
+          unitPrice = Math.round(avgCostPrice * 1.3); // Add 30% margin for selling price
+        } else {
+          // If no closing amount, set defaults
+          costPrice = 0;
+          unitPrice = 0;
         }
       }
     }
