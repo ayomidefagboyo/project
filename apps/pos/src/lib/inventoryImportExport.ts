@@ -29,7 +29,7 @@ export interface ImportProduct {
 }
 
 // ─── Supported source formats ───
-export type ImportSource = 'auto' | 'quickbooks' | 'square' | 'shopify' | 'generic' | 'compazz';
+export type ImportSource = 'auto' | 'quickbooks' | 'square' | 'shopify' | 'generic' | 'compazz' | 'busy21';
 
 // ─── Field mapping definitions per POS system ───
 interface FieldMapping {
@@ -125,6 +125,23 @@ const FIELD_MAPS: Record<string, FieldMapping> = {
     is_active:         ['Active'],
     vendor_id:         ['Supplier'],
   },
+
+  // ── Busy21 List of Items ──
+  busy21: {
+    name:              ['Name'],
+    sku:               ['Name'], // Will auto-generate unique SKU from name
+    barcode:           [], // Not available in this export
+    description:       ['Alias'], // Use alias as description if available
+    category:          ['Group Name'],
+    unit_price:        ['Sale Price'],
+    cost_price:        ['Purc. Price'],
+    quantity_on_hand:  ['Op. Stock(Main)'], // Current stock quantity
+    reorder_level:     [], // Not available
+    reorder_quantity:  [], // Not available
+    tax_rate:          [], // Not available, will default
+    is_active:         [], // Not available, will default to true
+    vendor_id:         [], // Not available
+  },
 };
 
 // ─── Helpers ───
@@ -162,6 +179,11 @@ function parseBool(val: any): boolean {
 /** Auto-detect source from column headers */
 function detectSource(headers: string[]): ImportSource {
   const normHeaders = headers.map(norm);
+
+  // Busy21 List of Items has 'Name' + 'Group Name' + 'Sale Price' + 'Purc. Price'
+  if (normHeaders.some(h => h.includes('groupname')) &&
+      normHeaders.some(h => h.includes('saleprice')) &&
+      normHeaders.some(h => h.includes('purcprice'))) return 'busy21';
 
   // Square has 'Current Quantity' or 'Variation SKU'
   if (normHeaders.some(h => h.includes('currentquantity') || h.includes('variationsku') || h.includes('squareid'))) return 'square';
@@ -204,13 +226,51 @@ export async function parseImportFile(
   // Use the first sheet
   const sheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[sheetName];
-  const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
 
-  if (rows.length === 0) {
+  // Get raw data to handle potential metadata rows at the top
+  const allRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+  if (allRows.length === 0) {
     return { products: [], source: 'generic', totalRows: 0, validCount: 0, errorCount: 0, warningCount: 0, headers: [], unmappedColumns: [] };
   }
 
-  const headers = Object.keys(rows[0]);
+  // Find the actual header row - look for common header patterns
+  let headerRowIndex = 0;
+  let dataStartIndex = 1;
+
+  for (let i = 0; i < Math.min(allRows.length, 5); i++) {
+    const row = allRows[i];
+    if (row && typeof row[0] === 'string') {
+      const firstCol = String(row[0]).toLowerCase();
+      // Look for header patterns (Name, Product Name, Item Details, etc.)
+      if (firstCol.includes('name') ||
+          firstCol.includes('product') ||
+          firstCol.includes('item') ||
+          firstCol.includes('sku')) {
+        headerRowIndex = i;
+        dataStartIndex = i + 1;
+        break;
+      }
+    }
+  }
+
+  const headers = allRows[headerRowIndex]?.map(h => String(h || '').trim()).filter(Boolean) || [];
+  const dataRows = allRows.slice(dataStartIndex).filter(row =>
+    row && row.length > 0 && row.some(cell => cell !== '' && cell != null)
+  );
+
+  if (headers.length === 0 || dataRows.length === 0) {
+    return { products: [], source: 'generic', totalRows: 0, validCount: 0, errorCount: 0, warningCount: 0, headers: [], unmappedColumns: [] };
+  }
+
+  // Convert back to object format for processing
+  const rows = dataRows.map(row => {
+    const obj: Record<string, any> = {};
+    headers.forEach((header, i) => {
+      obj[header] = row[i] || '';
+    });
+    return obj;
+  });
 
   const source = preferredSource === 'auto' ? detectSource(headers) : preferredSource;
   const mapping = FIELD_MAPS[source] || FIELD_MAPS.generic;
@@ -242,10 +302,20 @@ export async function parseImportFile(
     };
 
     const name = String(getValue('name') || '').trim();
-    const sku = String(getValue('sku') || '').trim();
+    let sku = String(getValue('sku') || '').trim();
     const unitPrice = parseNumber(getValue('unit_price'));
     const costPrice = parseNumber(getValue('cost_price'));
     const qty = parseNumber(getValue('quantity_on_hand'));
+
+    // Special handling for Busy21 format - generate SKU from name
+    if (source === 'busy21' && !sku && name) {
+      sku = name.toUpperCase()
+        .replace(/[^A-Z0-9\s]/g, '') // Remove special chars
+        .replace(/\s+/g, '-')        // Replace spaces with hyphens
+        .substring(0, 20);           // Limit length
+      // Add index to ensure uniqueness
+      sku = `${sku}-${i + 1}`;
+    }
 
     // Validation
     if (!name) {
