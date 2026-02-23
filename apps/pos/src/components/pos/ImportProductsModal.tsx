@@ -290,6 +290,7 @@ const ImportProductsModal: React.FC<ImportProductsModalProps> = ({
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                 {([
                   { value: 'auto', label: 'Auto Detect' },
+                  { value: 'busy21', label: 'Busy21' },
                   { value: 'quickbooks', label: 'QuickBooks' },
                   { value: 'square', label: 'Square' },
                   { value: 'shopify', label: 'Shopify' },
@@ -355,6 +356,7 @@ const ImportProductsModal: React.FC<ImportProductsModalProps> = ({
                 <p className="text-sm font-medium text-gray-700">Supported Formats</p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-600">
+                <div><span className="font-semibold">Busy21:</span> Stock Status report (CSV)</div>
                 <div><span className="font-semibold">QuickBooks POS:</span> Item List export (CSV/Excel)</div>
                 <div><span className="font-semibold">Square POS:</span> Item Library export (CSV)</div>
                 <div><span className="font-semibold">Shopify:</span> Products export (CSV)</div>
