@@ -535,7 +535,17 @@ function AppContent() {
 
   // Handle authentication routing
   if (location.pathname === '/auth') {
-    return <AuthWrapper onAuthSuccess={() => { reInitAuth(); navigate('/', { replace: true }); }} />;
+    return (
+      <AuthWrapper
+        onAuthSuccess={() => {
+          // Don't trigger reInitAuth immediately to avoid loading state
+          // The OutletProvider will handle auth initialization automatically
+          setTimeout(() => {
+            navigate('/', { replace: true });
+          }, 100); // Small delay to ensure auth state is settled
+        }}
+      />
+    );
   }
 
   // Show loading state
@@ -935,8 +945,10 @@ function AppContent() {
           element={
             <AuthWrapper
               onAuthSuccess={() => {
-                reInitAuth();
-                navigate('/', { replace: true });
+                // Let the context handle the auth state update naturally
+                setTimeout(() => {
+                  navigate('/', { replace: true });
+                }, 100);
               }}
             />
           }

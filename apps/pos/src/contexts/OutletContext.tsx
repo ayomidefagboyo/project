@@ -194,8 +194,8 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
         const hasTerminalConfig = !!localStorage.getItem('pos_terminal_config');
         const canUseTerminalCache = hasTerminalConfig && !!(cachedState?.outlet || currentOutlet);
 
-        // Only show spinner if we have NO cache
-        if (!cachedState) setIsLoading(true);
+        // Only show spinner if we have NO cache AND no current user AND not just triggering a refresh
+        if (!cachedState && !currentUser && authTrigger === 0) setIsLoading(true);
 
         // Handle OAuth callback if present
         if (window.location.hash.includes('access_token')) {
