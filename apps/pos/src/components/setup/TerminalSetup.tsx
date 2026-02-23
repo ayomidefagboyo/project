@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Monitor, Store, CheckCircle, AlertCircle, LogOut, Loader2 } from 'lucide-react';
+import { Monitor, Store, CheckCircle, AlertCircle, LogOut, Loader2, ChevronDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useOutlet } from '@/contexts/OutletContext';
 import AuthWrapper from '../auth/AuthWrapper';
@@ -264,37 +264,45 @@ const TerminalSetup: React.FC<TerminalSetupProps> = ({ onSetupComplete }) => {
           <label className="block text-sm font-medium text-gray-700 mb-3">
             Select Outlet for This Terminal
           </label>
-          <div className="space-y-3">
-            {userOutlets.map((outlet) => (
-              <div
-                key={outlet.id}
-                className={`
-                  relative rounded-lg border-2 p-4 cursor-pointer transition-all
-                  ${selectedOutletId === outlet.id
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-200 hover:border-gray-300'
-                  }
-                `}
-                onClick={() => setSelectedOutletId(outlet.id)}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
-                    <Store className="w-5 h-5 text-orange-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-medium text-gray-900">{outlet.name}</h3>
-                    <p className="text-sm text-gray-600">{formatOutletAddress(outlet.address)}</p>
-                  </div>
-                </div>
-
-                {selectedOutletId === outlet.id && (
-                  <div className="absolute top-4 right-4">
-                    <CheckCircle className="w-5 h-5 text-blue-600" />
-                  </div>
-                )}
-              </div>
-            ))}
+          <div className="relative">
+            <select
+              value={selectedOutletId}
+              onChange={(e) => setSelectedOutletId(e.target.value)}
+              className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-4 py-3 pr-10 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">Choose an outlet...</option>
+              {userOutlets.map((outlet) => (
+                <option key={outlet.id} value={outlet.id}>
+                  {outlet.name} - {formatOutletAddress(outlet.address)}
+                </option>
+              ))}
+            </select>
+            <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+              <ChevronDown className="w-5 h-5 text-gray-400" />
+            </div>
           </div>
+
+          {/* Selected Outlet Preview */}
+          {selectedOutletId && (
+            <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <Store className="w-5 h-5 text-blue-600" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-blue-900">
+                    {userOutlets.find(o => o.id === selectedOutletId)?.name}
+                  </h3>
+                  <p className="text-sm text-blue-700">
+                    {formatOutletAddress(userOutlets.find(o => o.id === selectedOutletId)?.address)}
+                  </p>
+                </div>
+                <div className="ml-auto">
+                  <CheckCircle className="w-5 h-5 text-blue-600" />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Warning Message */}
