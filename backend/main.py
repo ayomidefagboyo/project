@@ -3,6 +3,7 @@ Main FastAPI application for Compazz Financial Management Platform
 """
 
 from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -97,11 +98,15 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     """Handle request validation errors"""
     # Log validation error for developers
     logger.warning(f"Validation error on {request.method} {request.url}: {exc.errors()}")
-    
+
+    # Ensure errors are JSON-serializable (e.g. Decimal in Pydantic ctx)
+    # so validation issues return clean 422 responses instead of crashing into 500.
+    safe_errors = jsonable_encoder(exc.errors())
+
     # Return user-friendly validation error
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": "Invalid request data", "errors": exc.errors()}
+        content={"detail": "Invalid request data", "errors": safe_errors}
     )
 
 

@@ -243,8 +243,8 @@ export async function parseImportFile(
 
     const name = String(getValue('name') || '').trim();
     const sku = String(getValue('sku') || '').trim();
-    const unitPrice = parseNumber(getValue('unit_price'));
-    const costPrice = parseNumber(getValue('cost_price'));
+    const unitPrice = Math.max(0, parseNumber(getValue('unit_price')));
+    const costPrice = Math.max(0, parseNumber(getValue('cost_price')));
     const qty = parseNumber(getValue('quantity_on_hand'));
 
     // Validation
@@ -254,6 +254,10 @@ export async function parseImportFile(
 
     if (unitPrice <= 0 && costPrice <= 0) {
       warnings.push('No price set');
+    }
+
+    if (unitPrice <= 0) {
+      errors.push('Selling price must be greater than 0');
     }
 
     if (costPrice > unitPrice && unitPrice > 0) {
