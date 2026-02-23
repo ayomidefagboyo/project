@@ -13,6 +13,13 @@ import {
   User,
   Check,
 } from 'lucide-react';
+
+interface TerminalConfig {
+  outlet_id: string;
+  outlet_name: string;
+  initialized_by: string;
+  initialized_at: string;
+}
 import { useOutlet } from '../../contexts/OutletContext';
 import { posService, PaymentMethod } from '../../lib/posService';
 import type { POSProduct } from '../../lib/posService';
@@ -79,7 +86,9 @@ interface HeldSale {
   synced?: boolean;
 }
 
-interface POSDashboardProps {}
+interface POSDashboardProps {
+  terminalConfig: TerminalConfig | null;
+}
 
 interface LocalReceiptLineItem {
   name: string;
@@ -104,7 +113,7 @@ interface LocalReceiptPayload {
   pendingSync: boolean;
 }
 
-const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) => {
+const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ terminalConfig }, ref) => {
   // Context and state
   const { currentUser, currentOutlet } = useOutlet();
   const navigate = useNavigate();
@@ -426,8 +435,12 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>((_, ref) 
   // App.tsx already handles terminal setup + staff authentication, so POS should
   // never gate the Register screen on local staff-profile fetch timing.
   const getScreenToShow = (): 'manager_login' | 'pos_dashboard' => {
-    // If no user is authenticated, show manager login
-    if (!currentUser) {
+    // Terminal mode can continue with staff PIN auth when manager session is unavailable.
+    // Only force manager/business-owner auth when terminal is not yet configured.
+    const canRunWithTerminalSessionOnly = !!terminalConfig;
+
+    // If no user is authenticated and terminal is not configured, show manager login
+    if (!currentUser && !canRunWithTerminalSessionOnly) {
       return 'manager_login';
     }
 
