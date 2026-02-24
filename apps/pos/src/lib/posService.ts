@@ -568,6 +568,9 @@ class POSService {
   private isInitialized = false;
   private readonly initPromise: Promise<void>;
   private readonly productSyncPageSize = 100;
+  private readonly productSyncRetryDelaysMs = [500, 1500, 3000];
+  private readonly productSyncCooldownMs = 60_000;
+  private readonly productSyncPauseUntilByOutlet = new Map<string, number>();
   private offlineSyncPromise: Promise<number> | null = null;
   private readonly inFlightTransactionCreates = new Map<string, Promise<POSTransaction>>();
 
@@ -675,6 +678,22 @@ class POSService {
     return normalized.includes('not found') || normalized.includes('404');
   }
 
+  private isTransientNetworkError(error: unknown): boolean {
+    const message = String((error as any)?.message || error || '').toLowerCase();
+    return (
+      message.includes('network error') ||
+      message.includes('failed to fetch') ||
+      message.includes('connection closed') ||
+      message.includes('err_connection_closed') ||
+      message.includes('err_connection_reset') ||
+      message.includes('load failed')
+    );
+  }
+
+  private async waitFor(ms: number): Promise<void> {
+    await new Promise<void>((resolve) => setTimeout(resolve, ms));
+  }
+
   private async fetchProductsPageFromApi(
     outletId: string,
     options: {
@@ -704,6 +723,36 @@ class POSService {
       throw new Error(response.error || 'Failed to fetch products');
     }
     return response.data;
+  }
+
+  private async fetchProductsPageWithRetry(
+    outletId: string,
+    options: {
+      page: number;
+      size: number;
+      search?: string;
+      category?: string;
+      activeOnly?: boolean;
+      updatedAfter?: string;
+      includeTotal?: boolean;
+    }
+  ): Promise<ProductListResult> {
+    let attempt = 0;
+    while (true) {
+      try {
+        return await this.fetchProductsPageFromApi(outletId, options);
+      } catch (error) {
+        if (!this.isTransientNetworkError(error) || attempt >= this.productSyncRetryDelaysMs.length) {
+          throw error;
+        }
+        const delayMs = this.productSyncRetryDelaysMs[attempt];
+        logger.warn(
+          `Product page fetch failed (attempt ${attempt + 1}/${this.productSyncRetryDelaysMs.length + 1}), retrying in ${delayMs}ms`
+        );
+        await this.waitFor(delayMs);
+        attempt += 1;
+      }
+    }
   }
 
   // ===============================================
@@ -943,6 +992,11 @@ class POSService {
     const cursorKey = this.getProductCursorSettingKey(outletId);
     const existingCursor = await offlineDatabase.getSetting(cursorKey);
     const mode: 'full' | 'delta' = options.forceFull || !existingCursor ? 'full' : 'delta';
+    const now = Date.now();
+    const pausedUntil = this.productSyncPauseUntilByOutlet.get(outletId) || 0;
+    if (pausedUntil > now) {
+      return { mode, updated: 0 };
+    }
 
     let page = 1;
     let updated = 0;
@@ -957,67 +1011,81 @@ class POSService {
       });
     };
 
-    if (mode === 'full') {
-      const allItems: POSProduct[] = [];
+    try {
+      if (mode === 'full') {
+        const allItems: POSProduct[] = [];
 
-      while (page <= maxPages) {
-        const response = await this.fetchProductsPageFromApi(outletId, {
-          page,
-          size: this.productSyncPageSize,
-          activeOnly: false,
-          includeTotal: false,
-        });
+        while (page <= maxPages) {
+          const response = await this.fetchProductsPageWithRetry(outletId, {
+            page,
+            size: this.productSyncPageSize,
+            activeOnly: false,
+            includeTotal: false,
+          });
 
-        const items = response.items || [];
-        if (items.length === 0) break;
+          const items = response.items || [];
+          if (items.length === 0) break;
 
-        allItems.push(...items);
+          allItems.push(...items);
+          updated = allItems.length;
+          publishProgress(page, items.length, 'syncing');
+          const latestInBatch = this.getLatestUpdatedAt(items);
+          if (latestInBatch && this.toTimestamp(latestInBatch) > this.toTimestamp(latestCursor)) {
+            latestCursor = latestInBatch;
+          }
+
+          if (items.length < this.productSyncPageSize) break;
+          page += 1;
+        }
+
+        await offlineDatabase.replaceOutletProducts(outletId, allItems);
         updated = allItems.length;
-        publishProgress(page, items.length, 'syncing');
-        const latestInBatch = this.getLatestUpdatedAt(items);
-        if (latestInBatch && this.toTimestamp(latestInBatch) > this.toTimestamp(latestCursor)) {
-          latestCursor = latestInBatch;
-        }
+      } else {
+        while (page <= maxPages) {
+          const response = await this.fetchProductsPageWithRetry(outletId, {
+            page,
+            size: this.productSyncPageSize,
+            activeOnly: false,
+            updatedAfter: existingCursor,
+            includeTotal: false,
+          });
 
-        if (items.length < this.productSyncPageSize) break;
-        page += 1;
+          const items = response.items || [];
+          if (items.length === 0) break;
+
+          await offlineDatabase.storeProducts(items);
+          updated += items.length;
+          publishProgress(page, items.length, 'syncing');
+
+          const latestInBatch = this.getLatestUpdatedAt(items);
+          if (latestInBatch && this.toTimestamp(latestInBatch) > this.toTimestamp(latestCursor)) {
+            latestCursor = latestInBatch;
+          }
+
+          if (items.length < this.productSyncPageSize) break;
+          page += 1;
+        }
       }
 
-      await offlineDatabase.replaceOutletProducts(outletId, allItems);
-      updated = allItems.length;
-    } else {
-      while (page <= maxPages) {
-        const response = await this.fetchProductsPageFromApi(outletId, {
-          page,
-          size: this.productSyncPageSize,
-          activeOnly: false,
-          updatedAfter: existingCursor,
-          includeTotal: false,
-        });
-
-        const items = response.items || [];
-        if (items.length === 0) break;
-
-        await offlineDatabase.storeProducts(items);
-        updated += items.length;
-        publishProgress(page, items.length, 'syncing');
-
-        const latestInBatch = this.getLatestUpdatedAt(items);
-        if (latestInBatch && this.toTimestamp(latestInBatch) > this.toTimestamp(latestCursor)) {
-          latestCursor = latestInBatch;
-        }
-
-        if (items.length < this.productSyncPageSize) break;
-        page += 1;
+      if (latestCursor) {
+        await offlineDatabase.storeSetting(cursorKey, latestCursor);
       }
-    }
 
-    if (latestCursor) {
-      await offlineDatabase.storeSetting(cursorKey, latestCursor);
+      this.productSyncPauseUntilByOutlet.delete(outletId);
+      publishProgress(page, 0, 'completed');
+      return { mode, updated };
+    } catch (error) {
+      if (this.isTransientNetworkError(error)) {
+        const pauseUntil = Date.now() + this.productSyncCooldownMs;
+        this.productSyncPauseUntilByOutlet.set(outletId, pauseUntil);
+        logger.warn(
+          `Product catalog sync paused for ${Math.round(this.productSyncCooldownMs / 1000)}s due to transient network failure`
+        );
+        publishProgress(page, 0, 'completed');
+        return { mode, updated };
+      }
+      throw error;
     }
-
-    publishProgress(page, 0, 'completed');
-    return { mode, updated };
   }
 
   /**
