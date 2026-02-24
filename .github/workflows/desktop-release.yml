@@ -81,15 +81,33 @@ jobs:
           echo "Assets to publish:"
           find release-assets -type f | sort
 
+      - name: Prepare curated release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+
+          mkdir -p release-upload
+
+          # Windows installer + electron-updater metadata
+          for f in release-assets/**/Compazz-POS-Setup-*.exe; do cp -f "$f" release-upload/; done
+          for f in release-assets/**/Compazz-POS-Setup-*.exe.blockmap; do cp -f "$f" release-upload/; done
+          for f in release-assets/**/latest.yml; do cp -f "$f" release-upload/; done
+
+          # macOS artifacts + updater metadata
+          for f in release-assets/**/Compazz\ POS-*.dmg; do cp -f "$f" release-upload/; done
+          for f in release-assets/**/Compazz\ POS-*.dmg.blockmap; do cp -f "$f" release-upload/; done
+          for f in release-assets/**/Compazz\ POS-*-mac.zip; do cp -f "$f" release-upload/; done
+          for f in release-assets/**/Compazz\ POS-*-mac.zip.blockmap; do cp -f "$f" release-upload/; done
+          for f in release-assets/**/latest-mac.yml; do cp -f "$f" release-upload/; done
+
+          echo "Curated assets:"
+          find release-upload -type f | sort
+
       - name: Create/Update release and upload assets
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           fail_on_unmatched_files: false
           files: |
-            release-assets/**/*.dmg
-            release-assets/**/*.zip
-            release-assets/**/*.exe
-            release-assets/**/*.yml
-            release-assets/**/*.yaml
-            release-assets/**/*.blockmap
+            release-upload/*
