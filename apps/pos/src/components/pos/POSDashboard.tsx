@@ -1503,7 +1503,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     tenderedAmount?: number,
     customerName?: string
   ) => {
-    if (!currentUser?.id || !currentOutlet?.id) return;
+    if (!currentUser?.id || !currentStaff?.id || !currentOutlet?.id) return;
 
     try {
       const totals = calculateCartTotals();
@@ -1529,7 +1529,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
       // Create transaction request
       const transactionRequest = {
         outlet_id: currentOutlet.id,
-        cashier_id: currentUser.id,
+        cashier_id: currentStaff.id,
         customer_name: customerName,
         items,
         payment_method: paymentMethod,
@@ -1564,10 +1564,11 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
    * Handle split payment processing
    */
   const handleSplitPayment = async (mode: 'save' | 'save_and_print' = 'save') => {
-    if (!currentUser?.id || !currentOutlet?.id || isFinalizingSale || finalizeSaleLockRef.current) return;
+    if (!currentUser?.id || !currentStaff?.id || !currentOutlet?.id || isFinalizingSale || finalizeSaleLockRef.current) return;
 
     const outletId = currentOutlet.id;
-    const cashierId = currentUser.id;
+    const cashierUserId = currentUser.id;
+    const cashierStaffId = currentStaff.id;
     const activeTerminalId = terminalId || undefined;
     const terminalHardware = getHardwareRuntimeForTerminal(outletId, activeTerminalId);
     const hardwarePolicy = terminalHardware.policy;
@@ -1640,7 +1641,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     const offlineId = createLocalOfflineId();
     const transactionRequest: any = {
       outlet_id: outletId,
-      cashier_id: cashierId,
+      cashier_id: cashierStaffId,
       items,
       payment_method: primaryPaymentMethod,
       tendered_amount: totalPaid,
@@ -1707,7 +1708,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                   await posService.openCashDrawerSession({
                     outlet_id: outletId,
                     terminal_id: activeTerminalId,
-                    cashier_id: cashierId,
+                    cashier_id: cashierUserId,
                     opening_balance: 0,
                     opening_notes: 'Auto-opened from sale based on hardware preferences'
                   });

@@ -6,6 +6,7 @@
 import { apiClient } from './apiClient';
 import { offlineDatabase } from './offlineDatabase';
 import logger from './logger';
+import { getParsedStaffSession } from './staffSessionStorage';
 
 // ===============================================
 // TYPES AND INTERFACES
@@ -1548,6 +1549,21 @@ class POSService {
 
     this.offlineSyncPromise = (async () => {
       try {
+        const staffSession = getParsedStaffSession<{ session_token?: string; expires_at?: string }>();
+        const staffSessionToken = typeof staffSession?.session_token === 'string' ? staffSession.session_token.trim() : '';
+        if (!staffSessionToken) {
+          logger.warn('Skipping offline transaction sync: no active POS staff session.');
+          return 0;
+        }
+        const expiresAtRaw = typeof staffSession?.expires_at === 'string' ? staffSession.expires_at.trim() : '';
+        if (expiresAtRaw) {
+          const expiresAtMs = new Date(expiresAtRaw).getTime();
+          if (!Number.isNaN(expiresAtMs) && expiresAtMs <= Date.now()) {
+            logger.warn('Skipping offline transaction sync: POS staff session has expired.');
+            return 0;
+          }
+        }
+
         let offlineTransactions: any[] = [];
 
         if (this.isInitialized) {

@@ -352,7 +352,7 @@ class SplitPaymentEntry(BaseModel):
 class POSTransactionCreate(BaseModel):
     """Schema for creating a POS transaction"""
     outlet_id: str = Field(..., description="Outlet ID")
-    cashier_id: str = Field(..., description="Cashier user ID")
+    cashier_id: str = Field(..., description="Cashier staff profile ID")
     customer_id: Optional[str] = Field(None, description="Customer ID (optional)")
     customer_name: Optional[str] = Field(None, max_length=255, description="Customer name for receipt")
     items: List[TransactionItemCreate] = Field(..., min_items=1, description="Transaction items")
@@ -384,7 +384,7 @@ class POSTransactionResponse(BaseModel):
     id: str = Field(..., description="Transaction unique identifier")
     outlet_id: str = Field(..., description="Outlet identifier")
     transaction_number: str = Field("", description="Transaction number")
-    cashier_id: str = Field("", description="Cashier ID")
+    cashier_id: str = Field("", description="Cashier staff profile ID")
     customer_id: Optional[str] = Field(None, description="Customer ID")
     customer_name: Optional[str] = Field(None, description="Customer name")
     subtotal: Decimal = Field(0, description="Subtotal amount")

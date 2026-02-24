@@ -492,6 +492,10 @@ def _decorate_transaction_record(record: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize transaction payload for API response contracts."""
     row = dict(record)
     split_payments = _extract_split_payments_from_record(row)
+    staff_profile_id = _extract_cashier_staff_profile_id_from_record(row)
+    if staff_profile_id:
+        # API contract: cashier_id represents POS staff identity.
+        row["cashier_id"] = staff_profile_id
     row["split_payments"] = split_payments or None
     row["notes"] = _extract_display_note_from_record(row)
     return row
@@ -1710,6 +1714,12 @@ async def create_transaction(
             x_pos_staff_session
         )
         authenticated_user_id = _resolve_actor_user_id(current_user)
+        staff_profile_id = str(actor_context.get('staff_profile_id') or '').strip()
+        if actor_context.get('source') != 'staff_session' or not staff_profile_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Active POS staff clock-in is required before processing sales"
+            )
 
         has_line_discount = any((item.discount_amount or Decimal(0)) > Decimal(0) for item in transaction.items)
         has_transaction_discount = (transaction.discount_amount or Decimal(0)) > Decimal(0)
@@ -1770,16 +1780,15 @@ async def create_transaction(
             discount_authorizer_staff_profile_id = str(authorizer_profile.get('id') or '').strip() or None
             discount_authorizer_name = str(authorizer_profile.get('display_name') or '').strip() or None
 
-        # Persist user-id in pos_transactions.cashier_id (FK -> users.id).
-        # Staff session is still used for role enforcement and cashier_name display.
-        if transaction.cashier_id and transaction.cashier_id != authenticated_user_id:
-            logger.warning(
-                "Ignoring client cashier_id %s in favor of authenticated user %s",
-                transaction.cashier_id,
-                authenticated_user_id
+        # Request cashier_id is the expected staff profile id.
+        # Keep DB cashier_id as authenticated user id for FK compatibility.
+        requested_cashier_id = str(transaction.cashier_id or '').strip()
+        if requested_cashier_id and requested_cashier_id not in {staff_profile_id, authenticated_user_id}:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Transaction cashier does not match active staff session"
             )
         cashier_id = authenticated_user_id
-        staff_profile_id = actor_context.get('staff_profile_id')
         normalized_offline_id = _normalize_optional_uuid(transaction.offline_id, "offline_id")
 
         if normalized_offline_id:
@@ -1910,20 +1919,14 @@ async def create_transaction(
             notes_metadata or None
         )
 
-        # Get cashier's name for display (prefer staff_profiles, then users).
+        # Cashier display always comes from staff profile identity for POS transactions.
         cashier_name = 'Unknown'
         try:
-            if staff_profile_id:
-                cashier_result = supabase.table('staff_profiles').select('display_name').eq('id', staff_profile_id).execute()
-                if cashier_result.data:
-                    cashier_name = cashier_result.data[0].get('display_name') or cashier_name
-
-            if cashier_name == 'Unknown':
-                user_result = supabase.table('users').select('name').eq('id', cashier_id).execute()
-                if user_result.data:
-                    cashier_name = user_result.data[0].get('name') or cashier_name
+            cashier_result = supabase.table('staff_profiles').select('display_name').eq('id', staff_profile_id).execute()
+            if cashier_result.data:
+                cashier_name = cashier_result.data[0].get('display_name') or cashier_name
         except Exception as cashier_lookup_error:
-            logger.warning(f"Cashier name lookup failed for {cashier_id}: {cashier_lookup_error}")
+            logger.warning(f"Cashier name lookup failed for staff profile {staff_profile_id}: {cashier_lookup_error}")
 
         # Prepare transaction data
         transaction_data = {
@@ -3568,9 +3571,17 @@ async def print_receipt(
             biz_result = supabase.table('business_settings').select('*').eq('outlet_id', outlet['id']).execute()
             biz_settings = biz_result.data[0] if biz_result.data else None
 
-        # Get cashier info
-        cashier_result = supabase.table('users').select('name').eq('id', transaction['cashier_id']).execute()
-        cashier_name = cashier_result.data[0]['name'] if cashier_result.data else 'Cashier'
+        # Get cashier info (prefer staff profile identity, fallback to users for legacy rows)
+        cashier_name = str(transaction.get('cashier_name') or '').strip() or 'Cashier'
+        transaction_staff_profile_id = _extract_cashier_staff_profile_id_from_record(transaction)
+        if transaction_staff_profile_id:
+            staff_result = supabase.table(Tables.STAFF_PROFILES).select('display_name').eq('id', transaction_staff_profile_id).limit(1).execute()
+            if staff_result.data:
+                cashier_name = str(staff_result.data[0].get('display_name') or '').strip() or cashier_name
+        else:
+            cashier_result = supabase.table('users').select('name').eq('id', transaction['cashier_id']).limit(1).execute()
+            if cashier_result.data:
+                cashier_name = str(cashier_result.data[0].get('name') or '').strip() or cashier_name
 
         # Determine currency symbol
         currency = (biz_settings or {}).get('currency', (outlet or {}).get('currency', 'NGN'))
@@ -3963,7 +3974,7 @@ async def get_sales_breakdown(
 
         # Build query
         query = supabase.table('pos_transactions')\
-            .select('*, pos_transaction_items(*), users!pos_transactions_cashier_id_fkey(id, name)')\
+            .select('*, pos_transaction_items(*)')\
             .eq('outlet_id', outlet_id)\
             .eq('status', 'completed')\
             .neq('is_voided', True)\
@@ -3973,6 +3984,21 @@ async def get_sales_breakdown(
         result = query.order('transaction_date', desc=False).execute()
 
         transactions = result.data or []
+        staff_profiles_result = supabase.table(Tables.STAFF_PROFILES)\
+            .select('id,display_name')\
+            .eq('outlet_id', outlet_id)\
+            .execute()
+        staff_name_by_id = {
+            str(row.get('id') or '').strip(): str(row.get('display_name') or '').strip()
+            for row in (staff_profiles_result.data or [])
+            if str(row.get('id') or '').strip()
+        }
+        staff_ids_by_name: Dict[str, List[str]] = {}
+        for staff_id, display_name in staff_name_by_id.items():
+            normalized_name = display_name.lower()
+            if not normalized_name:
+                continue
+            staff_ids_by_name.setdefault(normalized_name, []).append(staff_id)
 
         # Initialize breakdown structure
         breakdown = {
@@ -3999,27 +4025,30 @@ async def get_sales_breakdown(
 
         # Process each transaction
         for tx in transactions:
-            transaction_cashier_id = str(tx.get('cashier_id') or '').strip()
+            transaction_user_id = str(tx.get('cashier_id') or '').strip()
             transaction_staff_profile_id = _extract_cashier_staff_profile_id_from_record(tx)
             transaction_cashier_name = str(tx.get('cashier_name') or '').strip()
-            user_cashier_name = (
-                tx.get('users', {}).get('name', 'Unknown Cashier')
-                if tx.get('users')
-                else 'Unknown Cashier'
-            )
-            cashier_name = transaction_cashier_name or user_cashier_name
+
+            # Legacy fallback rows may have only cashier_name; promote to staff id when unambiguous.
+            if not transaction_staff_profile_id and transaction_cashier_name:
+                matching_staff_ids = staff_ids_by_name.get(transaction_cashier_name.lower(), [])
+                if len(matching_staff_ids) == 1:
+                    transaction_staff_profile_id = matching_staff_ids[0]
 
             if transaction_staff_profile_id:
+                cashier_name = staff_name_by_id.get(transaction_staff_profile_id) or transaction_cashier_name or 'Unknown Cashier'
                 cashier_group_key = f"staff:{transaction_staff_profile_id}"
-            elif transaction_cashier_name:
-                cashier_group_key = f"name:{transaction_cashier_name.lower()}"
             else:
-                cashier_group_key = f"user:{transaction_cashier_id}"
+                cashier_name = transaction_cashier_name or 'Unknown Cashier'
+                if transaction_cashier_name:
+                    cashier_group_key = f"name:{transaction_cashier_name.lower()}"
+                else:
+                    cashier_group_key = f"user:{transaction_user_id or 'unknown'}"
 
             if cashier_filter_value:
                 cashier_filter_matches = cashier_filter_value in {
                     cashier_group_key,
-                    transaction_cashier_id,
+                    transaction_user_id,
                     transaction_staff_profile_id or '',
                 }
                 if not cashier_filter_matches:
@@ -4061,7 +4090,7 @@ async def get_sales_breakdown(
                 breakdown['by_cashier'][cashier_group_key] = {
                     'id': cashier_group_key,
                     'staff_profile_id': transaction_staff_profile_id,
-                    'user_id': transaction_cashier_id,
+                    'user_id': transaction_user_id,
                     'name': cashier_name,
                     'transaction_count': 0,
                     'total_amount': Decimal('0'),
@@ -4104,7 +4133,7 @@ async def get_sales_breakdown(
                 'amount': float(amount),
                 'payment_method': payment_method,
                 'split_payments': split_payments if len(split_payments) > 1 else None,
-                'cashier_id': transaction_cashier_id,
+                'cashier_id': transaction_staff_profile_id or transaction_user_id or cashier_group_key,
                 'cashier_staff_profile_id': transaction_staff_profile_id,
                 'cashier_group_key': cashier_group_key,
                 'cashier_name': cashier_name,
