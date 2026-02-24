@@ -1,0 +1,200 @@
+-- Add first-class staff cashier identity to POS transactions.
+-- Safe to run multiple times.
+
+BEGIN;
+
+DO $$
+DECLARE
+  has_pos_transactions BOOLEAN := to_regclass('public.pos_transactions') IS NOT NULL;
+  has_staff_profiles BOOLEAN := to_regclass('public.staff_profiles') IS NOT NULL;
+  has_notes_column BOOLEAN := FALSE;
+  has_cashier_name_column BOOLEAN := FALSE;
+BEGIN
+  IF NOT has_pos_transactions THEN
+    RAISE NOTICE 'Skipping migration: public.pos_transactions does not exist. Run POS base migration first.';
+    RETURN;
+  END IF;
+
+  -- -----------------------------------------------------------------
+  -- 1) Schema: add staff-profile cashier column + FK + indexes
+  -- -----------------------------------------------------------------
+  EXECUTE 'ALTER TABLE public.pos_transactions ADD COLUMN IF NOT EXISTS cashier_staff_profile_id UUID';
+
+  IF has_staff_profiles THEN
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_constraint
+      WHERE conname = 'pos_transactions_cashier_staff_profile_id_fkey'
+        AND conrelid = to_regclass('public.pos_transactions')
+    ) THEN
+      EXECUTE '
+        ALTER TABLE public.pos_transactions
+        ADD CONSTRAINT pos_transactions_cashier_staff_profile_id_fkey
+        FOREIGN KEY (cashier_staff_profile_id)
+        REFERENCES public.staff_profiles(id)
+        ON DELETE SET NULL
+      ';
+    END IF;
+  ELSE
+    RAISE NOTICE 'public.staff_profiles is missing; FK and backfill steps skipped.';
+  END IF;
+
+  EXECUTE '
+    CREATE INDEX IF NOT EXISTS idx_pos_transactions_cashier_staff_profile_date
+      ON public.pos_transactions(cashier_staff_profile_id, transaction_date)
+  ';
+  EXECUTE '
+    CREATE INDEX IF NOT EXISTS idx_pos_transactions_outlet_cashier_staff_profile_date
+      ON public.pos_transactions(outlet_id, cashier_staff_profile_id, transaction_date)
+  ';
+  EXECUTE '
+    COMMENT ON COLUMN public.pos_transactions.cashier_staff_profile_id IS
+    ''Staff profile identity for cashier attribution in POS reports and EOD.''
+  ';
+
+  IF NOT has_staff_profiles THEN
+    RETURN;
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'pos_transactions'
+      AND column_name = 'notes'
+  ) INTO has_notes_column;
+
+  SELECT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'pos_transactions'
+      AND column_name = 'cashier_name'
+  ) INTO has_cashier_name_column;
+
+  -- -----------------------------------------------------------------
+  -- 2) Backfill helper: tolerant JSON parser for notes payload
+  -- -----------------------------------------------------------------
+  EXECUTE '
+    CREATE OR REPLACE FUNCTION public._compazz_try_parse_jsonb(value text)
+    RETURNS jsonb
+    LANGUAGE plpgsql
+    STABLE
+    AS $inner$
+    BEGIN
+      IF value IS NULL OR btrim(value) = '''' THEN
+        RETURN NULL;
+      END IF;
+      RETURN value::jsonb;
+    EXCEPTION
+      WHEN OTHERS THEN
+        RETURN NULL;
+    END;
+    $inner$
+  ';
+
+  -- -----------------------------------------------------------------
+  -- 3) Backfill from notes.cashier_staff_profile_id (when valid + same outlet)
+  -- -----------------------------------------------------------------
+  IF has_notes_column THEN
+    EXECUTE '
+      WITH parsed AS (
+        SELECT
+          t.id AS transaction_id,
+          t.outlet_id,
+          NULLIF(
+            btrim(public._compazz_try_parse_jsonb(t.notes)->>''cashier_staff_profile_id''),
+            ''''
+          ) AS raw_staff_profile_id
+        FROM public.pos_transactions t
+        WHERE t.cashier_staff_profile_id IS NULL
+      ),
+      valid AS (
+        SELECT
+          p.transaction_id,
+          sp.id AS staff_profile_id
+        FROM parsed p
+        JOIN public.staff_profiles sp
+          ON sp.id::text = p.raw_staff_profile_id
+         AND sp.outlet_id = p.outlet_id
+      )
+      UPDATE public.pos_transactions t
+      SET cashier_staff_profile_id = v.staff_profile_id
+      FROM valid v
+      WHERE t.id = v.transaction_id
+        AND t.cashier_staff_profile_id IS NULL
+    ';
+  END IF;
+
+  -- -----------------------------------------------------------------
+  -- 4) Backfill from cashier_name -> staff_profiles.display_name
+  --    Only if match is unambiguous for the transaction row.
+  -- -----------------------------------------------------------------
+  IF has_cashier_name_column THEN
+    EXECUTE '
+      WITH candidates AS (
+        SELECT
+          t.id AS transaction_id,
+          sp.id AS staff_profile_id,
+          ROW_NUMBER() OVER (
+            PARTITION BY t.id
+            ORDER BY sp.is_active DESC, sp.id
+          ) AS row_rank,
+          COUNT(*) OVER (PARTITION BY t.id) AS candidate_count
+        FROM public.pos_transactions t
+        JOIN public.staff_profiles sp
+          ON sp.outlet_id = t.outlet_id
+         AND lower(btrim(sp.display_name)) = lower(btrim(t.cashier_name))
+        WHERE t.cashier_staff_profile_id IS NULL
+          AND t.cashier_name IS NOT NULL
+          AND btrim(t.cashier_name) <> ''''
+      )
+      UPDATE public.pos_transactions t
+      SET cashier_staff_profile_id = c.staff_profile_id
+      FROM candidates c
+      WHERE t.id = c.transaction_id
+        AND c.row_rank = 1
+        AND c.candidate_count = 1
+        AND t.cashier_staff_profile_id IS NULL
+    ';
+
+    -- ---------------------------------------------------------------
+    -- 5) Backfill by historical name mapping when name -> one staff id
+    -- ---------------------------------------------------------------
+    EXECUTE '
+      WITH name_map AS (
+        SELECT
+          t.outlet_id,
+          lower(btrim(t.cashier_name)) AS normalized_cashier_name,
+          MIN(t.cashier_staff_profile_id) AS staff_profile_id
+        FROM public.pos_transactions t
+        WHERE t.cashier_staff_profile_id IS NOT NULL
+          AND t.cashier_name IS NOT NULL
+          AND btrim(t.cashier_name) <> ''''
+        GROUP BY t.outlet_id, lower(btrim(t.cashier_name))
+        HAVING COUNT(DISTINCT t.cashier_staff_profile_id) = 1
+      )
+      UPDATE public.pos_transactions t
+      SET cashier_staff_profile_id = m.staff_profile_id
+      FROM name_map m
+      WHERE t.cashier_staff_profile_id IS NULL
+        AND t.outlet_id = m.outlet_id
+        AND lower(btrim(COALESCE(t.cashier_name, ''''))) = m.normalized_cashier_name
+    ';
+  END IF;
+
+  EXECUTE 'DROP FUNCTION IF EXISTS public._compazz_try_parse_jsonb(text)';
+END $$;
+
+COMMIT;
+
+-- -------------------------------------------------------------------
+-- 6) Refresh PostgREST schema cache (Supabase/PostgREST)
+-- -------------------------------------------------------------------
+DO $$
+BEGIN
+  PERFORM pg_notify('pgrst', 'reload schema');
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE NOTICE 'PostgREST schema reload notify failed: %', SQLERRM;
+END $$;
