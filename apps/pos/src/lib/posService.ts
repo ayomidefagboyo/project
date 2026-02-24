@@ -41,13 +41,24 @@ export interface POSProduct {
   reorder_notification_sent?: boolean;
   last_received?: string;
   min_shelf_life_days?: number;
+  // Multi-unit selling
+  base_unit_name?: string;
+  pack_enabled?: boolean;
+  pack_name?: string;
+  units_per_pack?: number;
+  pack_price?: number;
+  pack_barcode?: string;
 }
+
+export type SaleUnit = 'unit' | 'pack';
 
 export interface POSTransactionItem {
   product_id: string;
   quantity: number;
   unit_price?: number;
   discount_amount?: number;
+  sale_unit?: SaleUnit;
+  units_per_sale_unit?: number;
 }
 
 export interface SplitPaymentLine {
@@ -91,6 +102,11 @@ export interface POSTransactionItemResponse {
   discount_amount: number;
   tax_amount: number;
   line_total: number;
+  sale_unit?: SaleUnit;
+  sale_quantity?: number;
+  sale_unit_price?: number;
+  units_per_sale_unit?: number;
+  base_units_quantity?: number;
 }
 
 export interface CreateTransactionRequest {
@@ -135,6 +151,12 @@ export interface ProductCreateRequest {
   expiry_date?: string;
   markup_percentage?: number;
   auto_pricing?: boolean;
+  base_unit_name?: string;
+  pack_enabled?: boolean;
+  pack_name?: string;
+  units_per_pack?: number;
+  pack_price?: number;
+  pack_barcode?: string;
 }
 
 export interface BulkImportProductsRequest {
@@ -2601,6 +2623,10 @@ class POSService {
       quantity: number;
       unit_price: number;
       discount: number;
+      sale_unit?: SaleUnit;
+      units_per_sale_unit?: number;
+      sale_unit_price?: number;
+      sale_quantity?: number;
     }>;
     total: number;
   }): Promise<any> {

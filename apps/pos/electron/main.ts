@@ -85,9 +85,31 @@ const readReleaseName = (payload: unknown): string | undefined => {
   return undefined;
 };
 
+const normalizeUpdaterErrorMessage = (message: string): string => {
+  const trimmed = message.trim();
+  if (!trimmed) return 'Unknown update error';
+
+  const lowered = trimmed.toLowerCase();
+  if (
+    lowered.includes('please double check that your authentication token is correct') ||
+    lowered.includes('status code 404') ||
+    lowered.includes('status code 405') ||
+    lowered.includes('method not allowed') ||
+    lowered.includes('not found')
+  ) {
+    return 'Update server unavailable (404/405). Verify release assets (including latest.yml) are published.';
+  }
+
+  return trimmed;
+};
+
 const readErrorMessage = (err: unknown): string => {
-  if (err instanceof Error && err.message.trim().length > 0) return err.message;
-  if (typeof err === 'string' && err.trim().length > 0) return err;
+  if (err instanceof Error) {
+    return normalizeUpdaterErrorMessage(err.message || '');
+  }
+  if (typeof err === 'string') {
+    return normalizeUpdaterErrorMessage(err);
+  }
   return 'Unknown update error';
 };
 

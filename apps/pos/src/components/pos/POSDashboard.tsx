@@ -22,7 +22,7 @@ interface TerminalConfig {
   initialized_at: string;
 }
 import { useOutlet } from '../../contexts/OutletContext';
-import { posService, PaymentMethod } from '../../lib/posService';
+import { posService, PaymentMethod, type SaleUnit } from '../../lib/posService';
 import type { POSProduct } from '../../lib/posService';
 import { staffService } from '../../lib/staffService';
 import type { StaffProfile, StaffAuthResponse } from '../../types';
@@ -64,14 +64,21 @@ import type { ReceiptPrintStyle } from '../../lib/receiptPrinter';
 import type { ReceiptTemplate } from '../settings/ReceiptEditor';
 
 export interface CartItem {
+  lineId: string;
   product: POSProduct;
   quantity: number;
   unitPrice: number;
   discount: number;
+  saleUnit: SaleUnit;
+  unitsPerSaleUnit: number;
 }
 
 export interface POSDashboardHandle {
-  addToCart: (product: POSProduct, quantity?: number) => void;
+  addToCart: (
+    product: POSProduct,
+    quantity?: number,
+    options?: { saleUnit?: SaleUnit }
+  ) => void;
   openCustomerSearch: () => void;
   openTransactionHistory: () => void;
 }
@@ -119,6 +126,45 @@ interface DiscountOverrideGrant {
   expiresAt: string;
   approver: Pick<StaffProfile, 'id' | 'display_name' | 'role' | 'permissions'>;
 }
+
+const DEFAULT_BASE_UNIT_NAME = 'Unit';
+const DEFAULT_PACK_NAME = 'Pack';
+
+const normalizeSaleUnit = (value?: string | null): SaleUnit => {
+  return String(value || '').trim().toLowerCase() === 'pack' ? 'pack' : 'unit';
+};
+
+const getUnitsPerPack = (product: POSProduct): number => {
+  const raw = Number(product.units_per_pack || 0);
+  return Number.isFinite(raw) && raw >= 2 ? Math.floor(raw) : 1;
+};
+
+const isPackSaleConfigured = (product: POSProduct): boolean => {
+  return Boolean(product.pack_enabled) && getUnitsPerPack(product) >= 2 && Number(product.pack_price || 0) > 0;
+};
+
+const getLineUnitPrice = (product: POSProduct, saleUnit: SaleUnit): number => {
+  if (saleUnit === 'pack' && isPackSaleConfigured(product)) {
+    return Number(product.pack_price || 0);
+  }
+  return Number(product.unit_price || 0);
+};
+
+const getLineUnitsPerSaleUnit = (product: POSProduct, saleUnit: SaleUnit): number => {
+  if (saleUnit === 'pack' && isPackSaleConfigured(product)) {
+    return getUnitsPerPack(product);
+  }
+  return 1;
+};
+
+const getSaleUnitLabel = (product: POSProduct, saleUnit: SaleUnit): string => {
+  if (saleUnit === 'pack') {
+    return String(product.pack_name || DEFAULT_PACK_NAME).trim() || DEFAULT_PACK_NAME;
+  }
+  return String(product.base_unit_name || DEFAULT_BASE_UNIT_NAME).trim() || DEFAULT_BASE_UNIT_NAME;
+};
+
+const buildCartLineId = (productId: string, saleUnit: SaleUnit): string => `${productId}:${saleUnit}`;
 
 const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ terminalConfig }, ref) => {
   // Context and state
@@ -220,6 +266,42 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
       minimumFractionDigits: 2
     }).format(amount);
   };
+
+  const normalizeCartLine = useCallback((input: any): CartItem => {
+    const product = input.product as POSProduct;
+    const requestedSaleUnit = normalizeSaleUnit(input.saleUnit || input.sale_unit);
+    const saleUnit: SaleUnit =
+      requestedSaleUnit === 'pack' && isPackSaleConfigured(product) ? 'pack' : 'unit';
+    const quantity = Math.max(
+      1,
+      Number(input.quantity || input.sale_quantity || 1)
+    );
+    const fallbackUnitPrice = getLineUnitPrice(product, saleUnit);
+    const parsedUnitPrice = Number(
+      input.unitPrice ?? input.sale_unit_price ?? input.unit_price ?? fallbackUnitPrice
+    );
+    const unitPrice = Number.isFinite(parsedUnitPrice) && parsedUnitPrice >= 0
+      ? parsedUnitPrice
+      : fallbackUnitPrice;
+    const unitsPerSaleUnit = Math.max(
+      1,
+      Number(
+        input.unitsPerSaleUnit ??
+        input.units_per_sale_unit ??
+        getLineUnitsPerSaleUnit(product, saleUnit)
+      ) || 1
+    );
+
+    return {
+      lineId: String(input.lineId || buildCartLineId(product.id, saleUnit)),
+      product,
+      quantity,
+      unitPrice,
+      discount: Math.max(0, Number(input.discount || 0)),
+      saleUnit,
+      unitsPerSaleUnit,
+    };
+  }, []);
 
   const paymentMethodLabel = (method: PaymentMethod): string => {
     if (method === PaymentMethod.CASH) return 'Cash';
@@ -400,7 +482,10 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
       cashierName,
       customerName: params.customerName,
       items: params.cartSnapshot.map((item) => ({
-        name: item.product.name,
+        name:
+          item.saleUnit === 'pack'
+            ? `${item.product.name} (${getSaleUnitLabel(item.product, item.saleUnit)})`
+            : item.product.name,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         discount: item.discount,
@@ -955,25 +1040,39 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
   /**
    * Add product to cart
    */
-  const addToCart = (product: POSProduct, quantity: number = 1) => {
+  const addToCart = (
+    product: POSProduct,
+    quantity: number = 1,
+    options?: { saleUnit?: SaleUnit }
+  ) => {
+    const requestedUnit = normalizeSaleUnit(options?.saleUnit);
+    const saleUnit: SaleUnit =
+      requestedUnit === 'pack' && isPackSaleConfigured(product) ? 'pack' : 'unit';
+    const lineId = buildCartLineId(product.id, saleUnit);
+    const unitPrice = getLineUnitPrice(product, saleUnit);
+    const unitsPerSaleUnit = getLineUnitsPerSaleUnit(product, saleUnit);
+
     setCart(prevCart => {
-      const existingItem = prevCart.find(item => item.product.id === product.id);
+      const existingItem = prevCart.find(item => item.lineId === lineId);
 
       if (existingItem) {
         // Update quantity
         return prevCart.map(item =>
-          item.product.id === product.id
+          item.lineId === lineId
             ? { ...item, quantity: item.quantity + quantity }
             : item
         );
       } else {
         // Add new item – treat product.unit_price as VAT-inclusive final price
         return [...prevCart, {
+          lineId,
           product,
           quantity,
           // IMPORTANT: unitPrice is already VAT-inclusive; we DO NOT add tax again here.
-          unitPrice: product.unit_price,
-          discount: 0
+          unitPrice,
+          discount: 0,
+          saleUnit,
+          unitsPerSaleUnit,
         }];
       }
     });
@@ -989,22 +1088,22 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
   /**
    * Remove item from cart
    */
-  const removeFromCart = (productId: string) => {
-    setCart(prevCart => prevCart.filter(item => item.product.id !== productId));
+  const removeFromCart = (lineId: string) => {
+    setCart(prevCart => prevCart.filter(item => item.lineId !== lineId));
   };
 
   /**
    * Update cart item quantity
    */
-  const updateCartItemQuantity = (productId: string, quantity: number) => {
+  const updateCartItemQuantity = (lineId: string, quantity: number) => {
     if (quantity <= 0) {
-      removeFromCart(productId);
+      removeFromCart(lineId);
       return;
     }
 
     setCart(prevCart =>
       prevCart.map(item =>
-        item.product.id === productId
+        item.lineId === lineId
           ? { ...item, quantity }
           : item
       )
@@ -1014,14 +1113,61 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
   /**
    * Update cart item discount
    */
-  const updateCartItemDiscount = (productId: string, discount: number) => {
+  const updateCartItemDiscount = (lineId: string, discount: number) => {
     setCart(prevCart =>
       prevCart.map(item =>
-        item.product.id === productId
+        item.lineId === lineId
           ? { ...item, discount }
           : item
       )
     );
+  };
+
+  /**
+   * Switch cart line between unit and pack sale mode.
+   */
+  const updateCartItemSaleUnit = (lineId: string, nextSaleUnit: SaleUnit) => {
+    setCart((prevCart) => {
+      const sourceLine = prevCart.find((item) => item.lineId === lineId);
+      if (!sourceLine) return prevCart;
+
+      const normalizedNext = normalizeSaleUnit(nextSaleUnit);
+      const resolvedNext: SaleUnit =
+        normalizedNext === 'pack' && isPackSaleConfigured(sourceLine.product) ? 'pack' : 'unit';
+      const targetLineId = buildCartLineId(sourceLine.product.id, resolvedNext);
+      if (targetLineId === lineId) return prevCart;
+
+      const nextUnitPrice = getLineUnitPrice(sourceLine.product, resolvedNext);
+      const nextUnitsPerSaleUnit = getLineUnitsPerSaleUnit(sourceLine.product, resolvedNext);
+
+      const withoutSource = prevCart.filter((item) => item.lineId !== lineId);
+      const targetIndex = withoutSource.findIndex((item) => item.lineId === targetLineId);
+
+      if (targetIndex >= 0) {
+        const merged = [...withoutSource];
+        merged[targetIndex] = {
+          ...merged[targetIndex],
+          quantity: merged[targetIndex].quantity + sourceLine.quantity,
+          unitPrice: nextUnitPrice,
+          saleUnit: resolvedNext,
+          unitsPerSaleUnit: nextUnitsPerSaleUnit,
+          discount: 0,
+        };
+        return merged;
+      }
+
+      return [
+        ...withoutSource,
+        {
+          ...sourceLine,
+          lineId: targetLineId,
+          saleUnit: resolvedNext,
+          unitsPerSaleUnit: nextUnitsPerSaleUnit,
+          unitPrice: nextUnitPrice,
+          discount: 0,
+        },
+      ];
+    });
   };
 
   /**
@@ -1066,34 +1212,42 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
         // Convert backend format to frontend format
         const convertedReceipts: HeldSale[] = receipts.map((r: any) => ({
           id: r.id,
-          cart: r.items.map((item: any) => ({
-            product: {
+          cart: r.items.map((item: any) => {
+            const matched = products.find((p) => p.id === item.product_id);
+            const fallbackProduct = {
               id: item.product_id,
               // Older held receipts may store placeholder "Product". Resolve using loaded catalog if possible.
               name: (() => {
                 const raw = (item.product_name || (item.product && item.product.name) || '').trim();
                 if (raw && raw.toLowerCase() !== 'product') return raw;
-                const matched = products.find((p) => p.id === item.product_id);
                 return matched?.name || item.sku || 'Product';
               })(),
-              unit_price: item.unit_price,
-              tax_rate: item.tax_rate || 0.075,
-              quantity_on_hand: 0, // Will be fetched when needed
-              reorder_level: 0,
-              reorder_quantity: 0,
+              unit_price: Number(item.unit_price || matched?.unit_price || 0),
+              tax_rate: Number(item.tax_rate || matched?.tax_rate || 0.075),
+              quantity_on_hand: Number(matched?.quantity_on_hand || 0),
+              reorder_level: Number(matched?.reorder_level || 0),
+              reorder_quantity: Number(matched?.reorder_quantity || 0),
               is_active: true,
               display_order: 0,
-              sku: item.sku || '',
-              barcode: item.barcode,
-              category: item.category,
+              sku: item.sku || matched?.sku || '',
+              barcode: item.barcode || matched?.barcode,
+              category: item.category || matched?.category,
               outlet_id: currentOutlet.id,
               created_at: '',
               updated_at: '',
-            } as POSProduct,
-            quantity: item.quantity,
-            unitPrice: item.unit_price,
-            discount: item.discount || 0,
-          })),
+              base_unit_name: matched?.base_unit_name || item.base_unit_name || DEFAULT_BASE_UNIT_NAME,
+              pack_enabled: matched?.pack_enabled ?? item.pack_enabled,
+              pack_name: matched?.pack_name || item.pack_name,
+              units_per_pack: matched?.units_per_pack ?? item.units_per_pack,
+              pack_price: matched?.pack_price ?? item.pack_price,
+              pack_barcode: matched?.pack_barcode || item.pack_barcode,
+            } as POSProduct;
+
+            return normalizeCartLine({
+              ...item,
+              product: matched || fallbackProduct,
+            });
+          }),
           saved_at: r.saved_at,
           total: r.total,
           cashier_id: r.cashier_id,
@@ -1112,7 +1266,15 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed)) {
-            setHeldSales(parsed);
+            const normalized = parsed.map((entry: any) => ({
+              ...entry,
+              cart: Array.isArray(entry?.cart)
+                ? entry.cart
+                    .map((line: any) => (line?.product ? normalizeCartLine(line) : null))
+                    .filter(Boolean)
+                : [],
+            }));
+            setHeldSales(normalized);
           }
         }
       }
@@ -1125,7 +1287,15 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
           if (raw) {
             const parsed = JSON.parse(raw);
             if (Array.isArray(parsed)) {
-              setHeldSales(parsed);
+              const normalized = parsed.map((entry: any) => ({
+                ...entry,
+                cart: Array.isArray(entry?.cart)
+                  ? entry.cart
+                      .map((line: any) => (line?.product ? normalizeCartLine(line) : null))
+                      .filter(Boolean)
+                  : [],
+              }));
+              setHeldSales(normalized);
             }
           }
         } catch (localErr) {
@@ -1138,7 +1308,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
         setIsLoadingHeldReceipts(false);
       }
     }
-  }, [currentOutlet?.id, isOnline, heldStorageKey, products]);
+  }, [currentOutlet?.id, isOnline, heldStorageKey, products, normalizeCartLine]);
 
   // Load held sales on outlet/network/catalog changes
   useEffect(() => {
@@ -1211,6 +1381,10 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
       quantity: item.quantity,
       unit_price: item.unitPrice,
       discount: item.discount,
+      sale_unit: item.saleUnit,
+      units_per_sale_unit: item.unitsPerSaleUnit,
+      sale_quantity: item.quantity,
+      sale_unit_price: item.unitPrice,
       // Include product details for easier restoration
       product_name: item.product.name,
       sku: item.product.sku,
@@ -1353,7 +1527,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     }
 
     // Restore cart
-    setCart(restoredCart);
+    setCart(restoredCart.map((line: any) => normalizeCartLine(line)));
     
     // Remove from list (so it doesn't show up again)
     const remaining = heldSales.filter((s) => s.id !== id);
@@ -1523,7 +1697,9 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
         product_id: item.product.id,
         quantity: item.quantity,
         unit_price: item.unitPrice,
-        discount_amount: item.discount * item.quantity
+        discount_amount: item.discount * item.quantity,
+        sale_unit: item.saleUnit,
+        units_per_sale_unit: item.unitsPerSaleUnit,
       }));
 
       // Create transaction request
@@ -1595,7 +1771,9 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
       product_id: item.product.id,
       quantity: item.quantity,
       unit_price: item.unitPrice,
-      discount_amount: item.discount * item.quantity
+      discount_amount: item.discount * item.quantity,
+      sale_unit: item.saleUnit,
+      units_per_sale_unit: item.unitsPerSaleUnit,
     }));
 
     const splitPayments: Array<{ method: PaymentMethod; amount: number }> = [];
@@ -1763,8 +1941,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
   // Get unique categories for filter
 
   const cartTotals = calculateCartTotals();
-  const isElectronDesktop = typeof window !== 'undefined' && Boolean(window.compazzDesktop?.isElectron);
-  const [desktopUpdateStatus, setDesktopUpdateStatus] = useState<DesktopUpdateStatus>({ state: 'idle' });
   const effectiveStaffRole = String(currentStaff?.role || currentUser?.role || '').toLowerCase();
   const discountPrivilegedRoles = new Set([
     'manager',
@@ -1786,47 +1962,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     discountOverrideGrant && new Date(discountOverrideGrant.expiresAt).getTime() > Date.now()
   );
   const canApplyDiscount = hasRoleDiscountPrivilege || hasValidDiscountOverride;
-
-  useEffect(() => {
-    if (!isElectronDesktop || !window.compazzDesktop) return;
-
-    let active = true;
-    window.compazzDesktop
-      .getUpdateStatus()
-      .then((status) => {
-        if (active) setDesktopUpdateStatus(status);
-      })
-      .catch((err) => {
-        logger.warn('Failed to fetch desktop update status:', err);
-      });
-
-    const listenerId = window.compazzDesktop.onUpdateStatus((status) => {
-      setDesktopUpdateStatus(status);
-    });
-
-    return () => {
-      active = false;
-      window.compazzDesktop?.offUpdateStatus(listenerId);
-    };
-  }, [isElectronDesktop]);
-
-  const triggerDesktopUpdateCheck = async () => {
-    if (!isElectronDesktop || !window.compazzDesktop) return;
-    const result = await window.compazzDesktop.checkForUpdates();
-    if (!result.ok) {
-      error(result.error || 'Update check failed.', 5000);
-      return;
-    }
-    success('Checking for desktop updates...', 3000);
-  };
-
-  const installDesktopUpdateNow = async () => {
-    if (!isElectronDesktop || !window.compazzDesktop) return;
-    const ok = await window.compazzDesktop.installUpdate();
-    if (!ok) {
-      warning('No downloaded update ready yet.', 4000);
-    }
-  };
 
   // Handle search with Debounce and Hybrid Strategy (Memory + Dexie)
   useEffect(() => {
@@ -1905,6 +2040,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                 canApplyDiscount={canApplyDiscount}
                 discountApprovalActive={hasValidDiscountOverride}
                 onUpdateQuantity={updateCartItemQuantity}
+                onUpdateSaleUnit={updateCartItemSaleUnit}
                 onUpdateDiscount={updateCartItemDiscount}
                 onRequestDiscountApproval={requestDiscountApproval}
                 onRemoveItem={removeFromCart}
@@ -2035,37 +2171,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                 </div>
               )}
 
-              {isElectronDesktop && (
-                <div className="text-xs text-stone-600 flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold text-stone-700">
-                    App Update:
-                    {' '}
-                    {desktopUpdateStatus.state === 'checking' && 'Checking...'}
-                    {desktopUpdateStatus.state === 'available' && `Downloading v${desktopUpdateStatus.version}...`}
-                    {desktopUpdateStatus.state === 'downloading' && `Downloading ${Math.round(desktopUpdateStatus.percent || 0)}%`}
-                    {desktopUpdateStatus.state === 'downloaded' && `Ready v${desktopUpdateStatus.version}`}
-                    {desktopUpdateStatus.state === 'not-available' && 'Up to date'}
-                    {desktopUpdateStatus.state === 'error' && desktopUpdateStatus.message}
-                    {desktopUpdateStatus.state === 'idle' && 'Idle'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={triggerDesktopUpdateCheck}
-                    className="px-2.5 py-1 rounded-md border border-stone-300 bg-white hover:bg-stone-100 text-stone-700 font-semibold"
-                  >
-                    Check Now
-                  </button>
-                  {desktopUpdateStatus.state === 'downloaded' && (
-                    <button
-                      type="button"
-                      onClick={installDesktopUpdateNow}
-                      className="px-2.5 py-1 rounded-md border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold"
-                    >
-                      Restart & Install
-                    </button>
-                  )}
-                </div>
-              )}
             </div>
 
             {tenderModal && (() => {
@@ -2331,7 +2436,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                                 })()}
                               </div>
                               <div className="flex items-center gap-2">
-                                <span>x{item.quantity}</span>
+                                <span>x{item.quantity} {getSaleUnitLabel(item.product, item.saleUnit).toLowerCase()}</span>
                                 <span>{formatCurrency(item.unitPrice * item.quantity)}</span>
                               </div>
                             </div>

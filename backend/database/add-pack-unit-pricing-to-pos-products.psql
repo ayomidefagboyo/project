@@ -1,0 +1,112 @@
+-- Add pack/unit selling metadata for POS products and transaction items.
+-- Safe to run multiple times.
+
+BEGIN;
+
+-- -------------------------------------------------------------------
+-- Product-level pack configuration
+-- -------------------------------------------------------------------
+ALTER TABLE IF EXISTS public.pos_products
+  ADD COLUMN IF NOT EXISTS base_unit_name VARCHAR(30) DEFAULT 'Unit',
+  ADD COLUMN IF NOT EXISTS pack_enabled BOOLEAN DEFAULT false,
+  ADD COLUMN IF NOT EXISTS pack_name VARCHAR(30),
+  ADD COLUMN IF NOT EXISTS units_per_pack INTEGER,
+  ADD COLUMN IF NOT EXISTS pack_price DECIMAL(12,2),
+  ADD COLUMN IF NOT EXISTS pack_barcode VARCHAR(100);
+
+UPDATE public.pos_products
+SET
+  base_unit_name = COALESCE(NULLIF(TRIM(base_unit_name), ''), 'Unit'),
+  pack_enabled = COALESCE(pack_enabled, false)
+WHERE true;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'pos_products_units_per_pack_chk'
+      AND conrelid = 'public.pos_products'::regclass
+  ) THEN
+    ALTER TABLE public.pos_products
+      ADD CONSTRAINT pos_products_units_per_pack_chk
+      CHECK (units_per_pack IS NULL OR units_per_pack >= 2);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'pos_products_pack_price_chk'
+      AND conrelid = 'public.pos_products'::regclass
+  ) THEN
+    ALTER TABLE public.pos_products
+      ADD CONSTRAINT pos_products_pack_price_chk
+      CHECK (pack_price IS NULL OR pack_price > 0);
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_pos_products_pack_barcode
+  ON public.pos_products(pack_barcode)
+  WHERE pack_barcode IS NOT NULL;
+
+-- -------------------------------------------------------------------
+-- Transaction item metadata for mixed unit/pack sales
+-- quantity remains the base-unit quantity for inventory-safe reversals.
+-- -------------------------------------------------------------------
+ALTER TABLE IF EXISTS public.pos_transaction_items
+  ADD COLUMN IF NOT EXISTS sale_unit VARCHAR(10) DEFAULT 'unit',
+  ADD COLUMN IF NOT EXISTS sale_quantity INTEGER,
+  ADD COLUMN IF NOT EXISTS sale_unit_price DECIMAL(12,2),
+  ADD COLUMN IF NOT EXISTS units_per_sale_unit INTEGER DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS base_units_quantity INTEGER;
+
+UPDATE public.pos_transaction_items
+SET
+  sale_unit = COALESCE(NULLIF(LOWER(TRIM(sale_unit)), ''), 'unit'),
+  sale_quantity = COALESCE(sale_quantity, quantity),
+  sale_unit_price = COALESCE(sale_unit_price, unit_price),
+  units_per_sale_unit = COALESCE(NULLIF(units_per_sale_unit, 0), 1),
+  base_units_quantity = COALESCE(
+    base_units_quantity,
+    quantity * COALESCE(NULLIF(units_per_sale_unit, 0), 1),
+    quantity
+  )
+WHERE true;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'pos_transaction_items_sale_unit_chk'
+      AND conrelid = 'public.pos_transaction_items'::regclass
+  ) THEN
+    ALTER TABLE public.pos_transaction_items
+      ADD CONSTRAINT pos_transaction_items_sale_unit_chk
+      CHECK (sale_unit IN ('unit', 'pack'));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'pos_transaction_items_units_per_sale_unit_chk'
+      AND conrelid = 'public.pos_transaction_items'::regclass
+  ) THEN
+    ALTER TABLE public.pos_transaction_items
+      ADD CONSTRAINT pos_transaction_items_units_per_sale_unit_chk
+      CHECK (units_per_sale_unit IS NULL OR units_per_sale_unit >= 1);
+  END IF;
+END $$;
+
+COMMIT;
+
+-- -------------------------------------------------------------------
+-- Refresh PostgREST schema cache (Supabase/PostgREST)
+-- -------------------------------------------------------------------
+DO $$
+BEGIN
+  PERFORM pg_notify('pgrst', 'reload schema');
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE NOTICE 'PostgREST schema reload notify failed: %', SQLERRM;
+END $$;

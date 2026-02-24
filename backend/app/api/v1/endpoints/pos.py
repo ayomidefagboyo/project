@@ -226,6 +226,73 @@ def _upsert_pos_products_compat(supabase, rows: List[Dict[str, Any]]):
     )
 
 
+def _update_pos_product_compat(supabase, product_id: str, update_data: Dict[str, Any]):
+    """
+    Update one pos_products row with backward compatibility for older schemas.
+    If a column is missing in schema cache, remove it and retry.
+    """
+    payload = dict(update_data)
+    removed_columns: List[str] = []
+
+    for _ in range(12):
+        try:
+            return supabase.table('pos_products').update(payload).eq('id', product_id).execute()
+        except Exception as exc:
+            missing_column = _extract_missing_column_name(exc)
+            if missing_column and missing_column in payload:
+                payload.pop(missing_column, None)
+                removed_columns.append(missing_column)
+                logger.warning(
+                    "pos_products.%s missing in schema cache; retrying update without it",
+                    missing_column
+                )
+                if not payload:
+                    break
+                continue
+            raise
+
+    raise RuntimeError(
+        f"Failed to update pos_products after compatibility retries; removed columns={removed_columns}"
+    )
+
+
+def _insert_pos_transaction_items_compat(supabase, rows: List[Dict[str, Any]]):
+    """
+    Insert pos_transaction_items rows with backward compatibility for older schemas.
+    If a column is missing in schema cache, remove it from all rows and retry.
+    """
+    payload_rows = [dict(row) for row in rows]
+    removed_columns: List[str] = []
+
+    for _ in range(12):
+        try:
+            return supabase.table('pos_transaction_items').insert(payload_rows).execute()
+        except Exception as exc:
+            missing_column = _extract_missing_column_name(exc)
+            if not missing_column:
+                raise
+
+            removed_any = False
+            for row in payload_rows:
+                if missing_column in row:
+                    row.pop(missing_column, None)
+                    removed_any = True
+
+            if removed_any:
+                removed_columns.append(missing_column)
+                logger.warning(
+                    "pos_transaction_items.%s missing in schema cache; retrying insert without it",
+                    missing_column
+                )
+                continue
+            raise
+
+    raise RuntimeError(
+        "Failed to insert pos_transaction_items after compatibility retries; "
+        f"removed columns={removed_columns}"
+    )
+
+
 def _insert_pos_departments_compat(supabase, rows: List[Dict[str, Any]]) -> Tuple[Any, List[str]]:
     """
     Insert pos_departments rows with backward compatibility for older schemas.
@@ -555,6 +622,30 @@ def _normalize_optional_uuid(value: Optional[str], field_name: str) -> Optional[
     except Exception:
         logger.warning("Ignoring non-UUID %s value during POS transaction create", field_name)
         return None
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        return int(value)
+    except Exception:
+        return default
+
+
+def _resolve_stock_quantity_from_transaction_item(item: Dict[str, Any]) -> int:
+    """
+    Resolve inventory-impact quantity from a transaction item record.
+    Prefers base_units_quantity, then quantity * units_per_sale_unit, then quantity.
+    """
+    base_units = _safe_int(item.get('base_units_quantity'), -1)
+    if base_units > 0:
+        return base_units
+
+    quantity = _safe_int(item.get('quantity'), 0)
+    units_per_sale_unit = max(1, _safe_int(item.get('units_per_sale_unit'), 1))
+    computed = quantity * units_per_sale_unit
+    return computed if computed > 0 else max(0, quantity)
 
 
 MANAGER_LEVEL_ROLES = {'manager', 'admin', 'business_owner', 'outlet_admin', 'super_admin'}
@@ -1261,6 +1352,16 @@ async def create_product(
             'updated_at': datetime.utcnow().isoformat()
         }
         product_data['category'] = _normalize_department_name(product_data.get('category'))
+        product_data['base_unit_name'] = str(product_data.get('base_unit_name') or 'Unit').strip() or 'Unit'
+        if 'pack_name' in product_data:
+            product_data['pack_name'] = str(product_data.get('pack_name') or '').strip() or None
+        if 'pack_barcode' in product_data:
+            product_data['pack_barcode'] = str(product_data.get('pack_barcode') or '').strip() or None
+        if product_data.get('pack_enabled') is False:
+            product_data['pack_name'] = None
+            product_data['units_per_pack'] = None
+            product_data['pack_price'] = None
+            product_data['pack_barcode'] = None
 
         _ensure_departments_exist(
             supabase,
@@ -1376,6 +1477,16 @@ async def bulk_import_products(
                 if row_data.get('barcode') is not None:
                     row_data['barcode'] = norm_barcode(row_data.get('barcode')) or None
                 row_data['category'] = _normalize_department_name(row_data.get('category'))
+                row_data['base_unit_name'] = str(row_data.get('base_unit_name') or 'Unit').strip() or 'Unit'
+                if row_data.get('pack_name') is not None:
+                    row_data['pack_name'] = str(row_data.get('pack_name') or '').strip() or None
+                if row_data.get('pack_barcode') is not None:
+                    row_data['pack_barcode'] = norm_barcode(row_data.get('pack_barcode')) or None
+                if row_data.get('pack_enabled') is False:
+                    row_data['pack_name'] = None
+                    row_data['units_per_pack'] = None
+                    row_data['pack_price'] = None
+                    row_data['pack_barcode'] = None
                 category_values_to_ensure.append(row_data.get('category'))
 
                 # Validate required commercial constraint at row level so
@@ -1597,9 +1708,24 @@ async def update_product(
                 outlet_id=existing_product.data[0].get('outlet_id'),
                 category_values=[update_data.get('category')]
             )
+
+        if 'base_unit_name' in update_data:
+            update_data['base_unit_name'] = str(update_data.get('base_unit_name') or '').strip() or 'Unit'
+
+        if 'pack_name' in update_data:
+            update_data['pack_name'] = (str(update_data.get('pack_name') or '').strip() or None)
+        if 'pack_barcode' in update_data:
+            update_data['pack_barcode'] = (str(update_data.get('pack_barcode') or '').strip() or None)
+
+        if update_data.get('pack_enabled') is False:
+            update_data['pack_name'] = None
+            update_data['units_per_pack'] = None
+            update_data['pack_price'] = None
+            update_data['pack_barcode'] = None
+
         update_data['updated_at'] = datetime.utcnow().isoformat()
 
-        result = supabase.table('pos_products').update(update_data).eq('id', product_id).execute()
+        result = _update_pos_product_compat(supabase, product_id, update_data)
 
         if not result.data:
             raise HTTPException(
@@ -1674,7 +1800,25 @@ async def get_product_by_barcode(
     try:
         supabase = get_supabase_admin()
 
-        result = supabase.table('pos_products').select('*').eq('barcode', barcode).eq('outlet_id', outlet_id).eq('is_active', True).execute()
+        result = supabase.table('pos_products').select('*').eq('barcode', barcode).eq('outlet_id', outlet_id).eq('is_active', True).limit(1).execute()
+
+        if not result.data:
+            try:
+                result = supabase.table('pos_products')\
+                    .select('*')\
+                    .eq('pack_barcode', barcode)\
+                    .eq('outlet_id', outlet_id)\
+                    .eq('is_active', True)\
+                    .limit(1)\
+                    .execute()
+            except Exception as pack_lookup_error:
+                missing_column = _extract_missing_column_name(pack_lookup_error)
+                if missing_column == 'pack_barcode':
+                    logger.warning(
+                        "pos_products.pack_barcode missing in schema cache; skipping pack barcode lookup"
+                    )
+                else:
+                    raise
 
         if not result.data:
             raise HTTPException(
@@ -1827,8 +1971,10 @@ async def create_transaction(
         tax_amount = Decimal(0) # Derived VAT portion (for reporting)
         total_amount = Decimal(0)  # Same as subtotal (for now), after any transaction-level discount
 
-        # Process each item and calculate totals
-        transaction_items = []
+        # Process each item and calculate totals.
+        # Stock is always tracked in base units (quantity/base_units_quantity),
+        # while sale metadata preserves whether cashier sold unit or pack.
+        transaction_items: List[Dict[str, Any]] = []
         for item in transaction.items:
             # Get product details
             product_result = supabase.table('pos_products').select('*').eq('id', item.product_id).execute()
@@ -1840,11 +1986,51 @@ async def create_transaction(
 
             product = product_result.data[0]
 
-            # Use provided price or product price (VAT-inclusive)
-            unit_price = item.unit_price if item.unit_price else Decimal(str(product['unit_price']))
+            requested_sale_unit = str(getattr(item, 'sale_unit', 'unit') or 'unit').strip().lower()
+            if requested_sale_unit not in {'unit', 'pack'}:
+                requested_sale_unit = 'unit'
+
+            pack_enabled = bool(product.get('pack_enabled'))
+            units_per_pack = max(1, _safe_int(product.get('units_per_pack'), 1))
+            pack_price_raw = product.get('pack_price')
+            try:
+                pack_price = Decimal(str(pack_price_raw)) if pack_price_raw is not None else Decimal(0)
+            except Exception:
+                pack_price = Decimal(0)
+            is_pack_configured = pack_enabled and units_per_pack >= 2 and pack_price > 0
+
+            if requested_sale_unit == 'pack':
+                if not is_pack_configured:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Product {item.product_id} is not configured for pack sales"
+                    )
+                sale_unit = 'pack'
+                units_per_sale_unit = units_per_pack
+                selected_sale_unit_price = (
+                    item.unit_price if item.unit_price is not None else pack_price
+                )
+            else:
+                sale_unit = 'unit'
+                units_per_sale_unit = 1
+                selected_sale_unit_price = (
+                    item.unit_price if item.unit_price is not None else Decimal(str(product['unit_price']))
+                )
+
+            sale_quantity = max(1, _safe_int(item.quantity, 1))
+            base_units_quantity = sale_quantity * units_per_sale_unit
+            if base_units_quantity <= 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid quantity for product {item.product_id}"
+                )
+
+            # Persist legacy unit_price as base-unit effective price to keep line math valid
+            # even on older schemas that don't have sale_unit/sale_quantity columns.
+            effective_base_unit_price = selected_sale_unit_price / Decimal(units_per_sale_unit)
 
             # Line calculations with VAT-inclusive pricing
-            line_gross = unit_price * item.quantity                 # Gross before discount (includes VAT)
+            line_gross = selected_sale_unit_price * sale_quantity  # Gross before discount (includes VAT)
             line_discount = item.discount_amount
             line_gross_after_discount = max(Decimal(0), line_gross - line_discount)
 
@@ -1870,11 +2056,18 @@ async def create_transaction(
                 'product_id': item.product_id,
                 'sku': product['sku'],
                 'product_name': product['name'],
-                'quantity': item.quantity,
-                'unit_price': float(unit_price),
+                # quantity is persisted as base units for inventory-safe reversals
+                'quantity': base_units_quantity,
+                'unit_price': float(effective_base_unit_price),
                 'discount_amount': float(line_discount),
                 'tax_amount': float(line_tax),
-                'line_total': float(line_total)
+                'line_total': float(line_total),
+                # New sale-unit metadata (optional on older schemas)
+                'sale_unit': sale_unit,
+                'sale_quantity': sale_quantity,
+                'sale_unit_price': float(selected_sale_unit_price),
+                'units_per_sale_unit': units_per_sale_unit,
+                'base_units_quantity': base_units_quantity,
             })
 
         # Apply transaction-level discount (if any)
@@ -1969,7 +2162,7 @@ async def create_transaction(
             )
 
         # Insert transaction items
-        items_result = supabase.table('pos_transaction_items').insert(transaction_items).execute()
+        items_result = _insert_pos_transaction_items_compat(supabase, transaction_items)
         if not items_result.data:
             # Rollback transaction if items failed
             supabase.table('pos_transactions').delete().eq('id', transaction_id).execute()
@@ -1979,37 +2172,49 @@ async def create_transaction(
             )
 
         # Update stock quantities for each product sold
-        for item in transaction.items:
+        for item in transaction_items:
             try:
+                product_id = item['product_id']
+                quantity_to_deduct = _resolve_stock_quantity_from_transaction_item(item)
+                if quantity_to_deduct <= 0:
+                    continue
+
                 # Get current stock
-                product_result = supabase.table('pos_products').select('quantity_on_hand').eq('id', item.product_id).execute()
+                product_result = supabase.table('pos_products').select('quantity_on_hand').eq('id', product_id).execute()
                 if product_result.data:
                     current_qty = product_result.data[0]['quantity_on_hand']
-                    new_qty = max(0, current_qty - item.quantity)  # Prevent negative stock
-                    
+                    new_qty = max(0, current_qty - quantity_to_deduct)  # Prevent negative stock
+
                     # Update product quantity
                     supabase.table('pos_products').update({
                         'quantity_on_hand': new_qty,
                         'updated_at': datetime.utcnow().isoformat()
-                    }).eq('id', item.product_id).execute()
-                    
+                    }).eq('id', product_id).execute()
+
                     # Create stock movement record
+                    sale_unit = str(item.get('sale_unit') or 'unit')
+                    sale_quantity = _safe_int(item.get('sale_quantity'), 0)
                     movement_data = {
                         'id': str(uuid.uuid4()),
-                        'product_id': item.product_id,
+                        'product_id': product_id,
                         'outlet_id': transaction.outlet_id,
                         'movement_type': 'sale',
-                        'quantity_change': -item.quantity,
+                        'quantity_change': -quantity_to_deduct,
                         'quantity_before': current_qty,
                         'quantity_after': new_qty,
                         'reference_id': transaction_id,
                         'reference_type': 'pos_transaction',
                         'performed_by': cashier_id,
-                        'movement_date': datetime.utcnow().isoformat()
+                        'movement_date': datetime.utcnow().isoformat(),
+                        'notes': (
+                            f"POS sale ({sale_quantity} {sale_unit}, "
+                            f"{quantity_to_deduct} base units)"
+                            if sale_quantity > 0 else None
+                        ),
                     }
                     supabase.table('pos_stock_movements').insert(movement_data).execute()
             except Exception as stock_error:
-                logger.warning(f"Failed to update stock for product {item.product_id}: {stock_error}")
+                logger.warning(f"Failed to update stock for product {item.get('product_id')}: {stock_error}")
                 # Don't fail transaction if stock update fails, but log it
 
         # Return complete transaction with items
@@ -2219,12 +2424,16 @@ async def void_transaction(
         if transaction.get('pos_transaction_items'):
             for item in transaction['pos_transaction_items']:
                 try:
+                    quantity_to_restore = _resolve_stock_quantity_from_transaction_item(item)
+                    if quantity_to_restore <= 0:
+                        continue
+
                     # Get current stock
                     product_result = supabase.table('pos_products').select('quantity_on_hand').eq('id', item['product_id']).execute()
                     if product_result.data:
                         current_qty = product_result.data[0]['quantity_on_hand']
-                        new_qty = current_qty + item['quantity']  # Restore sold quantity
-                        
+                        new_qty = current_qty + quantity_to_restore  # Restore sold base quantity
+
                         # Update product quantity
                         supabase.table('pos_products').update({
                             'quantity_on_hand': new_qty,
@@ -2237,14 +2446,18 @@ async def void_transaction(
                             'product_id': item['product_id'],
                             'outlet_id': transaction['outlet_id'],
                             'movement_type': 'return',
-                            'quantity_change': item['quantity'],
+                            'quantity_change': quantity_to_restore,
                             'quantity_before': current_qty,
                             'quantity_after': new_qty,
                             'reference_id': transaction_id,
                             'reference_type': 'voided_transaction',
                             'performed_by': actor_id,
                             'movement_date': datetime.utcnow().isoformat(),
-                            'notes': f'Stock restored from voided transaction: {void_reason}'
+                            'notes': (
+                                f"Stock restored from voided transaction: {void_reason} "
+                                f"({_safe_int(item.get('sale_quantity'), 0)} {str(item.get('sale_unit') or 'unit')}, "
+                                f"{quantity_to_restore} base units)"
+                            )
                         }
                         supabase.table('pos_stock_movements').insert(movement_data).execute()
                 except Exception as stock_error:
@@ -3516,11 +3729,15 @@ async def return_transaction(
         if original_transaction.get('pos_transaction_items'):
             for item in original_transaction['pos_transaction_items']:
                 try:
+                    quantity_to_restore = _resolve_stock_quantity_from_transaction_item(item)
+                    if quantity_to_restore <= 0:
+                        continue
+
                     # Get current stock
                     product_result = supabase.table('pos_products').select('quantity_on_hand').eq('id', item['product_id']).execute()
                     if product_result.data:
                         current_qty = product_result.data[0]['quantity_on_hand']
-                        new_qty = current_qty + item['quantity']  # Restore returned quantity
+                        new_qty = current_qty + quantity_to_restore  # Restore returned base quantity
 
                         # Update product quantity
                         supabase.table('pos_products').update({
@@ -3534,14 +3751,18 @@ async def return_transaction(
                             'product_id': item['product_id'],
                             'outlet_id': original_transaction['outlet_id'],
                             'movement_type': 'return',
-                            'quantity_change': item['quantity'],
+                            'quantity_change': quantity_to_restore,
                             'quantity_before': current_qty,
                             'quantity_after': new_qty,
                             'reference_id': return_transaction_id,
                             'reference_type': 'return_transaction',
                             'performed_by': actor_id,
                             'movement_date': datetime.utcnow().isoformat(),
-                            'notes': f'Stock restored from return: {return_reason}'
+                            'notes': (
+                                f"Stock restored from return: {return_reason} "
+                                f"({_safe_int(item.get('sale_quantity'), 0)} {str(item.get('sale_unit') or 'unit')}, "
+                                f"{quantity_to_restore} base units)"
+                            )
                         }
                         supabase.table('pos_stock_movements').insert(movement_data).execute()
                 except Exception as stock_error:
@@ -3671,8 +3892,14 @@ async def print_receipt(
         # Items
         for item in transaction.get('pos_transaction_items', []):
             item_name = item['product_name'][:20]
-            qty = float(item['quantity'])
-            price = float(item['unit_price'])
+            sale_qty = _safe_int(item.get('sale_quantity'), 0)
+            sale_unit_price_raw = item.get('sale_unit_price')
+            if sale_qty > 0 and sale_unit_price_raw is not None:
+                qty = float(sale_qty)
+                price = float(sale_unit_price_raw)
+            else:
+                qty = float(item.get('quantity') or 0)
+                price = float(item.get('unit_price') or 0)
             total = float(item['line_total'])
             # If name is long, put it on its own line
             if len(item['product_name']) > 20:
@@ -3756,6 +3983,16 @@ async def preview_receipt(
         outlet = outlet_result.data[0] if outlet_result.data else None
         
         # Generate HTML preview
+        item_rows_html = []
+        for item in transaction.get('pos_transaction_items', []):
+            sale_qty = _safe_int(item.get('sale_quantity'), 0)
+            sale_unit_price = item.get('sale_unit_price')
+            display_qty = sale_qty if sale_qty > 0 else _safe_int(item.get('quantity'), 0)
+            display_price = float(sale_unit_price) if sale_qty > 0 and sale_unit_price is not None else float(item.get('unit_price') or 0)
+            item_rows_html.append(
+                f'<p>{item["product_name"]} - {display_qty} x {display_price:,.2f} = {float(item.get("line_total") or 0):,.2f}</p>'
+            )
+
         receipt_html = f"""
         <div style="font-family: monospace; max-width: 300px; margin: 0 auto; padding: 20px;">
             <div style="text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 10px;">
@@ -3768,7 +4005,7 @@ async def preview_receipt(
                 <p><strong>Date:</strong> {datetime.fromisoformat(transaction['transaction_date'].replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M:%S')}</p>
             </div>
             <div style="border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; padding: 10px 0; margin: 10px 0;">
-                {''.join([f'<p>{item["product_name"]} - {item["quantity"]} x {item["unit_price"]:,.2f} = {item["line_total"]:,.2f}</p>' for item in transaction.get('pos_transaction_items', [])])}
+                {''.join(item_rows_html)}
             </div>
             <div style="text-align: right; margin-top: 10px;">
                 <p>Subtotal: {transaction['subtotal']:,.2f}</p>

@@ -15,9 +15,8 @@
   },
   "publish": [
     {
-      "provider": "github",
-      "owner": "ayomidefagboyo",
-      "repo": "project"
+      "provider": "generic",
+      "url": "https://github.com/ayomidefagboyo/project/releases/latest/download"
     }
   ],
   "win": {

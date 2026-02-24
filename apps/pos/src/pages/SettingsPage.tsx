@@ -544,8 +544,61 @@ const defaultTerminalSettings: TerminalSettingsState = {
   keypadLayout: 'standard'
 };
 
+const normalizeDesktopUpdateError = (message?: string): string => {
+  const raw = String(message || '').trim();
+  if (!raw) return 'Update check failed. Please try again later.';
+
+  const lowered = raw.toLowerCase();
+  if (
+    lowered.includes('404') ||
+    lowered.includes('405') ||
+    lowered.includes('method not allowed') ||
+    lowered.includes('not found')
+  ) {
+    return 'Update server is unavailable right now. Please check again later from Settings.';
+  }
+
+  return raw;
+};
+
+const describeDesktopUpdateStatus = (status: DesktopUpdateStatus): { text: string; className: string } => {
+  switch (status.state) {
+    case 'checking':
+      return { text: 'Checking for updates...', className: 'text-blue-700 bg-blue-50 border-blue-200' };
+    case 'available':
+      return {
+        text: `Update found${status.version ? ` (v${status.version})` : ''}. Downloading...`,
+        className: 'text-blue-700 bg-blue-50 border-blue-200',
+      };
+    case 'downloading':
+      return {
+        text: `Downloading update ${Math.round(status.percent || 0)}%`,
+        className: 'text-blue-700 bg-blue-50 border-blue-200',
+      };
+    case 'downloaded':
+      return {
+        text: `Update ready${status.version ? ` (v${status.version})` : ''}. Restart to install.`,
+        className: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+      };
+    case 'not-available':
+      return { text: 'App is up to date.', className: 'text-emerald-700 bg-emerald-50 border-emerald-200' };
+    case 'error':
+      return {
+        text: normalizeDesktopUpdateError(status.message),
+        className: 'text-amber-700 bg-amber-50 border-amber-200',
+      };
+    case 'idle':
+    default:
+      return { text: 'No update action yet.', className: 'text-gray-700 bg-gray-50 border-gray-200' };
+  }
+};
+
 const TerminalSettingsTab: React.FC<TerminalSettingsTabProps> = ({ outletId, terminalId }) => {
   const [settings, setSettings] = useState<TerminalSettingsState>(defaultTerminalSettings);
+  const [desktopUpdateStatus, setDesktopUpdateStatus] = useState<DesktopUpdateStatus>({ state: 'idle' });
+  const [desktopVersion, setDesktopVersion] = useState<string>('');
+  const [updateActionError, setUpdateActionError] = useState<string>('');
+  const isElectronDesktop = typeof window !== 'undefined' && Boolean(window.compazzDesktop?.isElectron);
 
   const storageKey = outletId && terminalId ? `pos_terminal_settings_${outletId}_${terminalId}` : null;
 
@@ -577,6 +630,70 @@ const TerminalSettingsTab: React.FC<TerminalSettingsTabProps> = ({ outletId, ter
       // Ignore storage errors
     }
   }, [settings, storageKey]);
+
+  useEffect(() => {
+    if (!isElectronDesktop || !window.compazzDesktop) return;
+
+    let active = true;
+
+    window.compazzDesktop
+      .getAppVersion()
+      .then((version) => {
+        if (active) setDesktopVersion(String(version || ''));
+      })
+      .catch(() => {
+        if (active) setDesktopVersion('');
+      });
+
+    window.compazzDesktop
+      .getUpdateStatus()
+      .then((status) => {
+        if (active) setDesktopUpdateStatus(status);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setDesktopUpdateStatus({
+          state: 'error',
+          message: normalizeDesktopUpdateError(err instanceof Error ? err.message : String(err || 'Unknown error')),
+        });
+      });
+
+    const listenerId = window.compazzDesktop.onUpdateStatus((status) => {
+      setDesktopUpdateStatus(status);
+    });
+
+    return () => {
+      active = false;
+      window.compazzDesktop?.offUpdateStatus(listenerId);
+    };
+  }, [isElectronDesktop]);
+
+  const checkDesktopUpdates = async () => {
+    if (!isElectronDesktop || !window.compazzDesktop) return;
+
+    setUpdateActionError('');
+    const result = await window.compazzDesktop.checkForUpdates();
+    if (!result.ok) {
+      setUpdateActionError(normalizeDesktopUpdateError(result.error));
+      return;
+    }
+  };
+
+  const installDesktopUpdate = async () => {
+    if (!isElectronDesktop || !window.compazzDesktop) return;
+
+    setUpdateActionError('');
+    const ok = await window.compazzDesktop.installUpdate();
+    if (!ok) {
+      setUpdateActionError('No downloaded update is ready yet.');
+    }
+  };
+
+  const updateStatusMeta = describeDesktopUpdateStatus(desktopUpdateStatus);
+  const isCheckingUpdate =
+    desktopUpdateStatus.state === 'checking' ||
+    desktopUpdateStatus.state === 'available' ||
+    desktopUpdateStatus.state === 'downloading';
 
   return (
     <div className="p-4 sm:p-6">
@@ -612,6 +729,49 @@ const TerminalSettingsTab: React.FC<TerminalSettingsTabProps> = ({ outletId, ter
               />
             </div>
           </div>
+        </div>
+
+        {/* Desktop App Updates */}
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Desktop App Updates</h3>
+          {isElectronDesktop ? (
+            <div className="space-y-4">
+              <div className="text-sm text-gray-700 dark:text-gray-300">
+                Current version: <span className="font-semibold">{desktopVersion || 'Unknown'}</span>
+              </div>
+              <div className={`rounded-lg border px-3 py-2 text-sm ${updateStatusMeta.className}`}>
+                {updateStatusMeta.text}
+              </div>
+              {updateActionError && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                  {updateActionError}
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={checkDesktopUpdates}
+                  disabled={isCheckingUpdate}
+                  className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-gray-800 text-sm font-semibold hover:bg-gray-50 disabled:opacity-60"
+                >
+                  {isCheckingUpdate ? 'Checking...' : 'Check for Updates'}
+                </button>
+                {desktopUpdateStatus.state === 'downloaded' && (
+                  <button
+                    type="button"
+                    onClick={installDesktopUpdate}
+                    className="px-3 py-2 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 text-sm font-semibold hover:bg-emerald-100"
+                  >
+                    Restart & Install
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Update controls are available only in the desktop app.
+            </p>
+          )}
         </div>
 
         {/* Session & Security */}

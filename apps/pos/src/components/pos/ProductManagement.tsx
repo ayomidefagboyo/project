@@ -551,6 +551,15 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     if (!product) return;
     const draft = editDrafts[productId] || {};
     const merged = { ...product, ...draft };
+    const unitsPerPack = Math.floor(Number(merged.units_per_pack || 0));
+    const packPrice = Number(merged.pack_price || 0);
+    const packEnabled =
+      Boolean(merged.pack_enabled) ||
+      (Number.isFinite(unitsPerPack) && unitsPerPack >= 2 && Number.isFinite(packPrice) && packPrice > 0);
+    if (packEnabled && (!Number.isFinite(unitsPerPack) || unitsPerPack < 2 || !Number.isFinite(packPrice) || packPrice <= 0)) {
+      setError('Pack setup requires units per pack (>=2) and pack price (>0).');
+      return;
+    }
 
     try {
       const updatedProduct = await posService.updateProduct(productId, {
@@ -569,6 +578,12 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
         vendor_id: merged.vendor_id,
         image_url: merged.image_url,
         display_order: merged.display_order,
+        base_unit_name: merged.base_unit_name || 'Unit',
+        pack_enabled: packEnabled,
+        pack_name: packEnabled ? (merged.pack_name || 'Pack') : undefined,
+        units_per_pack: packEnabled ? unitsPerPack : undefined,
+        pack_price: packEnabled ? packPrice : undefined,
+        pack_barcode: packEnabled ? merged.pack_barcode : undefined,
       });
       setProducts((prev) =>
         prev.map((row) => (row.id === productId ? { ...row, ...updatedProduct } : row))
@@ -606,6 +621,15 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
         0,
         typedUnitPrice > 0 ? typedUnitPrice : calculatedUnitPrice
       );
+      const unitsPerPack = Math.floor(Number(newProduct.units_per_pack || 0));
+      const packPrice = Number(newProduct.pack_price || 0);
+      const packEnabled =
+        Boolean(newProduct.pack_enabled) ||
+        (Number.isFinite(unitsPerPack) && unitsPerPack >= 2 && Number.isFinite(packPrice) && packPrice > 0);
+      if (packEnabled && (!Number.isFinite(unitsPerPack) || unitsPerPack < 2 || !Number.isFinite(packPrice) || packPrice <= 0)) {
+        setError('Pack setup requires units per pack (>=2) and pack price (>0).');
+        return;
+      }
 
       const productToCreate = {
         outlet_id: currentOutlet.id,
@@ -622,6 +646,12 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
         barcode: newProduct.barcode,
         markup_percentage: defaultMarkup,
         auto_pricing: autoPricingEnabled,
+        base_unit_name: newProduct.base_unit_name || 'Unit',
+        pack_enabled: packEnabled,
+        pack_name: packEnabled ? (newProduct.pack_name || 'Pack') : undefined,
+        units_per_pack: packEnabled ? unitsPerPack : undefined,
+        pack_price: packEnabled ? packPrice : undefined,
+        pack_barcode: packEnabled ? newProduct.pack_barcode : undefined,
       };
 
       const createdProduct = await posService.createProduct(productToCreate);
@@ -704,6 +734,8 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
         const categoryValue = String(draft.category ?? product.category ?? '');
         const costPriceValue = Number(draft.cost_price ?? product.cost_price ?? 0);
         const unitPriceValue = Number(draft.unit_price ?? product.unit_price ?? 0);
+        const unitsPerPackValue = Number(draft.units_per_pack ?? product.units_per_pack ?? 0);
+        const packPriceValue = Number(draft.pack_price ?? product.pack_price ?? 0);
         const quantityValue = Number(draft.quantity_on_hand ?? product.quantity_on_hand ?? 0);
         const reorderLevelValue = Number(draft.reorder_level ?? product.reorder_level ?? 0);
         const isActiveValue =
@@ -791,6 +823,33 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                 />
               ) : (
                 formatCurrency(product.unit_price)
+              )}
+            </td>
+            <td className="p-4 text-right font-mono">
+              {isEditing ? (
+                <input
+                  type="number"
+                  min={0}
+                  defaultValue={unitsPerPackValue}
+                  onBlur={(e) => handleCellEdit(product.id, 'units_per_pack', parseInt(e.target.value) || 0)}
+                  className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 text-right"
+                />
+              ) : (
+                unitsPerPackValue >= 2 ? `${unitsPerPackValue}x` : '—'
+              )}
+            </td>
+            <td className="p-4 text-right font-mono font-semibold">
+              {isEditing ? (
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  defaultValue={packPriceValue}
+                  onBlur={(e) => handleCellEdit(product.id, 'pack_price', parseFloat(e.target.value) || 0)}
+                  className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 text-right"
+                />
+              ) : (
+                packPriceValue > 0 ? formatCurrency(packPriceValue) : '—'
               )}
             </td>
             <td className="p-4 text-right">
@@ -987,6 +1046,8 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                   <th className="text-left p-4 font-semibold text-slate-900">Department</th>
                   <th className="text-right p-4 font-semibold text-slate-900">Cost Price</th>
                   <th className="text-right p-4 font-semibold text-slate-900">Selling Price</th>
+                  <th className="text-right p-4 font-semibold text-slate-900">Pack Size</th>
+                  <th className="text-right p-4 font-semibold text-slate-900">Pack Price</th>
                   <th className="text-right p-4 font-semibold text-slate-900">Stock</th>
                   <th className="text-right p-4 font-semibold text-slate-900">Reorder Level</th>
                   <th className="text-center p-4 font-semibold text-slate-900">Status</th>

@@ -121,6 +121,25 @@ class POSProductBase(BaseModel):
     reorder_notification_sent: bool = Field(False, description="Whether reorder notification was sent")
     last_received: Optional[datetime] = Field(None, description="Last time stock was received")
     min_shelf_life_days: int = Field(30, ge=0, description="Minimum shelf life required in days")
+    # Multi-unit selling support
+    base_unit_name: str = Field("Unit", max_length=30, description="Base stock/sales unit label")
+    pack_enabled: bool = Field(False, description="Whether pack sales are enabled for this product")
+    pack_name: Optional[str] = Field(None, max_length=30, description="Pack unit label, e.g. Pack/Carton")
+    units_per_pack: Optional[int] = Field(
+        None,
+        ge=2,
+        description="How many base units are in one pack when pack mode is enabled"
+    )
+    pack_price: Optional[Decimal] = Field(
+        None,
+        gt=0,
+        description="Selling price for one pack when pack mode is enabled"
+    )
+    pack_barcode: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Optional barcode that directly selects pack sale mode"
+    )
 
     @validator('unit_price', 'cost_price')
     def validate_prices(cls, v):
@@ -139,6 +158,41 @@ class POSProductBase(BaseModel):
         if not v or not v.strip():
             raise ValueError('Product name cannot be empty')
         return v.strip()
+
+    @validator('base_unit_name')
+    def validate_base_unit_name(cls, v):
+        normalized = str(v or '').strip()
+        if not normalized:
+            raise ValueError('Base unit name cannot be empty')
+        return normalized
+
+    @validator('pack_name')
+    def validate_pack_name(cls, v):
+        if v is None:
+            return v
+        normalized = str(v).strip()
+        return normalized or None
+
+    @validator('pack_barcode')
+    def validate_pack_barcode(cls, v):
+        if v is None:
+            return v
+        normalized = str(v).strip()
+        return normalized or None
+
+    @validator('units_per_pack', always=True)
+    def validate_units_per_pack(cls, v, values):
+        if values.get('pack_enabled'):
+            if v is None or int(v) < 2:
+                raise ValueError('units_per_pack must be at least 2 when pack sales are enabled')
+        return v
+
+    @validator('pack_price', always=True)
+    def validate_pack_price(cls, v, values):
+        if values.get('pack_enabled'):
+            if v is None or Decimal(str(v)) <= 0:
+                raise ValueError('pack_price must be greater than 0 when pack sales are enabled')
+        return v
 
 
 class POSProductCreate(POSProductBase):
@@ -163,6 +217,35 @@ class POSProductUpdate(BaseModel):
     vendor_id: Optional[str] = None
     image_url: Optional[str] = None
     display_order: Optional[int] = None
+    base_unit_name: Optional[str] = Field(None, max_length=30)
+    pack_enabled: Optional[bool] = None
+    pack_name: Optional[str] = Field(None, max_length=30)
+    units_per_pack: Optional[int] = Field(None, ge=2)
+    pack_price: Optional[Decimal] = Field(None, gt=0)
+    pack_barcode: Optional[str] = Field(None, max_length=100)
+
+    @validator('base_unit_name')
+    def validate_update_base_unit_name(cls, v):
+        if v is None:
+            return v
+        normalized = str(v).strip()
+        if not normalized:
+            raise ValueError('Base unit name cannot be empty')
+        return normalized
+
+    @validator('pack_name')
+    def validate_update_pack_name(cls, v):
+        if v is None:
+            return v
+        normalized = str(v).strip()
+        return normalized or None
+
+    @validator('pack_barcode')
+    def validate_update_pack_barcode(cls, v):
+        if v is None:
+            return v
+        normalized = str(v).strip()
+        return normalized or None
 
 
 class POSProductResponse(POSProductBase):
@@ -324,6 +407,12 @@ class TransactionItemCreate(BaseModel):
     quantity: int = Field(..., gt=0, description="Quantity sold")
     unit_price: Optional[Decimal] = Field(None, description="Override price (optional)")
     discount_amount: Decimal = Field(0, ge=0, description="Item discount")
+    sale_unit: Literal['unit', 'pack'] = Field('unit', description="Sale unit mode")
+    units_per_sale_unit: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Optional multiplier (base units per sold unit)"
+    )
 
 
 class TransactionItemResponse(BaseModel):
@@ -337,6 +426,11 @@ class TransactionItemResponse(BaseModel):
     discount_amount: Decimal = Field(..., description="Discount applied")
     tax_amount: Decimal = Field(..., description="Tax amount")
     line_total: Decimal = Field(..., description="Line total amount")
+    sale_unit: Optional[Literal['unit', 'pack']] = Field('unit', description="Sale unit mode")
+    sale_quantity: Optional[int] = Field(None, description="Sold quantity in selected sale unit")
+    sale_unit_price: Optional[Decimal] = Field(None, description="Price per selected sale unit")
+    units_per_sale_unit: Optional[int] = Field(1, description="Base units represented by one sold unit")
+    base_units_quantity: Optional[int] = Field(None, description="Quantity impact in base stock units")
 
     class Config:
         from_attributes = True
@@ -1132,6 +1226,12 @@ class HeldReceiptItemCreate(BaseModel):
     quantity: int = Field(..., ge=1, description="Quantity")
     unit_price: Decimal = Field(..., gt=0, description="Unit price")
     discount: Decimal = Field(0, ge=0, description="Discount per item")
+    sale_unit: Literal['unit', 'pack'] = Field('unit', description="Sale unit mode")
+    units_per_sale_unit: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Optional multiplier (base units per sold unit)"
+    )
 
 
 class HeldReceiptCreate(BaseModel):

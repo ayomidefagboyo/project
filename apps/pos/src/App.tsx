@@ -441,7 +441,18 @@ function AppContent() {
     try {
       const product = await posService.getProductByBarcode(normalizedBarcode, currentOutlet.id);
       if (posDashboardRef.current) {
-        posDashboardRef.current.addToCart(product);
+        const normalizeLoose = (value?: string | null): string =>
+          String(value || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        const scannedLoose = normalizeLoose(normalizedBarcode);
+        const packBarcodeLoose = normalizeLoose(product.pack_barcode);
+        const packConfigured =
+          Boolean(product.pack_enabled) &&
+          Number(product.pack_price || 0) > 0 &&
+          Number(product.units_per_pack || 0) >= 2;
+        const saleUnit = packConfigured && packBarcodeLoose && scannedLoose === packBarcodeLoose
+          ? 'pack'
+          : 'unit';
+        posDashboardRef.current.addToCart(product, 1, { saleUnit });
       }
       searchRequestRef.current += 1;
       setSearchQuery('');
