@@ -37,6 +37,7 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   managerOnly?: boolean;
   pharmacistOnly?: boolean;
+  managerOrPharmacist?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -69,7 +70,7 @@ const navItems: NavItem[] = [
     label: 'Stocktaking',
     sublabel: 'Reconcile Inventory',
     icon: ClipboardCheck,
-    managerOnly: true,
+    managerOrPharmacist: true,
   },
   {
     path: '/transfer-outlet',
@@ -122,6 +123,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent, staffRol
 
   const isActive = (path: string) => location.pathname === path;
   const visibleNavItems = navItems.filter((item) => {
+    if (item.managerOrPharmacist && !(isManager || isPharmacist)) return false;
     if (item.managerOnly && !isManager) return false;
     if (item.pharmacistOnly && !isPharmacist) return false;
     if (item.path === '/receive' && !canAccessReceive) return false;

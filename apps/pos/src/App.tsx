@@ -911,6 +911,7 @@ function AppContent() {
   const isInventoryStaff = normalizedStaffRole === 'inventory_staff';
   const canAccessSettings = isManager;
   const canAccessReceive = isManager || isPharmacist || isInventoryStaff;
+  const canAccessStocktaking = isManager || isPharmacist;
   const canAccessEod = normalizedStaffRole !== 'cashier';
 
   const headerContent =
@@ -935,7 +936,7 @@ function AppContent() {
         <Route path="/transactions" element={<TransactionsPage />} />
         <Route path="/products" element={<ProductManagement ref={productManagementRef} />} />
         <Route path="/receive" element={canAccessReceive ? <ReceiveItemsPage /> : <Navigate to="/" replace />} />
-        <Route path="/stocktaking" element={isManager ? <StocktakingPage /> : <Navigate to="/" replace />} />
+        <Route path="/stocktaking" element={canAccessStocktaking ? <StocktakingPage /> : <Navigate to="/" replace />} />
         <Route path="/transfer-outlet" element={isManager ? <TransferToOutletPage /> : <Navigate to="/" replace />} />
         <Route path="/patients" element={isPharmacist ? <PharmacyPatientsPage /> : <Navigate to="/" replace />} />
         <Route path="/eod" element={canAccessEod ? <POSEODDashboard /> : <Navigate to="/" replace />} />

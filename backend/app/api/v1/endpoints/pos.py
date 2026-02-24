@@ -556,6 +556,7 @@ def _normalize_optional_uuid(value: Optional[str], field_name: str) -> Optional[
 MANAGER_LEVEL_ROLES = {'manager', 'admin', 'business_owner', 'outlet_admin', 'super_admin'}
 PHARMACY_ONLY_ROLES = {'pharmacist', 'accountant'}
 INVENTORY_EDITOR_ROLES = MANAGER_LEVEL_ROLES | {'pharmacist', 'accountant', 'inventory_staff'}
+STOCKTAKE_EDITOR_ROLES = MANAGER_LEVEL_ROLES | PHARMACY_ONLY_ROLES
 DISCOUNT_ALLOWED_ROLES = MANAGER_LEVEL_ROLES | PHARMACY_ONLY_ROLES
 DISCOUNT_PERMISSION_KEYS = {'apply_discounts', 'manage_discounts'}
 
@@ -692,6 +693,21 @@ def _require_inventory_editor_role(
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Inventory edit authorization required for this action"
+    )
+
+
+def _require_stocktake_role(
+    supabase,
+    current_user: Dict[str, Any],
+    outlet_id: Optional[str],
+    staff_session_token: Optional[str]
+) -> Dict[str, Any]:
+    context = _resolve_staff_context(supabase, current_user, outlet_id, staff_session_token)
+    if context['role'] in STOCKTAKE_EDITOR_ROLES:
+        return context
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Stocktaking authorization required (manager or pharmacist)"
     )
 
 
@@ -2367,7 +2383,7 @@ async def commit_stocktake(
     """Commit an entire stocktake in one operation with conflict checks and rollback safety."""
     try:
         supabase = get_supabase_admin()
-        actor_context = _require_manager_role(
+        actor_context = _require_stocktake_role(
             supabase,
             current_user,
             stocktake.outlet_id,
