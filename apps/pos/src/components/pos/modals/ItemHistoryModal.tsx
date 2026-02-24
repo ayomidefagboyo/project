@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   X,
   Clock,
@@ -22,9 +22,16 @@ interface ItemHistoryModalProps {
   product: POSProduct | null;
 }
 
+const parsePositiveCost = (value: unknown): number | null => {
+  const next = Number(value);
+  if (!Number.isFinite(next) || next <= 0) return null;
+  return next;
+};
+
 const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({ isOpen, onClose, product }) => {
   const { currentOutlet } = useOutlet();
   const { error: showError } = useToast();
+  const showErrorRef = useRef(showError);
   const [isLoading, setIsLoading] = useState(false);
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<MovementFilter>('all');
@@ -32,6 +39,10 @@ const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({ isOpen, onClose, pr
     startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     endDate: new Date().toISOString().split('T')[0],
   });
+
+  useEffect(() => {
+    showErrorRef.current = showError;
+  }, [showError]);
 
   const loadMovements = useCallback(async () => {
     if (!currentOutlet?.id || !product?.id) return;
@@ -48,18 +59,21 @@ const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({ isOpen, onClose, pr
       setMovements(data || []);
     } catch (err) {
       console.error('Error fetching item history:', err);
-      showError('Failed to load item history');
+      showErrorRef.current('Failed to load item history');
       setMovements([]);
     } finally {
       setIsLoading(false);
     }
-  }, [currentOutlet?.id, product?.id, dateRange.startDate, dateRange.endDate, showError]);
+  }, [currentOutlet?.id, product?.id, dateRange.startDate, dateRange.endDate]);
 
   useEffect(() => {
-    if (isOpen && product?.id) {
-      setSelectedFilter('all');
-      loadMovements();
-    }
+    if (!isOpen || !product?.id) return;
+    setSelectedFilter('all');
+  }, [isOpen, product?.id]);
+
+  useEffect(() => {
+    if (!isOpen || !product?.id) return;
+    void loadMovements();
   }, [isOpen, product?.id, loadMovements]);
 
   // --- Helpers ---
@@ -122,6 +136,32 @@ const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({ isOpen, onClose, pr
     return m.movement_type === selectedFilter;
   });
 
+  const costMetaByMovementId = useMemo(() => {
+    const map = new Map<string, { current: number | null; previous: number | null; delta: number | null }>();
+    for (let index = 0; index < filteredMovements.length; index += 1) {
+      const movement = filteredMovements[index];
+      const current = parsePositiveCost(movement.unit_cost);
+      let previous: number | null = null;
+
+      if (current !== null) {
+        for (let olderIndex = index + 1; olderIndex < filteredMovements.length; olderIndex += 1) {
+          const olderCost = parsePositiveCost(filteredMovements[olderIndex].unit_cost);
+          if (olderCost !== null) {
+            previous = olderCost;
+            break;
+          }
+        }
+      }
+
+      map.set(movement.id, {
+        current,
+        previous,
+        delta: current !== null && previous !== null ? Number((current - previous).toFixed(2)) : null,
+      });
+    }
+    return map;
+  }, [filteredMovements]);
+
   // --- Summary ---
 
   const totalIn = movements
@@ -141,12 +181,19 @@ const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({ isOpen, onClose, pr
     csv += `Outlet: ${currentOutlet?.name || ''}\n`;
     csv += `Date Range: ${dateRange.startDate} to ${dateRange.endDate}\n`;
     csv += `Generated: ${new Date().toLocaleString()}\n\n`;
-    csv += `Date,Type,Qty Change,Balance After,Reference,Notes\n`;
+    csv += `Date,Type,Qty Change,Balance After,Unit Cost,Cost Change,Reference,Notes\n`;
 
     filteredMovements.forEach((m) => {
       const change = m.quantity_change > 0 ? `+${m.quantity_change}` : `${m.quantity_change}`;
       const notes = (m.notes || '').replace(/,/g, ';').replace(/\n/g, ' ');
-      csv += `${formatDate(m.movement_date)},${m.movement_type},${change},${m.quantity_after},${formatReference(m)},${notes}\n`;
+      const costMeta = costMetaByMovementId.get(m.id);
+      const unitCost = costMeta?.current !== null && costMeta?.current !== undefined
+        ? costMeta.current.toFixed(2)
+        : '';
+      const costChange = costMeta?.delta !== null && costMeta?.delta !== undefined
+        ? costMeta.delta.toFixed(2)
+        : '';
+      csv += `${formatDate(m.movement_date)},${m.movement_type},${change},${m.quantity_after},${unitCost},${costChange},${formatReference(m)},${notes}\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -352,13 +399,25 @@ const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({ isOpen, onClose, pr
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       Reference
                     </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                      Unit Cost
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Cost Change
+                    </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       Notes
                     </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredMovements.map((movement) => (
+                  {filteredMovements.map((movement) => {
+                    const costMeta = costMetaByMovementId.get(movement.id);
+                    const hasCostChange =
+                      costMeta?.delta !== null &&
+                      costMeta?.delta !== undefined &&
+                      Math.abs(costMeta.delta) > 0;
+                    return (
                     <tr key={movement.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
                         {formatDate(movement.movement_date)}
@@ -382,11 +441,30 @@ const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({ isOpen, onClose, pr
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
                         {formatReference(movement)}
                       </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-700">
+                        {costMeta?.current !== null && costMeta?.current !== undefined
+                          ? formatCurrency(costMeta.current)
+                          : '-'}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm">
+                        {costMeta?.current === null || costMeta?.current === undefined ? (
+                          <span className="text-gray-400">-</span>
+                        ) : costMeta.previous === null || costMeta.previous === undefined ? (
+                          <span className="text-gray-500">Initial cost</span>
+                        ) : hasCostChange ? (
+                          <span className={costMeta.delta! > 0 ? 'text-red-600 font-medium' : 'text-green-600 font-medium'}>
+                            {formatCurrency(costMeta.previous)} → {formatCurrency(costMeta.current)}
+                          </span>
+                        ) : (
+                          <span className="text-gray-500">No change</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-sm text-gray-500 max-w-[200px] truncate">
                         {movement.notes || '-'}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

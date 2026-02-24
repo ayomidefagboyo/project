@@ -77,7 +77,7 @@ const navItems: NavItem[] = [
     label: 'Transfer Outlet',
     sublabel: 'Move Stock',
     icon: ArrowLeftRight,
-    managerOnly: true,
+    managerOrPharmacist: true,
   },
   {
     path: '/patients',

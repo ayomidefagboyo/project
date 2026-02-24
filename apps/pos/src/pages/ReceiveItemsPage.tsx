@@ -140,13 +140,6 @@ const parseQuickToken = (value: string): { identifier: string; quantity: number 
   return { identifier, quantity: parsedQty };
 };
 
-const looksLikeBarcode = (value: string): boolean => {
-  const normalized = value.trim();
-  if (normalized.length < 4) return false;
-  if (!/^[A-Z0-9._/-]+$/i.test(normalized)) return false;
-  return /\d/.test(normalized) || normalized.length >= 8;
-};
-
 const normalizeLookupStrict = (value?: string | null): string =>
   String(value || '').trim().toLowerCase();
 
@@ -293,6 +286,7 @@ const ReceiveItemsPage: React.FC = () => {
   const [lineProductSearch, setLineProductSearch] = useState('');
   const [lineSearchMatches, setLineSearchMatches] = useState<POSProduct[]>([]);
   const [lineSearchLoading, setLineSearchLoading] = useState(false);
+  const [pendingLineFocusId, setPendingLineFocusId] = useState<string | null>(null);
 
   const [quickEntry, setQuickEntry] = useState('');
   const [quickMatches, setQuickMatches] = useState<POSProduct[]>([]);
@@ -380,6 +374,32 @@ const ReceiveItemsPage: React.FC = () => {
   const showQuickSuggestions = quickToken.identifier.trim().length > 0 && (
     quickMatchLoading || quickMatches.length > 0 || quickToken.identifier.trim().length >= 3
   );
+
+  useEffect(() => {
+    if (!pendingLineFocusId) return;
+    const selector = `[data-line-description-id="${pendingLineFocusId}"]`;
+    let attempts = 0;
+
+    const focusLine = () => {
+      const target = document.querySelector<HTMLInputElement>(selector);
+      if (target) {
+        target.focus();
+        setPendingLineFocusId(null);
+        return true;
+      }
+
+      attempts += 1;
+      if (attempts >= 4) {
+        setPendingLineFocusId(null);
+        return false;
+      }
+
+      window.requestAnimationFrame(focusLine);
+      return false;
+    };
+
+    window.requestAnimationFrame(focusLine);
+  }, [pendingLineFocusId, items.length]);
 
   const exactProductIndex = useMemo(() => {
     const barcodeMap = new Map<string, POSProduct>();
@@ -815,7 +835,10 @@ const ReceiveItemsPage: React.FC = () => {
   const upsertLineFromProduct = (product: POSProduct, quantity = 1, unitPrice?: number) => {
     const normalizedQty = Math.max(1, quantity);
     const costPrice = Math.max(0, unitPrice ?? product.cost_price ?? 0);
-    const sellingPrice = Math.max(0, product.unit_price || costPrice);
+    const pricing = resolveDepartmentPricing(product.category);
+    const sellingPrice = pricing.autoPricingEnabled
+      ? computeSellingFromMargin(costPrice, pricing.markup)
+      : Math.max(0, product.unit_price || costPrice);
     setItems((prev) => {
       const existingIndex = prev.findIndex((item) => item.product_id === product.id);
       if (existingIndex >= 0) {
@@ -838,8 +861,8 @@ const ReceiveItemsPage: React.FC = () => {
           unit_price: costPrice,
           line_total: roundMoney(normalizedQty * costPrice),
           selling_price: sellingPrice,
-          auto_pricing_enabled: false,
-          markup_percentage: product.markup_percentage ?? 0,
+          auto_pricing_enabled: pricing.autoPricingEnabled,
+          markup_percentage: pricing.markup,
           product_id: product.id,
           sku: product.sku || undefined,
           barcode: product.barcode || undefined,
@@ -908,19 +931,27 @@ const ReceiveItemsPage: React.FC = () => {
     setItems((prev) =>
       prev.map((line) =>
         line.lineId === lineId
-          ? {
-              ...line,
-              description: product.name,
-              product_id: product.id,
-              unit_price: line.unit_price || product.cost_price || 0,
-              line_total: roundMoney((line.quantity || 0) * (line.unit_price || product.cost_price || 0)),
-              selling_price: product.unit_price || line.selling_price || 0,
-              auto_pricing_enabled: false,
-              markup_percentage: product.markup_percentage ?? line.markup_percentage ?? 0,
-              sku: product.sku || undefined,
-              barcode: product.barcode || undefined,
-              category: line.category || product.category || '',
-            }
+          ? (() => {
+              const category = line.category || product.category || '';
+              const pricing = resolveDepartmentPricing(category);
+              const unitPrice = line.unit_price || product.cost_price || 0;
+              const fallbackSelling = product.unit_price || line.selling_price || unitPrice;
+              return {
+                ...line,
+                description: product.name,
+                product_id: product.id,
+                unit_price: unitPrice,
+                line_total: roundMoney((line.quantity || 0) * unitPrice),
+                selling_price: pricing.autoPricingEnabled
+                  ? computeSellingFromMargin(unitPrice, pricing.markup)
+                  : fallbackSelling,
+                auto_pricing_enabled: pricing.autoPricingEnabled,
+                markup_percentage: pricing.markup,
+                sku: product.sku || undefined,
+                barcode: product.barcode || undefined,
+                category,
+              };
+            })()
           : line
       )
     );
@@ -934,10 +965,22 @@ const ReceiveItemsPage: React.FC = () => {
     });
   };
 
+  const addBlankLine = useCallback(() => {
+    const newLine = makeLine({ quantity: 0 });
+    setItems((prev) => [...prev, newLine]);
+    setPendingLineFocusId(newLine.lineId);
+    setQuickEntry('');
+    setLineSearchTargetId(null);
+    setLineProductSearch('');
+  }, []);
+
   const addQuickEntryToken = useCallback(async (rawEntry: string) => {
     const token = parseQuickToken(rawEntry);
     const query = token.identifier;
-    if (!query) return;
+    if (!query) {
+      addBlankLine();
+      return;
+    }
 
     const qty = Math.max(1, token.quantity ?? 1);
     const unitPrice = undefined;
@@ -969,29 +1012,8 @@ const ReceiveItemsPage: React.FC = () => {
       focusQuickEntry();
       return;
     }
-
-    const inferredBarcode = looksLikeBarcode(query) ? query : undefined;
-    const pricing = resolveDepartmentPricing('');
-    const cost = unitPrice ?? 0;
-    setItems((prev) => [
-      ...prev,
-      makeLine({
-        description: query,
-        quantity: qty,
-        unit_price: cost,
-        line_total: roundMoney(cost * qty),
-        markup_percentage: pricing.markup,
-        auto_pricing_enabled: pricing.autoPricingEnabled,
-        selling_price: pricing.autoPricingEnabled
-          ? computeSellingFromMargin(cost, pricing.markup)
-          : cost,
-        product_id: null,
-        barcode: inferredBarcode,
-      }),
-    ]);
-    setQuickEntry('');
-    focusQuickEntry();
-  }, [findProductExact, quickMatches, resolveDepartmentPricing, searchProductsFast]);
+    addBlankLine();
+  }, [addBlankLine, findProductExact, quickMatches, searchProductsFast]);
 
   const handleQuickAdd = async () => {
     await addQuickEntryToken(quickEntry);
@@ -1570,7 +1592,7 @@ const ReceiveItemsPage: React.FC = () => {
                           )}
                           {!quickMatchLoading && quickMatches.length === 0 && quickToken.identifier.trim().length >= 3 && (
                             <p className="px-3 py-2 text-xs text-stone-500">
-                              No exact inventory match. Press Add to create a new line.
+                              No exact inventory match. Press Add to insert a blank line.
                             </p>
                           )}
                           {quickMatches.map((product) => (
@@ -1676,7 +1698,7 @@ const ReceiveItemsPage: React.FC = () => {
                     <Package className="w-10 h-10 mx-auto text-stone-300 mb-2" />
                     <p className="text-sm font-medium text-slate-700">No items added yet</p>
                     <p className="text-xs text-stone-500 mt-1">
-                      Scan/search inventory to begin receiving.
+                      Scan/search inventory or press Add to insert a blank row.
                     </p>
                   </div>
                 ) : (
@@ -1702,6 +1724,7 @@ const ReceiveItemsPage: React.FC = () => {
 
                             <td className="px-3 py-2">
                               <input
+                                data-line-description-id={line.lineId}
                                 value={line.description}
                                 onChange={(event) =>
                                   updateLine(line.lineId, 'description', event.target.value)

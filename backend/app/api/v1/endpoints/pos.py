@@ -3402,7 +3402,7 @@ async def return_transaction(
         supabase = get_supabase_admin()
 
         return_reason = return_data.get('return_reason', 'Customer return')
-        return_items = return_data.get('items', [])  # Specific items being returned
+        _return_items = return_data.get('items', [])  # Reserved for future partial-line refund support.
         return_amount = return_data.get('amount')    # Total return amount
 
         # Get original transaction
@@ -3439,7 +3439,35 @@ async def return_transaction(
             if staff_result.data:
                 processor_name = staff_result.data[0].get('display_name') or processor_name
 
-        # Create return transaction as a negative transaction
+        original_total = abs(float(original_transaction.get('total_amount') or 0))
+        original_subtotal = abs(float(original_transaction.get('subtotal') or 0))
+        original_tax = abs(float(original_transaction.get('tax_amount') or 0))
+        requested_amount = abs(float(return_amount)) if return_amount is not None else original_total
+
+        if requested_amount <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Return amount must be greater than zero"
+            )
+
+        if original_total <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Original transaction has no refundable amount"
+            )
+
+        if requested_amount > original_total + 0.01:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Return amount cannot exceed original transaction total"
+            )
+
+        refund_ratio = min(1.0, requested_amount / original_total) if original_total > 0 else 1.0
+        subtotal_to_record = round(original_subtotal * refund_ratio, 2)
+        tax_to_record = round(original_tax * refund_ratio, 2)
+        total_to_record = round(requested_amount, 2)
+
+        # Create return transaction
         return_transaction_id = str(uuid.uuid4())
         return_transaction_number = f"RTN-{datetime.now().strftime('%Y%m%d')}-{return_transaction_id[:8].upper()}"
 
@@ -3452,15 +3480,15 @@ async def return_transaction(
             'cashier_name': processor_name,
             'customer_id': original_transaction.get('customer_id'),
             'customer_name': original_transaction.get('customer_name'),
-            'subtotal': -float(return_amount or original_transaction['subtotal']),
-            'tax_amount': -float(original_transaction['tax_amount']),
+            'subtotal': subtotal_to_record,
+            'tax_amount': tax_to_record,
             'discount_amount': 0,
-            'total_amount': -float(return_amount or original_transaction['total_amount']),
-            'payment_method': 'cash',  # Returns typically processed as cash
+            'total_amount': total_to_record,
+            'payment_method': original_transaction.get('payment_method') or 'cash',
             'tendered_amount': None,
             'change_amount': 0,
             'payment_reference': f"Return for {original_transaction['transaction_number']}",
-            'status': TransactionStatus.COMPLETED.value,
+            'status': TransactionStatus.REFUNDED.value,
             'receipt_type': 'return',
             'transaction_date': datetime.utcnow().isoformat(),
             'sync_status': SyncStatus.SYNCED.value,
@@ -3524,7 +3552,7 @@ async def return_transaction(
             "original_transaction_id": transaction_id,
             "return_transaction_id": return_transaction_id,
             "return_transaction_number": return_transaction_number,
-            "return_amount": return_amount or original_transaction['total_amount']
+            "return_amount": total_to_record
         }
 
     except HTTPException:
