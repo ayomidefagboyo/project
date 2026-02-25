@@ -1190,10 +1190,65 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
   const [expandedHeldIds, setExpandedHeldIds] = useState<string[]>([]);
   const [isLoadingHeldReceipts, setIsLoadingHeldReceipts] = useState(false);
   const [restoredHeldReceiptId, setRestoredHeldReceiptId] = useState<string | null>(null);
+  const heldSalesRef = useRef<HeldSale[]>([]);
 
   const heldStorageKey = currentOutlet?.id
     ? `pos_hold_carts_${currentOutlet.id}`
     : null;
+
+  useEffect(() => {
+    heldSalesRef.current = heldSales;
+  }, [heldSales]);
+
+  const readHeldSalesFromStorage = useCallback((): HeldSale[] => {
+    if (!heldStorageKey) return [];
+    try {
+      const raw = localStorage.getItem(heldStorageKey);
+      if (!raw) return [];
+
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+
+      return parsed
+        .map((entry: any) => ({
+          ...entry,
+          synced: entry?.synced === false ? false : true,
+          cart: Array.isArray(entry?.cart)
+            ? entry.cart
+                .map((line: any) => (line?.product ? normalizeCartLine(line) : null))
+                .filter(Boolean)
+            : [],
+        }))
+        .filter((entry: HeldSale) => Boolean(entry?.id));
+    } catch (err) {
+      logger.error('Failed to load held receipts from localStorage:', err);
+      return [];
+    }
+  }, [heldStorageKey, normalizeCartLine]);
+
+  const mergeBackendWithLocalUnsynced = useCallback((backendReceipts: HeldSale[]): HeldSale[] => {
+    const mergedById = new Map<string, HeldSale>();
+    backendReceipts.forEach((sale) => {
+      mergedById.set(sale.id, sale);
+    });
+
+    const unsyncedLocalCandidates = [
+      ...heldSalesRef.current,
+      ...readHeldSalesFromStorage(),
+    ];
+    unsyncedLocalCandidates.forEach((sale) => {
+      if (!sale?.id || sale.synced !== false) return;
+      if (!mergedById.has(sale.id)) {
+        mergedById.set(sale.id, { ...sale, synced: false });
+      }
+    });
+
+    return Array.from(mergedById.values()).sort((a, b) => {
+      const aTime = new Date(a.saved_at || 0).getTime();
+      const bTime = new Date(b.saved_at || 0).getTime();
+      return bTime - aTime;
+    });
+  }, [readHeldSalesFromStorage]);
 
   const loadHeldReceipts = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent === true;
@@ -1254,61 +1309,27 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
           cashier_name: r.cashier_name,
           synced: true,
         }));
-        setHeldSales(convertedReceipts);
+        const mergedReceipts = mergeBackendWithLocalUnsynced(convertedReceipts);
+        setHeldSales(mergedReceipts);
 
         // Also sync to localStorage as backup
         if (heldStorageKey) {
-          localStorage.setItem(heldStorageKey, JSON.stringify(convertedReceipts));
+          localStorage.setItem(heldStorageKey, JSON.stringify(mergedReceipts));
         }
-      } else if (heldStorageKey) {
+      } else {
         // Offline: load from localStorage
-        const raw = localStorage.getItem(heldStorageKey);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) {
-            const normalized = parsed.map((entry: any) => ({
-              ...entry,
-              cart: Array.isArray(entry?.cart)
-                ? entry.cart
-                    .map((line: any) => (line?.product ? normalizeCartLine(line) : null))
-                    .filter(Boolean)
-                : [],
-            }));
-            setHeldSales(normalized);
-          }
-        }
+        setHeldSales(readHeldSalesFromStorage());
       }
     } catch (err) {
       logger.error('Failed to load held receipts:', err);
       // Fallback to localStorage
-      if (heldStorageKey) {
-        try {
-          const raw = localStorage.getItem(heldStorageKey);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-              const normalized = parsed.map((entry: any) => ({
-                ...entry,
-                cart: Array.isArray(entry?.cart)
-                  ? entry.cart
-                      .map((line: any) => (line?.product ? normalizeCartLine(line) : null))
-                      .filter(Boolean)
-                  : [],
-              }));
-              setHeldSales(normalized);
-            }
-          }
-        } catch (localErr) {
-          logger.error('Failed to load from localStorage:', localErr);
-          setHeldSales([]);
-        }
-      }
+      setHeldSales(readHeldSalesFromStorage());
     } finally {
       if (!silent) {
         setIsLoadingHeldReceipts(false);
       }
     }
-  }, [currentOutlet?.id, isOnline, heldStorageKey, products, normalizeCartLine]);
+  }, [currentOutlet?.id, isOnline, heldStorageKey, products, normalizeCartLine, readHeldSalesFromStorage, mergeBackendWithLocalUnsynced]);
 
   // Load held sales on outlet/network/catalog changes
   useEffect(() => {
@@ -1459,7 +1480,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
           }
         } catch (err) {
           logger.error('Failed to sync held receipt to backend (kept locally):', err);
-          // Keep the local held sale; it will remain visible on this terminal
+          warning('Held receipt saved locally. Cloud sync failed; it will retry when connection is stable.', 6000);
         }
       })();
     }
