@@ -28,6 +28,7 @@ const TransferToOutletPage: React.FC = () => {
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const [isLoadingTransfers, setIsLoadingTransfers] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedTransfer, setSelectedTransfer] = useState<InventoryTransfer | null>(null);
   const productLoadRequestRef = useRef(0);
 
   const destinationOutlets = useMemo(() => {
@@ -162,6 +163,19 @@ const TransferToOutletPage: React.FC = () => {
     void loadOutletsFallback();
   }, [currentOutlet?.id]);
 
+  useEffect(() => {
+    if (!selectedTransfer) return;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSelectedTransfer(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [selectedTransfer]);
+
   const addDraftItem = (productIdOverride?: string) => {
     const targetProductId = productIdOverride || selectedProductId;
     if (!targetProductId) {
@@ -207,6 +221,19 @@ const TransferToOutletPage: React.FC = () => {
   };
 
   const totalUnits = draftItems.reduce((sum, item) => sum + item.quantity_requested, 0);
+
+  const formatDateTime = (value?: string) => {
+    if (!value) return '--';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '--';
+    return parsed.toLocaleString([], {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
 
   const handleSubmitTransfer = async () => {
     if (!currentOutlet?.id) return;
@@ -505,7 +532,12 @@ const TransferToOutletPage: React.FC = () => {
                 const requestedAt = transfer.requested_at ? new Date(transfer.requested_at) : null;
 
                 return (
-                  <div key={transfer.id} className="rounded-xl border border-stone-200 p-3">
+                  <button
+                    type="button"
+                    key={transfer.id}
+                    onClick={() => setSelectedTransfer(transfer)}
+                    className="w-full text-left rounded-xl border border-stone-200 p-3 hover:border-slate-300 hover:bg-stone-50 transition-colors"
+                  >
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <div className="text-sm font-semibold text-slate-900">{transfer.transfer_number}</div>
@@ -525,21 +557,132 @@ const TransferToOutletPage: React.FC = () => {
                       </span>
                     </div>
 
-                    <div className="text-sm text-stone-600 mt-2">
+                    <div className="text-xs text-stone-600 mt-2">
                       <div className="flex items-center gap-1">
                         <Truck className="w-4 h-4" />
                         {transfer.from_outlet_name} → {transfer.to_outlet_name}
                       </div>
                       <div className="mt-1">{transfer.total_items} units • ₦{Number(transfer.total_value || 0).toLocaleString()}</div>
-                      {transfer.transfer_reason && <div className="mt-1 text-stone-500">{transfer.transfer_reason}</div>}
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
           </div>
         </div>
       </div>
+
+      {selectedTransfer && (
+        <div className="fixed inset-0 z-40">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setSelectedTransfer(null)}
+            aria-label="Close transfer details"
+          />
+          <div className="relative z-10 h-full flex items-center justify-center p-4">
+            <div className="w-full max-w-4xl max-h-[88vh] overflow-hidden rounded-2xl bg-white border border-stone-200 shadow-xl">
+              <div className="px-5 py-4 border-b border-stone-200 flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900">Transfer Details</h3>
+                  <p className="text-sm text-stone-600 mt-1">{selectedTransfer.transfer_number}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedTransfer(null)}
+                  className="h-10 w-10 rounded-lg border border-stone-300 hover:bg-stone-100 text-slate-700 inline-flex items-center justify-center"
+                  aria-label="Close transfer details"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4 overflow-y-auto max-h-[calc(88vh-72px)]">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-xl border border-stone-200 p-3">
+                    <div className="text-stone-500 text-xs uppercase tracking-wide">Route</div>
+                    <div className="mt-1 font-semibold text-slate-900">{selectedTransfer.from_outlet_name} → {selectedTransfer.to_outlet_name}</div>
+                  </div>
+                  <div className="rounded-xl border border-stone-200 p-3">
+                    <div className="text-stone-500 text-xs uppercase tracking-wide">Status</div>
+                    <div className="mt-1 font-semibold text-slate-900 capitalize">{selectedTransfer.status.replace('_', ' ')}</div>
+                  </div>
+                  <div className="rounded-xl border border-stone-200 p-3">
+                    <div className="text-stone-500 text-xs uppercase tracking-wide">Requested</div>
+                    <div className="mt-1 font-semibold text-slate-900">{formatDateTime(selectedTransfer.requested_at)}</div>
+                  </div>
+                  <div className="rounded-xl border border-stone-200 p-3">
+                    <div className="text-stone-500 text-xs uppercase tracking-wide">Received</div>
+                    <div className="mt-1 font-semibold text-slate-900">{formatDateTime(selectedTransfer.received_at)}</div>
+                  </div>
+                </div>
+
+                {(selectedTransfer.transfer_reason || selectedTransfer.notes) && (
+                  <div className="rounded-xl border border-stone-200 p-3 space-y-2 text-sm">
+                    {selectedTransfer.transfer_reason && (
+                      <div>
+                        <div className="text-stone-500 text-xs uppercase tracking-wide">Reason</div>
+                        <div className="mt-1 text-slate-900">{selectedTransfer.transfer_reason}</div>
+                      </div>
+                    )}
+                    {selectedTransfer.notes && (
+                      <div>
+                        <div className="text-stone-500 text-xs uppercase tracking-wide">Notes</div>
+                        <div className="mt-1 text-slate-900">{selectedTransfer.notes}</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="rounded-xl border border-stone-200 overflow-hidden">
+                  <div className="px-4 py-3 bg-stone-100 text-sm font-semibold text-slate-900">
+                    Items ({selectedTransfer.items.length})
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[760px] text-sm">
+                      <thead className="bg-stone-50 text-stone-600">
+                        <tr>
+                          <th className="text-left px-4 py-3 font-semibold">Product</th>
+                          <th className="text-left px-4 py-3 font-semibold">SKU</th>
+                          <th className="text-right px-4 py-3 font-semibold">Requested</th>
+                          <th className="text-right px-4 py-3 font-semibold">Sent</th>
+                          <th className="text-right px-4 py-3 font-semibold">Received</th>
+                          <th className="text-right px-4 py-3 font-semibold">Unit Cost</th>
+                          <th className="text-right px-4 py-3 font-semibold">Line Value</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-stone-200">
+                        {selectedTransfer.items.map((item) => {
+                          const qty = item.quantity_sent || item.quantity_requested || item.quantity_received || 0;
+                          const unitCost = Number(item.unit_cost || 0);
+                          const lineValue = unitCost * qty;
+
+                          return (
+                            <tr key={item.id}>
+                              <td className="px-4 py-3 font-semibold text-slate-900">{item.product_name}</td>
+                              <td className="px-4 py-3 text-stone-600">{item.sku || '--'}</td>
+                              <td className="px-4 py-3 text-right text-slate-700">{item.quantity_requested}</td>
+                              <td className="px-4 py-3 text-right text-slate-700">{item.quantity_sent}</td>
+                              <td className="px-4 py-3 text-right text-slate-700">{item.quantity_received}</td>
+                              <td className="px-4 py-3 text-right text-slate-700">₦{unitCost.toLocaleString()}</td>
+                              <td className="px-4 py-3 text-right font-semibold text-slate-900">₦{lineValue.toLocaleString()}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm text-slate-700 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                  <div>{selectedTransfer.total_items} units</div>
+                  <div className="font-semibold text-slate-900">Total Value: ₦{Number(selectedTransfer.total_value || 0).toLocaleString()}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
