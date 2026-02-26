@@ -332,10 +332,16 @@ export const OutletProvider: React.FC<OutletProviderProps> = ({ children }) => {
           const { data: settings, error } = await dataService.getBusinessSettings(currentOutlet.id);
           if (settings && !error) {
             setBusinessSettings(settings);
+          } else {
+            // Prevent stale settings from a different outlet remaining in memory.
+            setBusinessSettings(null);
           }
         } catch (error) {
           console.error('Error loading business settings:', error);
+          setBusinessSettings(null);
         }
+      } else {
+        setBusinessSettings(null);
       }
     };
 

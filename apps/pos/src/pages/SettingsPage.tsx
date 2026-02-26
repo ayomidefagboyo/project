@@ -122,9 +122,22 @@ const mapPreferenceToBusinessTheme = (preference: ThemePreference): 'light' | 'd
   preference === 'system' ? 'auto' : preference
 );
 
-const applyThemePreferenceToDocument = (preference: ThemePreference): boolean => {
-  if (typeof document === 'undefined') return false;
+const ALLOWED_BUSINESS_TYPES = new Set(['supermarket', 'restaurant', 'lounge', 'retail', 'cafe']);
 
+const normalizeBusinessTypeForSettings = (value: unknown): string => {
+  const candidate = String(value ?? '').trim().toLowerCase();
+  if (ALLOWED_BUSINESS_TYPES.has(candidate)) return candidate;
+  return 'retail';
+};
+
+const isSettingsForOutlet = (settings: BusinessSettings | null, outletId: string | undefined): boolean => {
+  if (!settings || !outletId) return false;
+  const rowOutletId =
+    String((settings as unknown as Record<string, unknown>).outlet_id ?? settings.outletId ?? '').trim();
+  return rowOutletId === outletId;
+};
+
+const applyThemePreferenceToDocument = (preference: ThemePreference): boolean => {
   const shouldUseDark =
     preference === 'dark' ||
     (
@@ -133,9 +146,9 @@ const applyThemePreferenceToDocument = (preference: ThemePreference): boolean =>
       window.matchMedia('(prefers-color-scheme: dark)').matches
     );
 
-  if (shouldUseDark) {
-    document.documentElement.classList.add('dark');
-  } else {
+  // Keep theme switching scoped to Settings for now to avoid mixed light/dark
+  // rendering in screens that are not fully dark-mode-ready.
+  if (typeof document !== 'undefined') {
     document.documentElement.classList.remove('dark');
   }
 
@@ -164,6 +177,13 @@ const SettingsPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    // Defensive cleanup in case a previous session left global dark class on <html>.
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.remove('dark');
+    }
+  }, []);
+
+  useEffect(() => {
     const resolved = resolveBrandColorFromSettings(businessSettings);
     setBrandColor(resolved);
     applyBrandColorToDocument(resolved);
@@ -183,12 +203,13 @@ const SettingsPage: React.FC = () => {
   }, [businessSettings]);
 
   const withBusinessSettingDefaults = (payload: Record<string, unknown>): Record<string, unknown> => {
-    if (businessSettings || !currentOutlet) return payload;
+    if (!currentOutlet) return payload;
+    if (isSettingsForOutlet(businessSettings, currentOutlet.id)) return payload;
 
     return {
       ...payload,
       business_name: currentOutlet.name,
-      business_type: currentOutlet.businessType || 'retail',
+      business_type: normalizeBusinessTypeForSettings(currentOutlet.businessType),
       theme: 'auto',
       language: 'en',
       date_format: 'MM/DD/YYYY',
@@ -310,7 +331,8 @@ const SettingsPage: React.FC = () => {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col xl:flex-row bg-gray-50 dark:bg-gray-900 overflow-hidden">
+    <div className={darkMode ? 'h-full dark' : 'h-full'}>
+      <div className="flex h-full min-h-0 flex-col xl:flex-row bg-gray-50 dark:bg-gray-900 overflow-hidden">
         {/* Sidebar Navigation */}
         <div className="shrink-0 xl:w-80 bg-white dark:bg-gray-800 border-b xl:border-b-0 xl:border-r border-gray-200 dark:border-gray-700 p-3 sm:p-4 overflow-x-auto xl:overflow-y-auto">
           <div className="flex xl:flex-col gap-2 min-w-max xl:min-w-0">
@@ -351,6 +373,7 @@ const SettingsPage: React.FC = () => {
       {/* Main Content */}
       <div className="flex-1 min-h-0 overflow-y-auto">
         {renderTabContent()}
+      </div>
       </div>
     </div>
   );

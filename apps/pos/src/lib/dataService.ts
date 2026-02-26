@@ -25,6 +25,31 @@ const parseMissingSchemaColumn = (errorMessage: string): string | null => {
   return null;
 };
 
+const ALLOWED_BUSINESS_TYPES = new Set(['supermarket', 'restaurant', 'lounge', 'retail', 'cafe']);
+
+const normalizeBusinessType = (value: unknown): string => {
+  const candidate = String(value ?? '').trim().toLowerCase();
+  if (ALLOWED_BUSINESS_TYPES.has(candidate)) return candidate;
+  return 'retail';
+};
+
+const normalizeTheme = (value: unknown): string => {
+  const candidate = String(value ?? '').trim().toLowerCase();
+  if (candidate === 'light' || candidate === 'dark' || candidate === 'auto') return candidate;
+  return 'auto';
+};
+
+const normalizeTimeFormat = (value: unknown): string => {
+  const candidate = String(value ?? '').trim().toLowerCase();
+  return candidate === '24h' ? '24h' : '12h';
+};
+
+const normalizeCurrencyCode = (value: unknown): string => {
+  const candidate = String(value ?? '').trim().toUpperCase();
+  if (!candidate) return 'NGN';
+  return candidate.slice(0, 3);
+};
+
 export class DataService extends DataServiceBase {
   constructor() {
     super(supabase);
@@ -407,12 +432,36 @@ export class DataService extends DataServiceBase {
   async updateBusinessSettings(outletId: string, settings: Partial<BusinessSettings>): Promise<{ data: BusinessSettings | null; error: string | null }> {
     try {
       const payload: Record<string, unknown> = { ...(settings as Record<string, unknown>), outlet_id: outletId };
+      const camelBusinessType = payload.businessType;
+      if (typeof camelBusinessType !== 'undefined' && typeof payload.business_type === 'undefined') {
+        payload.business_type = camelBusinessType;
+      }
+      delete payload.businessType;
+
+      payload.business_type = normalizeBusinessType(payload.business_type);
+      payload.theme = normalizeTheme(payload.theme);
+      payload.time_format = normalizeTimeFormat(payload.time_format);
+      payload.currency = normalizeCurrencyCode(payload.currency);
+      if (typeof payload.business_name !== 'string' || payload.business_name.trim().length === 0) {
+        payload.business_name = 'Business';
+      } else {
+        payload.business_name = payload.business_name.trim();
+      }
+      if (typeof payload.language !== 'string' || payload.language.trim().length === 0) {
+        payload.language = 'en';
+      }
+      if (typeof payload.date_format !== 'string' || payload.date_format.trim().length === 0) {
+        payload.date_format = 'MM/DD/YYYY';
+      }
+      if (typeof payload.timezone !== 'string' || payload.timezone.trim().length === 0) {
+        payload.timezone = 'Africa/Lagos';
+      }
       const strippedColumns = new Set<string>();
 
       while (true) {
         const { data, error } = await supabase
           .from(TABLES.BUSINESS_SETTINGS)
-          .upsert(payload)
+          .upsert(payload, { onConflict: 'outlet_id' })
           .select()
           .single();
 

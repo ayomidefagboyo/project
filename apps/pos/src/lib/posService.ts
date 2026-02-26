@@ -1296,6 +1296,13 @@ class POSService {
   async deleteProduct(productId: string): Promise<void> {
     try {
       await apiClient.delete(`${this.baseUrl}/products/${productId}`);
+      if (this.isInitialized) {
+        try {
+          await offlineDatabase.removeProduct(productId);
+        } catch (cacheError) {
+          logger.warn('Failed to remove deleted product from local cache:', cacheError);
+        }
+      }
     } catch (error) {
       logger.error('Error deleting product:', error);
       throw this.handleError(error);

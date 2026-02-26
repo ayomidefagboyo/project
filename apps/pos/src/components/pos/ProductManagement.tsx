@@ -83,6 +83,8 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
   const [newProductSellingPriceManuallyEdited, setNewProductSellingPriceManuallyEdited] = useState(false);
   const [showNewRow, setShowNewRow] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [deletingProductIds, setDeletingProductIds] = useState<Set<string>>(new Set());
   const [showDepartmentModal, setShowDepartmentModal] = useState(false);
   const [itemHistoryProduct, setItemHistoryProduct] = useState<POSProduct | null>(null);
   const [departmentModalError, setDepartmentModalError] = useState<string | null>(null);
@@ -705,6 +707,98 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     });
   }, [paginatedProducts]);
 
+  const removeProductsFromState = useCallback((productIds: string[]) => {
+    if (productIds.length === 0) return;
+    const ids = new Set(productIds);
+
+    setProducts((prev) => prev.filter((product) => !ids.has(product.id)));
+    setSelectedProducts((prev) => {
+      const next = new Set(prev);
+      productIds.forEach((id) => next.delete(id));
+      return next;
+    });
+    setEditingRows((prev) => {
+      const next = new Set(prev);
+      productIds.forEach((id) => next.delete(id));
+      return next;
+    });
+    setEditDrafts((prev) => {
+      const next = { ...prev };
+      productIds.forEach((id) => {
+        delete next[id];
+      });
+      return next;
+    });
+  }, []);
+
+  const handleDeleteProduct = useCallback(
+    async (product: POSProduct) => {
+      const confirmed = window.confirm(
+        `Delete "${product.name}"? This will remove it from the active item list.`
+      );
+      if (!confirmed) return;
+
+      setDeletingProductIds((prev) => {
+        const next = new Set(prev);
+        next.add(product.id);
+        return next;
+      });
+      setError(null);
+
+      try {
+        await posService.deleteProduct(product.id);
+        removeProductsFromState([product.id]);
+      } catch (deleteError) {
+        console.error(`Failed to delete product ${product.id}:`, deleteError);
+        setError(`Failed to delete "${product.name}". Please try again.`);
+      } finally {
+        setDeletingProductIds((prev) => {
+          const next = new Set(prev);
+          next.delete(product.id);
+          return next;
+        });
+      }
+    },
+    [removeProductsFromState]
+  );
+
+  const handleBulkDeleteSelected = useCallback(async () => {
+    const ids = Array.from(selectedProducts);
+    if (ids.length === 0) return;
+
+    const confirmed = window.confirm(
+      `Delete ${ids.length} selected product${ids.length === 1 ? '' : 's'}? This will remove them from the active item list.`
+    );
+    if (!confirmed) return;
+
+    setIsBulkDeleting(true);
+    setError(null);
+
+    const failedIds: string[] = [];
+    for (const id of ids) {
+      try {
+        await posService.deleteProduct(id);
+      } catch (deleteError) {
+        console.error(`Failed to delete product ${id}:`, deleteError);
+        failedIds.push(id);
+      }
+    }
+
+    const failedSet = new Set(failedIds);
+    const deletedIds = ids.filter((id) => !failedSet.has(id));
+    removeProductsFromState(deletedIds);
+
+    if (failedIds.length > 0) {
+      setError(
+        `Deleted ${deletedIds.length} product${deletedIds.length === 1 ? '' : 's'}, but ${failedIds.length} failed. Please retry the failed items.`
+      );
+    } else {
+      setError(null);
+    }
+
+    setIsBulkDeleting(false);
+  }, [selectedProducts, removeProductsFromState]);
+
   // Handle add product via prop or internal state
   const handleShowNewRow = () => {
     if (onShowNewRow) {
@@ -728,6 +822,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
         const isEditing = editingRows.has(product.id);
         const isSelected = selectedProducts.has(product.id);
         const draft = editDrafts[product.id] || {};
+        const isDeleting = deletingProductIds.has(product.id);
 
         const barcodeValue = String(draft.barcode ?? product.barcode ?? '');
         const nameValue = String(draft.name ?? product.name ?? '');
@@ -911,6 +1006,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                   <>
                     <button
                       onClick={() => void saveProduct(product.id)}
+                      disabled={isDeleting}
                       className="p-1 text-green-600 hover:bg-green-100 rounded transition-colors"
                       title="Save"
                     >
@@ -918,10 +1014,19 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                     </button>
                     <button
                       onClick={() => cancelEditingProduct(product.id)}
+                      disabled={isDeleting}
                       className="p-1 text-red-600 hover:bg-red-100 rounded transition-colors"
                       title="Cancel"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <X className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => void handleDeleteProduct(product)}
+                      disabled={isDeleting}
+                      className="p-1 text-rose-600 hover:bg-rose-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Delete product"
+                    >
+                      <Trash2 className={`w-4 h-4 ${isDeleting ? 'animate-pulse' : ''}`} />
                     </button>
                   </>
                 ) : (
@@ -940,6 +1045,14 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                     >
                       <History className="w-4 h-4" />
                     </button>
+                    <button
+                      onClick={() => void handleDeleteProduct(product)}
+                      disabled={isDeleting}
+                      className="p-1 text-rose-600 hover:bg-rose-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Delete product"
+                    >
+                      <Trash2 className={`w-4 h-4 ${isDeleting ? 'animate-pulse' : ''}`} />
+                    </button>
                   </>
                 )}
               </div>
@@ -952,6 +1065,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
       editingRows,
       selectedProducts,
       editDrafts,
+      deletingProductIds,
       categoryOptions,
       formatCurrency,
       handleCellEdit,
@@ -959,6 +1073,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
       saveProduct,
       startEditingProduct,
       cancelEditingProduct,
+      handleDeleteProduct,
     ]
   );
 
@@ -1249,8 +1364,13 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                 <button className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
                   Bulk Edit
                 </button>
-                <button className="px-4 py-2 text-sm font-medium text-red-700 bg-red-100 hover:bg-red-200 rounded-lg transition-colors">
-                  Delete Selected
+                <button
+                  type="button"
+                  onClick={() => void handleBulkDeleteSelected()}
+                  disabled={isBulkDeleting}
+                  className="px-4 py-2 text-sm font-medium text-red-700 bg-red-100 hover:bg-red-200 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {isBulkDeleting ? 'Deleting...' : 'Delete Selected'}
                 </button>
               </div>
             </div>
