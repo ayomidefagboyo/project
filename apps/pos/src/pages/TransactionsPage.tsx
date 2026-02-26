@@ -1020,7 +1020,7 @@ const TransactionsPage: React.FC = () => {
                       }
                       className="py-2.5 border border-amber-200 text-amber-700 font-semibold rounded-xl hover:bg-amber-50 transition-colors text-sm disabled:opacity-60"
                     >
-                      Return / Exchange
+                      Return
                     </button>
                     <button
                       onClick={() => {
