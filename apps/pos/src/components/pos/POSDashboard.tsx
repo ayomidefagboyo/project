@@ -197,6 +197,23 @@ const buildCartLineId = (productId: string, saleUnit: SaleUnit): string => `${pr
 const roundMoney = (amount: number): number => Math.round((amount + Number.EPSILON) * 100) / 100;
 const lineUnitNet = (unitPrice: number, discountPerUnit: number): number =>
   Math.max(0, Number(unitPrice || 0) - Number(discountPerUnit || 0));
+const DISCOUNT_APPROVER_ROLES = new Set([
+  'manager',
+  'pharmacist',
+  'accountant',
+  'outlet_admin',
+  'business_owner',
+  'super_admin',
+  'admin',
+]);
+
+const canStaffApproveDiscount = (profile: Pick<StaffProfile, 'role' | 'permissions'> | null | undefined): boolean => {
+  if (!profile) return false;
+  const role = String(profile.role || '').toLowerCase();
+  if (DISCOUNT_APPROVER_ROLES.has(role)) return true;
+  const permissions = (profile.permissions || []).map((permission) => String(permission || '').trim().toLowerCase());
+  return permissions.includes('apply_discounts') || permissions.includes('manage_discounts');
+};
 
 const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ terminalConfig }, ref) => {
   // Context and state
@@ -261,7 +278,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
   const [showStaffManagement, setShowStaffManagement] = useState(false);
   const [showManagerLogin, setShowManagerLogin] = useState(false);
   const [showDiscountApprovalModal, setShowDiscountApprovalModal] = useState(false);
-  const [discountApprovalStaffCode, setDiscountApprovalStaffCode] = useState('');
+  const [discountApprovalApproverId, setDiscountApprovalApproverId] = useState('');
   const [discountApprovalPin, setDiscountApprovalPin] = useState('');
   const [discountApprovalError, setDiscountApprovalError] = useState<string | null>(null);
   const [isDiscountApprovalLoading, setIsDiscountApprovalLoading] = useState(false);
@@ -291,6 +308,28 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     setDiscountOverrideGrant(null);
     setExchangeContext(null);
   }, [currentOutlet?.id, currentStaff?.id]);
+
+  const discountApprovers = useMemo(
+    () =>
+      (staffProfiles || [])
+        .filter((profile) => profile.is_active && canStaffApproveDiscount(profile))
+        .sort((a, b) => a.display_name.localeCompare(b.display_name)),
+    [staffProfiles]
+  );
+
+  useEffect(() => {
+    if (!showDiscountApprovalModal) return;
+
+    if (!discountApprovers.length) {
+      setDiscountApprovalError('No authorized manager/pharmacist profile is available for discount approval.');
+      return;
+    }
+
+    const stillValidSelection = discountApprovers.some((profile) => profile.id === discountApprovalApproverId);
+    if (!stillValidSelection) {
+      setDiscountApprovalApproverId(discountApprovers[0].id);
+    }
+  }, [showDiscountApprovalModal, discountApprovers, discountApprovalApproverId]);
 
   // Helper function to format currency
   const formatCurrency = (amount: number): string => {
@@ -1048,23 +1087,34 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
   const closeDiscountApprovalModal = () => {
     setShowDiscountApprovalModal(false);
     setDiscountApprovalError(null);
-    setDiscountApprovalStaffCode('');
+    setDiscountApprovalApproverId('');
     setDiscountApprovalPin('');
     setIsDiscountApprovalLoading(false);
   };
 
   const requestDiscountApproval = () => {
+    if (!discountApprovers.length) {
+      error('No authorized manager/pharmacist profile is available for discount approval.', 5000);
+      return;
+    }
     setDiscountApprovalError(null);
+    if (!discountApprovalApproverId) {
+      setDiscountApprovalApproverId(discountApprovers[0].id);
+    }
     setShowDiscountApprovalModal(true);
   };
 
   const authorizeDiscountForCurrentSale = async () => {
     if (!currentOutlet?.id) return;
 
-    const staffCode = discountApprovalStaffCode.trim().toUpperCase();
+    const selectedApprover = discountApprovers.find((profile) => profile.id === discountApprovalApproverId);
     const pin = discountApprovalPin.trim();
-    if (!staffCode || !pin) {
-      setDiscountApprovalError('Staff code and PIN are required.');
+    if (!selectedApprover) {
+      setDiscountApprovalError('Select an authorized staff profile.');
+      return;
+    }
+    if (!pin) {
+      setDiscountApprovalError('PIN is required.');
       return;
     }
 
@@ -1072,28 +1122,17 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     setDiscountApprovalError(null);
     try {
       const authResponse = await staffService.authenticateWithPin({
-        staff_code: staffCode,
+        staff_code: selectedApprover.staff_code,
         pin,
         outlet_id: currentOutlet.id,
       });
 
-      const approverRole = String(authResponse.staff_profile.role || '').toLowerCase();
-      const approverPermissions = (authResponse.staff_profile.permissions || []).map((permission) =>
-        String(permission || '').trim().toLowerCase()
-      );
-      const allowedRoles = new Set([
-        'manager',
-        'pharmacist',
-        'accountant',
-        'outlet_admin',
-        'business_owner',
-        'super_admin',
-        'admin',
-      ]);
-      const canApproveDiscount =
-        allowedRoles.has(approverRole) ||
-        approverPermissions.includes('apply_discounts') ||
-        approverPermissions.includes('manage_discounts');
+      if (authResponse.staff_profile.id !== selectedApprover.id) {
+        setDiscountApprovalError('PIN does not match selected staff profile.');
+        return;
+      }
+
+      const canApproveDiscount = canStaffApproveDiscount(authResponse.staff_profile);
 
       if (!canApproveDiscount) {
         setDiscountApprovalError('Selected staff cannot authorize discounts.');
@@ -1114,7 +1153,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
       success(`Discount approved by ${authResponse.staff_profile.display_name}`);
     } catch (err) {
       logger.error('Discount approval failed:', err);
-      setDiscountApprovalError('Invalid staff code or PIN.');
+      setDiscountApprovalError('Invalid PIN.');
     } finally {
       setIsDiscountApprovalLoading(false);
     }
@@ -1647,85 +1686,78 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     const sale = heldSales.find((s) => s.id === id);
     if (!sale) return;
 
-    // If cart items don't have full product data, fetch it
-    let restoredCart = sale.cart;
+    // Close modal immediately and restore cart instantly for cashier flow.
+    setShowHeldModal(false);
+    setExpandedHeldIds([]);
+    setExchangeContext(null);
+
+    const restoredCart = (sale.cart || []).map((line: any) => normalizeCartLine(line));
+    const restoreSignature = restoredCart.map((line) => `${line.lineId}:${line.quantity}`).join('|');
+    setCart(restoredCart);
+
+    // Remove from list (so it doesn't show up again)
+    const remaining = heldSales.filter((s) => s.id !== id);
+    void persistHeldSales(remaining).catch((persistErr) => {
+      logger.error('Failed to persist held receipt removal after load:', persistErr);
+    });
+
+    // Try deleting backend copy immediately so it won't reappear after refresh/reload.
+    // If it fails, keep ID for one retry after successful checkout.
+    setRestoredHeldReceiptId(null);
+    if (isOnline && sale.synced) {
+      void (async () => {
+        try {
+          await posService.deleteHeldReceipt(id);
+        } catch (deleteErr) {
+          logger.error('Failed to delete held receipt on load; will retry after sale:', deleteErr);
+          setRestoredHeldReceiptId(id);
+        }
+      })();
+    }
+
+    // If lines contain placeholder product records, hydrate names/prices in background
+    // without blocking the load interaction.
     const hasPlaceholderProducts = restoredCart.some((item) => {
       const name = (item.product.name || '').trim().toLowerCase();
       return !item.product.id || !item.product.name || name === 'product';
     });
-    if (restoredCart.length > 0 && hasPlaceholderProducts) {
-      // Fetch full product details for each item
-      try {
-        const productIds = restoredCart.map(item => {
-          // Try to get product_id from the item (might be stored differently)
-          return (item.product as any).product_id || item.product.id;
-        });
-        
-        // Fetch products from local database or API
-        const fetchedProducts = await Promise.all(
-          productIds.map(async (productId: string) => {
-            try {
-              // Try to get from local products first
-              const localProduct = products.find(p => p.id === productId);
-              if (localProduct) return localProduct;
-              
-              // If not found locally and online, fetch from API
-              if (isOnline && currentOutlet?.id) {
-                const result = await posService.getProducts(currentOutlet.id, {
-                  page: 1,
-                  size: 100,
-                  activeOnly: false,
-                });
-                return result?.items?.find((p: POSProduct) => p.id === productId);
-              }
-              
-              return null;
-            } catch (err) {
-              logger.error(`Failed to fetch product ${productId}:`, err);
-              return null;
-            }
-          })
-        );
-        
-        // Rebuild cart with full product data
-        restoredCart = restoredCart.map((item, index) => {
-          const fullProduct = fetchedProducts[index];
-          if (fullProduct) {
-            return {
-              ...item,
-              product: fullProduct,
-            };
+
+    if (hasPlaceholderProducts) {
+      void (async () => {
+        try {
+          const localLookup = new Map<string, POSProduct>();
+          products.forEach((product) => localLookup.set(product.id, product));
+
+          if (currentOutlet?.id) {
+            const cached = await posService.getCachedProducts(currentOutlet.id, {
+              activeOnly: false,
+              page: 1,
+              size: 5000,
+            });
+            (cached.items || []).forEach((product) => localLookup.set(product.id, product));
           }
-          return item;
-        });
-      } catch (err) {
-        logger.error('Failed to fetch product details for held receipt:', err);
-        // Continue with existing cart data
-      }
-    }
 
-    // Restore cart
-    setCart(restoredCart.map((line: any) => normalizeCartLine(line)));
-    setExchangeContext(null);
-    
-    // Remove from list (so it doesn't show up again)
-    const remaining = heldSales.filter((s) => s.id !== id);
-    await persistHeldSales(remaining);
+          setCart((prevCart) => {
+            const prevSignature = prevCart.map((line) => `${line.lineId}:${line.quantity}`).join('|');
+            if (prevSignature !== restoreSignature) {
+              // Cashier already edited the restored cart; do not override.
+              return prevCart;
+            }
 
-    // Try deleting backend copy immediately so it won't reappear after refresh/reload.
-    // If it fails, keep ID for one retry after successful checkout.
-    let retryDeleteAfterSale: string | null = null;
-    if (isOnline && sale.synced) {
-      try {
-        await posService.deleteHeldReceipt(id);
-      } catch (deleteErr) {
-        logger.error('Failed to delete held receipt on load; will retry after sale:', deleteErr);
-        retryDeleteAfterSale = id;
-      }
+            return prevCart.map((line) => {
+              const resolvedProduct = localLookup.get(line.product.id);
+              if (!resolvedProduct) return line;
+              return normalizeCartLine({
+                ...line,
+                product: resolvedProduct,
+              });
+            });
+          });
+        } catch (hydrateErr) {
+          logger.error('Failed to hydrate product details for held receipt load:', hydrateErr);
+        }
+      })();
     }
-    setRestoredHeldReceiptId(retryDeleteAfterSale);
-    
-    setShowHeldModal(false);
   };
 
   const handleRemoveHeldSale = async (id: string) => {
@@ -2261,23 +2293,10 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
   // Get unique categories for filter
 
   const cartTotals = calculateCartTotals();
-  const effectiveStaffRole = String(currentStaff?.role || currentUser?.role || '').toLowerCase();
-  const discountPrivilegedRoles = new Set([
-    'manager',
-    'pharmacist',
-    'accountant',
-    'outlet_admin',
-    'business_owner',
-    'super_admin',
-    'admin',
-  ]);
-  const staffPermissions = (currentStaff?.permissions || []).map((permission) =>
-    String(permission || '').trim().toLowerCase()
-  );
-  const hasRoleDiscountPrivilege =
-    discountPrivilegedRoles.has(effectiveStaffRole) ||
-    staffPermissions.includes('apply_discounts') ||
-    staffPermissions.includes('manage_discounts');
+  const hasRoleDiscountPrivilege = canStaffApproveDiscount({
+    role: (currentStaff?.role || currentUser?.role || '') as StaffProfile['role'],
+    permissions: (currentStaff?.permissions || (currentUser as any)?.permissions || []) as StaffProfile['permissions'],
+  });
   const hasValidDiscountOverride = Boolean(
     discountOverrideGrant && new Date(discountOverrideGrant.expiresAt).getTime() > Date.now()
   );
@@ -2879,20 +2898,28 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                 </button>
               </div>
               <p className="text-xs text-stone-600 mb-3">
-                Manager/Pharmacist should enter staff code and PIN to authorize this sale discount.
+                Manager/Pharmacist should select their profile and enter PIN to authorize this sale discount.
               </p>
 
               <div className="space-y-3">
                 <div>
-                  <label className="block text-xs font-semibold text-stone-600 mb-1">Staff Code</label>
-                  <input
-                    type="text"
-                    value={discountApprovalStaffCode}
-                    onChange={(event) => setDiscountApprovalStaffCode(event.target.value.toUpperCase())}
-                    className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm"
-                    placeholder="STF001"
+                  <label className="block text-xs font-semibold text-stone-600 mb-1">Authorizer</label>
+                  <select
+                    value={discountApprovalApproverId}
+                    onChange={(event) => setDiscountApprovalApproverId(event.target.value)}
+                    className="w-full px-3 py-2 border border-stone-300 rounded-lg text-sm bg-white"
                     autoFocus
-                  />
+                  >
+                    {discountApprovers.length === 0 ? (
+                      <option value="">No authorized profiles</option>
+                    ) : (
+                      discountApprovers.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.display_name} ({profile.staff_code}) · {String(profile.role || '').replace(/_/g, ' ')}
+                        </option>
+                      ))
+                    )}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-stone-600 mb-1">PIN</label>
@@ -2921,7 +2948,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                 <button
                   type="button"
                   onClick={authorizeDiscountForCurrentSale}
-                  disabled={isDiscountApprovalLoading}
+                  disabled={isDiscountApprovalLoading || discountApprovers.length === 0}
                   className="px-3 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
                 >
                   {isDiscountApprovalLoading ? 'Authorizing...' : 'Authorize Discount'}

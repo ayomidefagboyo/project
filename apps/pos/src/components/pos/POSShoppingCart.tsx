@@ -10,8 +10,6 @@ import {
   Minus,
   Trash2,
   Tag,
-  Lock,
-  ShieldCheck,
 } from 'lucide-react';
 import type { CartItem } from './POSDashboard';
 
@@ -107,16 +105,6 @@ const POSShoppingCart: React.FC<POSShoppingCartProps> = ({
 
   return (
     <div className="space-y-2">
-      {!canApplyDiscount && (
-        <button
-          type="button"
-          onClick={onRequestDiscountApproval}
-          className="w-full px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 hover:bg-amber-100 text-[11px] text-amber-800 inline-flex items-center justify-center gap-2"
-        >
-          <ShieldCheck className="h-3.5 w-3.5" />
-          Request Manager/Pharmacist discount approval
-        </button>
-      )}
       {cart.map((item) => (
         <div
           key={item.lineId}
@@ -221,11 +209,7 @@ const POSShoppingCart: React.FC<POSShoppingCartProps> = ({
               }`}
               title={canApplyDiscount ? 'Apply discount' : 'Discount approval required'}
             >
-              {canApplyDiscount || discountApprovalActive ? (
-                <Tag className="h-4 w-4" />
-              ) : (
-                <Lock className="h-4 w-4" />
-              )}
+              <Tag className="h-4 w-4" />
             </button>
           </div>
 
