@@ -3610,13 +3610,13 @@ async def return_transaction(
     x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
     current_user=Depends(CurrentUser())
 ):
-    """Process a transaction return"""
+    """Process a full or partial transaction return."""
     try:
         supabase = get_supabase_admin()
 
-        return_reason = return_data.get('return_reason', 'Customer return')
-        _return_items = return_data.get('items', [])  # Reserved for future partial-line refund support.
-        return_amount = return_data.get('amount')    # Total return amount
+        return_reason = str(return_data.get('return_reason') or 'Customer return').strip() or 'Customer return'
+        raw_return_items = return_data.get('items') if isinstance(return_data, dict) else None
+        explicit_return_amount_raw = return_data.get('amount') if isinstance(return_data, dict) else None
 
         # Get original transaction
         tx_result = supabase.table('pos_transactions').select('*, pos_transaction_items(*)').eq('id', transaction_id).execute()
@@ -3635,14 +3635,21 @@ async def return_transaction(
         )
         actor_id = _resolve_actor_user_id(current_user)
 
-        # Validate transaction can be returned
-        if original_transaction['status'] not in ['completed']:
+        # Validate transaction can be returned.
+        if original_transaction.get('status') != TransactionStatus.COMPLETED.value:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot return a {original_transaction['status']} transaction"
+                detail=f"Cannot return a {original_transaction.get('status')} transaction"
             )
 
-        # Get processor's name for display
+        original_items = original_transaction.get('pos_transaction_items') or []
+        if not original_items:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Original transaction has no line items to return"
+            )
+
+        # Get processor name for display.
         processor_name = current_user.get('name', 'Unknown')
         if actor_context.get('staff_profile_id'):
             staff_result = supabase.table(Tables.STAFF_PROFILES)\
@@ -3652,55 +3659,282 @@ async def return_transaction(
             if staff_result.data:
                 processor_name = staff_result.data[0].get('display_name') or processor_name
 
-        original_total = abs(float(original_transaction.get('total_amount') or 0))
-        original_subtotal = abs(float(original_transaction.get('subtotal') or 0))
-        original_tax = abs(float(original_transaction.get('tax_amount') or 0))
-        requested_amount = abs(float(return_amount)) if return_amount is not None else original_total
+        # Build returnable quantity/value map from original sale items.
+        line_stats_by_key: Dict[str, Dict[str, Any]] = {}
+        for row in original_items:
+            product_id = str(row.get('product_id') or '').strip()
+            if not product_id:
+                continue
 
-        if requested_amount <= 0:
+            sale_unit = str(row.get('sale_unit') or 'unit').strip().lower()
+            sale_unit = 'pack' if sale_unit == 'pack' else 'unit'
+            units_per_sale_unit = max(1, _safe_int(row.get('units_per_sale_unit'), 1))
+
+            sale_quantity = _safe_int(row.get('sale_quantity'), 0)
+            if sale_quantity <= 0:
+                base_units_qty = _safe_int(row.get('base_units_quantity'), 0)
+                if base_units_qty <= 0:
+                    base_units_qty = _safe_int(row.get('quantity'), 0)
+                if base_units_qty > 0:
+                    sale_quantity = max(1, int(round(base_units_qty / units_per_sale_unit)))
+            if sale_quantity <= 0:
+                continue
+
+            sale_unit_price_raw = row.get('sale_unit_price')
+            if sale_unit_price_raw is None:
+                base_unit_price = Decimal(str(row.get('unit_price') or 0))
+                sale_unit_price = base_unit_price * Decimal(units_per_sale_unit)
+            else:
+                sale_unit_price = Decimal(str(sale_unit_price_raw or 0))
+
+            line_total = Decimal(str(row.get('line_total') or 0))
+            line_discount = Decimal(str(row.get('discount_amount') or 0))
+            line_tax = Decimal(str(row.get('tax_amount') or 0))
+            key = f"{product_id}:{sale_unit}"
+
+            existing = line_stats_by_key.get(key)
+            if not existing:
+                existing = {
+                    'product_id': product_id,
+                    'sale_unit': sale_unit,
+                    'sku': row.get('sku') or '',
+                    'product_name': row.get('product_name') or 'Product',
+                    'units_per_sale_unit': units_per_sale_unit,
+                    'total_sale_quantity': 0,
+                    'total_line_total': Decimal('0'),
+                    'total_discount': Decimal('0'),
+                    'total_tax': Decimal('0'),
+                    'total_sale_unit_price': Decimal('0'),
+                }
+                line_stats_by_key[key] = existing
+
+            existing['units_per_sale_unit'] = max(
+                int(existing.get('units_per_sale_unit') or 1),
+                units_per_sale_unit
+            )
+            existing['total_sale_quantity'] += sale_quantity
+            existing['total_line_total'] += line_total
+            existing['total_discount'] += line_discount
+            existing['total_tax'] += line_tax
+            existing['total_sale_unit_price'] += sale_unit_price * Decimal(sale_quantity)
+
+        if not line_stats_by_key:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Return amount must be greater than zero"
+                detail="Original transaction has no returnable items"
             )
 
-        if original_total <= 0:
+        original_total = Decimal(str(original_transaction.get('total_amount') or 0))
+        if original_total < 0:
+            original_total = abs(original_total)
+        if original_total <= Decimal('0'):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Original transaction has no refundable amount"
             )
 
-        if requested_amount > original_total + 0.01:
+        # Gather previous return quantities linked to this transaction.
+        return_reference_key = f"return_of:{transaction_id}"
+        prior_returns_result = supabase.table('pos_transactions')\
+            .select('id,total_amount,items:pos_transaction_items(*)')\
+            .eq('payment_reference', return_reference_key)\
+            .execute()
+
+        prior_returns = prior_returns_result.data or []
+        already_returned_total = Decimal('0')
+        returned_qty_by_key: Dict[str, int] = {}
+        for prior in prior_returns:
+            prior_total = Decimal(str(prior.get('total_amount') or 0))
+            already_returned_total += abs(prior_total)
+
+            for item in prior.get('items') or []:
+                prior_product_id = str(item.get('product_id') or '').strip()
+                if not prior_product_id:
+                    continue
+                prior_sale_unit = str(item.get('sale_unit') or 'unit').strip().lower()
+                prior_sale_unit = 'pack' if prior_sale_unit == 'pack' else 'unit'
+                prior_units_per_sale_unit = max(1, _safe_int(item.get('units_per_sale_unit'), 1))
+
+                prior_sale_qty = _safe_int(item.get('sale_quantity'), 0)
+                if prior_sale_qty <= 0:
+                    prior_base_units = _safe_int(item.get('base_units_quantity'), 0)
+                    if prior_base_units <= 0:
+                        prior_base_units = _safe_int(item.get('quantity'), 0)
+                    if prior_base_units > 0:
+                        prior_sale_qty = max(1, int(round(prior_base_units / prior_units_per_sale_unit)))
+                if prior_sale_qty <= 0:
+                    continue
+
+                prior_key = f"{prior_product_id}:{prior_sale_unit}"
+                returned_qty_by_key[prior_key] = returned_qty_by_key.get(prior_key, 0) + prior_sale_qty
+
+        for key, stats in line_stats_by_key.items():
+            already_qty = max(0, int(returned_qty_by_key.get(key, 0)))
+            total_qty = max(0, int(stats.get('total_sale_quantity') or 0))
+            stats['already_returned_quantity'] = min(total_qty, already_qty)
+            stats['remaining_sale_quantity'] = max(0, total_qty - stats['already_returned_quantity'])
+
+        remaining_refundable_total = max(Decimal('0'), original_total - already_returned_total)
+        if remaining_refundable_total <= Decimal('0.01'):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Return amount cannot exceed original transaction total"
+                detail="Transaction has already been fully returned"
             )
 
-        refund_ratio = min(1.0, requested_amount / original_total) if original_total > 0 else 1.0
-        subtotal_to_record = round(original_subtotal * refund_ratio, 2)
-        tax_to_record = round(original_tax * refund_ratio, 2)
-        total_to_record = round(requested_amount, 2)
+        # Normalize requested quantities.
+        requested_qty_by_key: Dict[str, int] = {}
+        if isinstance(raw_return_items, list) and len(raw_return_items) > 0:
+            for index, row in enumerate(raw_return_items, start=1):
+                if not isinstance(row, dict):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid return item payload at position {index}"
+                    )
 
-        # Create return transaction
+                product_id = str(row.get('product_id') or '').strip()
+                if not product_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Return item at position {index} is missing product_id"
+                    )
+
+                sale_unit = str(row.get('sale_unit') or 'unit').strip().lower()
+                sale_unit = 'pack' if sale_unit == 'pack' else 'unit'
+                quantity = _safe_int(row.get('quantity'), 0)
+                if quantity <= 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Return quantity must be greater than zero at position {index}"
+                    )
+
+                key = f"{product_id}:{sale_unit}"
+                requested_qty_by_key[key] = requested_qty_by_key.get(key, 0) + quantity
+        else:
+            # Full return of all currently remaining quantities.
+            for key, stats in line_stats_by_key.items():
+                remaining_qty = max(0, int(stats.get('remaining_sale_quantity') or 0))
+                if remaining_qty > 0:
+                    requested_qty_by_key[key] = remaining_qty
+
+        if not requested_qty_by_key:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No return quantities were provided"
+            )
+
         return_transaction_id = str(uuid.uuid4())
         return_transaction_number = f"RTN-{datetime.now().strftime('%Y%m%d')}-{return_transaction_id[:8].upper()}"
 
-        # Prepare return transaction data
+        return_items_rows: List[Dict[str, Any]] = []
+        returned_item_lines: List[Dict[str, Any]] = []
+        subtotal_to_record = Decimal('0')
+        tax_to_record = Decimal('0')
+        total_to_record = Decimal('0')
+
+        for key, requested_qty in requested_qty_by_key.items():
+            stats = line_stats_by_key.get(key)
+            if not stats:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Returned item {key} was not sold in the original transaction"
+                )
+
+            remaining_qty = max(0, int(stats.get('remaining_sale_quantity') or 0))
+            if requested_qty > remaining_qty:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Requested return quantity ({requested_qty}) exceeds remaining quantity "
+                        f"({remaining_qty}) for item {stats.get('product_name') or stats.get('product_id')}"
+                    )
+                )
+
+            total_sale_qty = max(1, int(stats.get('total_sale_quantity') or 1))
+            per_unit_line_total = Decimal(str(stats.get('total_line_total') or 0)) / Decimal(total_sale_qty)
+            per_unit_discount = Decimal(str(stats.get('total_discount') or 0)) / Decimal(total_sale_qty)
+            per_unit_tax = Decimal(str(stats.get('total_tax') or 0)) / Decimal(total_sale_qty)
+
+            weighted_sale_unit_price_total = Decimal(str(stats.get('total_sale_unit_price') or 0))
+            if weighted_sale_unit_price_total > 0:
+                sale_unit_price = weighted_sale_unit_price_total / Decimal(total_sale_qty)
+            else:
+                sale_unit_price = per_unit_line_total + per_unit_discount
+
+            line_total = (per_unit_line_total * Decimal(requested_qty)).quantize(Decimal('0.01'))
+            line_discount = (per_unit_discount * Decimal(requested_qty)).quantize(Decimal('0.01'))
+            line_tax = (per_unit_tax * Decimal(requested_qty)).quantize(Decimal('0.01'))
+            sale_unit_price = sale_unit_price.quantize(Decimal('0.01'))
+
+            units_per_sale_unit = max(1, int(stats.get('units_per_sale_unit') or 1))
+            base_units_quantity = requested_qty * units_per_sale_unit
+            base_unit_price = (sale_unit_price / Decimal(units_per_sale_unit)).quantize(Decimal('0.01'))
+
+            return_items_rows.append({
+                'id': str(uuid.uuid4()),
+                'transaction_id': return_transaction_id,
+                'product_id': stats['product_id'],
+                'sku': stats.get('sku') or '',
+                'product_name': stats.get('product_name') or 'Product',
+                # Keep quantity as base units for inventory-safe reversals.
+                'quantity': base_units_quantity,
+                'unit_price': float(base_unit_price),
+                'discount_amount': float(line_discount),
+                'tax_amount': float(line_tax),
+                'line_total': float(line_total),
+                'sale_unit': stats.get('sale_unit') or 'unit',
+                'sale_quantity': requested_qty,
+                'sale_unit_price': float(sale_unit_price),
+                'units_per_sale_unit': units_per_sale_unit,
+                'base_units_quantity': base_units_quantity,
+            })
+
+            returned_item_lines.append({
+                'product_id': stats['product_id'],
+                'product_name': stats.get('product_name') or 'Product',
+                'sale_unit': stats.get('sale_unit') or 'unit',
+                'quantity': requested_qty,
+                'line_total': float(line_total),
+            })
+
+            subtotal_to_record += line_total
+            tax_to_record += line_tax
+            total_to_record += line_total
+
+        if total_to_record <= Decimal('0'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Return amount must be greater than zero"
+            )
+
+        if explicit_return_amount_raw is not None:
+            explicit_return_amount = abs(Decimal(str(explicit_return_amount_raw)))
+            if abs(explicit_return_amount - total_to_record) > Decimal('0.05'):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Return amount does not match selected item totals"
+                )
+
+        remaining_after_this = max(Decimal('0'), remaining_refundable_total - total_to_record)
+        is_full_return = remaining_after_this <= Decimal('0.01')
+
+        # Prepare return transaction data.
         return_transaction_data = {
             'id': return_transaction_id,
             'transaction_number': return_transaction_number,
             'outlet_id': original_transaction['outlet_id'],
             'cashier_id': actor_id,
+            'cashier_staff_profile_id': actor_context.get('staff_profile_id'),
             'cashier_name': processor_name,
             'customer_id': original_transaction.get('customer_id'),
             'customer_name': original_transaction.get('customer_name'),
-            'subtotal': subtotal_to_record,
-            'tax_amount': tax_to_record,
+            'subtotal': float(subtotal_to_record),
+            'tax_amount': float(tax_to_record),
             'discount_amount': 0,
-            'total_amount': total_to_record,
+            'total_amount': float(total_to_record),
             'payment_method': original_transaction.get('payment_method') or 'cash',
             'tendered_amount': None,
             'change_amount': 0,
-            'payment_reference': f"Return for {original_transaction['transaction_number']}",
+            'payment_reference': return_reference_key,
             'status': TransactionStatus.REFUNDED.value,
             'receipt_type': 'return',
             'transaction_date': datetime.utcnow().isoformat(),
@@ -3719,61 +3953,71 @@ async def return_transaction(
                 detail="Failed to create return transaction"
             )
 
-        # Update original transaction status to returned
-        original_update = supabase.table('pos_transactions').update({
-            'status': TransactionStatus.REFUNDED.value,
+        # Persist returned line items.
+        items_result = _insert_pos_transaction_items_compat(supabase, return_items_rows)
+        if not items_result.data:
+            supabase.table('pos_transactions').delete().eq('id', return_transaction_id).execute()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to create return transaction items"
+            )
+
+        # Update original transaction status (full return -> refunded, partial return -> completed).
+        supabase.table('pos_transactions').update({
+            'status': TransactionStatus.REFUNDED.value if is_full_return else TransactionStatus.COMPLETED.value,
             'updated_at': datetime.utcnow().isoformat()
         }).eq('id', transaction_id).execute()
 
-        # Restore stock for returned items
-        if original_transaction.get('pos_transaction_items'):
-            for item in original_transaction['pos_transaction_items']:
-                try:
-                    quantity_to_restore = _resolve_stock_quantity_from_transaction_item(item)
-                    if quantity_to_restore <= 0:
-                        continue
+        # Restore stock only for returned quantities.
+        for item in return_items_rows:
+            try:
+                quantity_to_restore = _resolve_stock_quantity_from_transaction_item(item)
+                if quantity_to_restore <= 0:
+                    continue
 
-                    # Get current stock
-                    product_result = supabase.table('pos_products').select('quantity_on_hand').eq('id', item['product_id']).execute()
-                    if product_result.data:
-                        current_qty = product_result.data[0]['quantity_on_hand']
-                        new_qty = current_qty + quantity_to_restore  # Restore returned base quantity
+                product_result = supabase.table('pos_products').select('quantity_on_hand').eq('id', item['product_id']).execute()
+                if not product_result.data:
+                    continue
 
-                        # Update product quantity
-                        supabase.table('pos_products').update({
-                            'quantity_on_hand': new_qty,
-                            'updated_at': datetime.utcnow().isoformat()
-                        }).eq('id', item['product_id']).execute()
+                current_qty = _safe_int(product_result.data[0].get('quantity_on_hand'), 0)
+                new_qty = current_qty + quantity_to_restore
 
-                        # Create stock movement record for return
-                        movement_data = {
-                            'id': str(uuid.uuid4()),
-                            'product_id': item['product_id'],
-                            'outlet_id': original_transaction['outlet_id'],
-                            'movement_type': 'return',
-                            'quantity_change': quantity_to_restore,
-                            'quantity_before': current_qty,
-                            'quantity_after': new_qty,
-                            'reference_id': return_transaction_id,
-                            'reference_type': 'return_transaction',
-                            'performed_by': actor_id,
-                            'movement_date': datetime.utcnow().isoformat(),
-                            'notes': (
-                                f"Stock restored from return: {return_reason} "
-                                f"({_safe_int(item.get('sale_quantity'), 0)} {str(item.get('sale_unit') or 'unit')}, "
-                                f"{quantity_to_restore} base units)"
-                            )
-                        }
-                        supabase.table('pos_stock_movements').insert(movement_data).execute()
-                except Exception as stock_error:
-                    logger.warning(f"Failed to restore stock for product {item['product_id']}: {stock_error}")
+                supabase.table('pos_products').update({
+                    'quantity_on_hand': new_qty,
+                    'updated_at': datetime.utcnow().isoformat()
+                }).eq('id', item['product_id']).execute()
+
+                movement_data = {
+                    'id': str(uuid.uuid4()),
+                    'product_id': item['product_id'],
+                    'outlet_id': original_transaction['outlet_id'],
+                    'movement_type': 'return',
+                    'quantity_change': quantity_to_restore,
+                    'quantity_before': current_qty,
+                    'quantity_after': new_qty,
+                    'reference_id': return_transaction_id,
+                    'reference_type': 'return_transaction',
+                    'performed_by': actor_id,
+                    'movement_date': datetime.utcnow().isoformat(),
+                    'notes': (
+                        f"Stock restored from return: {return_reason} "
+                        f"({_safe_int(item.get('sale_quantity'), 0)} {str(item.get('sale_unit') or 'unit')}, "
+                        f"{quantity_to_restore} base units)"
+                    )
+                }
+                supabase.table('pos_stock_movements').insert(movement_data).execute()
+            except Exception as stock_error:
+                logger.warning(f"Failed to restore stock for product {item.get('product_id')}: {stock_error}")
 
         return {
             "message": "Transaction returned successfully",
             "original_transaction_id": transaction_id,
             "return_transaction_id": return_transaction_id,
             "return_transaction_number": return_transaction_number,
-            "return_amount": total_to_record
+            "return_amount": float(total_to_record),
+            "is_full_return": is_full_return,
+            "remaining_refundable_amount": float(remaining_after_this),
+            "returned_item_lines": returned_item_lines,
         }
 
     except HTTPException:

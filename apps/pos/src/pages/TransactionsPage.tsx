@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Search, RotateCcw, Receipt, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { posService, type POSTransaction, type PendingOfflineTransaction, PaymentMethod } from '../lib/posService';
 import { useOutlet } from '../contexts/OutletContext';
 import { useToast } from '../components/ui/Toast';
@@ -12,6 +13,7 @@ import { useRealtimeSync } from '../hooks/useRealtimeSync';
 import { printReceiptContent } from '../lib/receiptPrinter';
 import type { ReceiptPrintStyle } from '../lib/receiptPrinter';
 import { readCachedReceiptTemplate } from '../lib/receiptTemplate';
+import { setRefundExchangeIntent } from '../lib/refundExchangeIntent';
 
 // Extend base transaction type with UI-specific fields returned by API
 interface ExtendedTransaction extends POSTransaction {
@@ -27,6 +29,7 @@ const TRANSACTIONS_PAGE_SIZE = 100;
 
 const TransactionsPage: React.FC = () => {
   const { currentOutlet } = useOutlet();
+  const navigate = useNavigate();
   const { success, error: showError } = useToast();
 
   const [transactions, setTransactions] = useState<ExtendedTransaction[]>([]);
@@ -572,17 +575,67 @@ const TransactionsPage: React.FC = () => {
 
     try {
       setIsRefunding(true);
-      await posService.refundTransaction(selectedTransaction.id, {
+      let sourceTransaction = selectedTransaction as ExtendedTransaction;
+      if (!Array.isArray(sourceTransaction.items) || sourceTransaction.items.length === 0) {
+        const fullTransaction = await posService.getTransaction(selectedTransaction.id);
+        sourceTransaction = { ...sourceTransaction, ...(fullTransaction as ExtendedTransaction) };
+      }
+
+      const intentLines = (sourceTransaction.items || [])
+        .map((item) => {
+          const saleUnit = item.sale_unit === 'pack' ? 'pack' : 'unit';
+          const unitsPerSaleUnit = Math.max(1, Number(item.units_per_sale_unit || 1));
+
+          let saleQuantity = Number(item.sale_quantity || 0);
+          if (!Number.isFinite(saleQuantity) || saleQuantity <= 0) {
+            const baseUnits = Number(item.base_units_quantity || item.quantity || 0);
+            if (Number.isFinite(baseUnits) && baseUnits > 0) {
+              saleQuantity = Math.max(1, Math.round(baseUnits / unitsPerSaleUnit));
+            }
+          }
+          if (!Number.isFinite(saleQuantity) || saleQuantity <= 0) {
+            saleQuantity = Number(item.quantity || 0);
+          }
+
+          const normalizedSaleQuantity = Math.max(0, Math.round(saleQuantity));
+          const unitPrice = Number(item.sale_unit_price ?? item.unit_price ?? 0);
+          const totalDiscount = Number(item.discount_amount || 0);
+          const discountPerUnit =
+            normalizedSaleQuantity > 0 ? totalDiscount / normalizedSaleQuantity : 0;
+
+          return {
+            product_id: item.product_id,
+            product_name: item.product_name,
+            sku: item.sku,
+            sale_unit: saleUnit,
+            quantity: normalizedSaleQuantity,
+            unit_price: Number.isFinite(unitPrice) ? unitPrice : 0,
+            discount_per_unit: Number.isFinite(discountPerUnit) ? discountPerUnit : 0,
+            units_per_sale_unit: unitsPerSaleUnit,
+          };
+        })
+        .filter((line) => line.product_id && line.quantity > 0);
+
+      if (intentLines.length === 0) {
+        showError('This transaction has no returnable line items.');
+        return;
+      }
+
+      setRefundExchangeIntent({
+        original_transaction_id: selectedTransaction.id,
+        original_transaction_number: selectedTransaction.transaction_number,
+        outlet_id: currentOutlet?.id,
         return_reason: refundReason.trim() || 'Customer return',
-        amount: Math.abs(Number(selectedTransaction.total_amount || 0)),
+        created_at: new Date().toISOString(),
+        lines: intentLines,
       });
-      success('Refund processed successfully.');
+      success('Loaded on Register for partial/full return.');
       setShowRefundConfirm(false);
       setRefundReason('');
       setSelectedTransaction(null);
-      await loadTransactions();
+      navigate('/');
     } catch (err: any) {
-      showError(err?.message || 'Failed to process refund.');
+      showError(err?.message || 'Failed to load transaction for return.');
     } finally {
       setIsRefunding(false);
     }
@@ -949,7 +1002,7 @@ const TransactionsPage: React.FC = () => {
                       }
                       className="py-2.5 border border-amber-200 text-amber-700 font-semibold rounded-xl hover:bg-amber-50 transition-colors text-sm disabled:opacity-60"
                     >
-                      Refund
+                      Return / Exchange
                     </button>
                     <button
                       onClick={() => {
@@ -983,11 +1036,11 @@ const TransactionsPage: React.FC = () => {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <p className="text-sm font-semibold text-amber-800">Confirm refund for this transaction.</p>
+                    <p className="text-sm font-semibold text-amber-800">Load this transaction on Register for partial/full return.</p>
                     <textarea
                       value={refundReason}
                       onChange={e => setRefundReason(e.target.value)}
-                      placeholder="Reason for refund..."
+                      placeholder="Reason for return..."
                       className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm"
                       rows={2}
                     />
@@ -997,7 +1050,7 @@ const TransactionsPage: React.FC = () => {
                         disabled={isRefunding}
                         className="flex-1 py-2 bg-amber-600 text-white font-semibold rounded-lg text-sm hover:bg-amber-700 disabled:opacity-60"
                       >
-                        {isRefunding ? 'Processing...' : 'Confirm Refund'}
+                        {isRefunding ? 'Loading...' : 'Load on Register'}
                       </button>
                       <button
                         onClick={() => { setShowRefundConfirm(false); setRefundReason(''); }}

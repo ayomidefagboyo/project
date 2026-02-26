@@ -1384,7 +1384,7 @@ class POSService {
     data: {
       return_reason?: string;
       amount?: number;
-      items?: Array<{ product_id: string; quantity: number }>;
+      items?: Array<{ product_id: string; quantity: number; sale_unit?: SaleUnit }>;
     } = {}
   ): Promise<{
     message: string;
@@ -1392,6 +1392,15 @@ class POSService {
     return_transaction_id: string;
     return_transaction_number: string;
     return_amount: number;
+    is_full_return?: boolean;
+    remaining_refundable_amount?: number;
+    returned_item_lines?: Array<{
+      product_id: string;
+      product_name?: string;
+      sale_unit?: SaleUnit;
+      quantity: number;
+      line_total: number;
+    }>;
   }> {
     try {
       const response = await apiClient.put<any>(`${this.baseUrl}/transactions/${transactionId}/return`, data);
