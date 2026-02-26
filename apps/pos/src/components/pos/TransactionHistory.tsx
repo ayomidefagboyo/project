@@ -231,11 +231,22 @@ const TransactionDetailsModal: React.FC<TransactionDetailsModalProps> = ({
 }) => {
   const [showVoidConfirm, setShowVoidConfirm] = useState(false);
   const [voidReason, setVoidReason] = useState('');
-  const { success, error } = useToast();
+  const [voidError, setVoidError] = useState<string | null>(null);
+  const { success, error: showError } = useToast();
+
+  const formatActionError = (err: unknown, fallback: string): string => {
+    if (err instanceof Error && err.message.trim()) {
+      return err.message.replace(/^Error:\s*/i, '').replace(/^POS Error:\s*/i, '');
+    }
+    return fallback;
+  };
 
   const handleVoid = async () => {
+    setVoidError(null);
     if (!voidReason.trim()) {
-      error('Please provide a reason for voiding this transaction');
+      const message = 'Please provide a reason for voiding this transaction';
+      setVoidError(message);
+      showError(message);
       return;
     }
 
@@ -244,8 +255,10 @@ const TransactionDetailsModal: React.FC<TransactionDetailsModalProps> = ({
       success('Transaction voided successfully. Stock quantities have been restored.');
       onVoid();
       setShowVoidConfirm(false);
-    } catch (error: any) {
-      error(`Failed to void transaction: ${error.message}`);
+    } catch (err: any) {
+      const message = `Failed to void transaction: ${formatActionError(err, 'Unknown error')}`;
+      setVoidError(message);
+      showError(message);
     }
   };
 
@@ -310,6 +323,9 @@ const TransactionDetailsModal: React.FC<TransactionDetailsModalProps> = ({
               className="w-full px-3 py-2 border border-red-300 rounded-lg mb-3"
               rows={3}
             />
+            {voidError && (
+              <p className="text-xs font-medium text-red-700 mb-3">{voidError}</p>
+            )}
             <div className="flex gap-2">
               <button
                 onClick={handleVoid}
@@ -321,6 +337,7 @@ const TransactionDetailsModal: React.FC<TransactionDetailsModalProps> = ({
                 onClick={() => {
                   setShowVoidConfirm(false);
                   setVoidReason('');
+                  setVoidError(null);
                 }}
                 className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded-lg"
               >

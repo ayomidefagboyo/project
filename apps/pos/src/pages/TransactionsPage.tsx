@@ -46,6 +46,7 @@ const TransactionsPage: React.FC = () => {
   const [pendingProductLookup, setPendingProductLookup] = useState<Record<string, { name: string; sku?: string }>>({});
   const [showVoidConfirm, setShowVoidConfirm] = useState(false);
   const [voidReason, setVoidReason] = useState('');
+  const [voidActionError, setVoidActionError] = useState<string | null>(null);
   const [showRefundConfirm, setShowRefundConfirm] = useState(false);
   const [refundReason, setRefundReason] = useState('');
   const [isRefunding, setIsRefunding] = useState(false);
@@ -490,14 +491,26 @@ const TransactionsPage: React.FC = () => {
   const rangeStart = totalCount === 0 ? 0 : (currentPage - 1) * TRANSACTIONS_PAGE_SIZE + 1;
   const rangeEnd = totalCount === 0 ? 0 : Math.min(currentPage * TRANSACTIONS_PAGE_SIZE, totalCount);
 
+  const formatActionError = (err: unknown, fallback: string): string => {
+    if (err instanceof Error && err.message.trim()) {
+      return err.message.replace(/^Error:\s*/i, '').replace(/^POS Error:\s*/i, '');
+    }
+    return fallback;
+  };
+
   // Void handler
   const handleVoid = async () => {
+    setVoidActionError(null);
     if (!selectedTransaction || !voidReason.trim()) {
-      showError('Please provide a reason for voiding');
+      const message = 'Please provide a reason for voiding';
+      setVoidActionError(message);
+      showError(message);
       return;
     }
     if (selectedTransaction.status === 'pending') {
-      showError('Pending offline sale cannot be voided until it syncs.');
+      const message = 'Pending offline sale cannot be voided until it syncs.';
+      setVoidActionError(message);
+      showError(message);
       return;
     }
     try {
@@ -505,10 +518,13 @@ const TransactionsPage: React.FC = () => {
       success('Transaction voided. Stock quantities restored.');
       setShowVoidConfirm(false);
       setVoidReason('');
+      setVoidActionError(null);
       setSelectedTransaction(null);
       loadTransactions();
     } catch (err: any) {
-      showError(`Failed to void: ${err.message}`);
+      const message = `Failed to void: ${formatActionError(err, 'Unknown error')}`;
+      setVoidActionError(message);
+      showError(message);
     }
   };
 
@@ -644,6 +660,7 @@ const TransactionsPage: React.FC = () => {
   useEffect(() => {
     setShowVoidConfirm(false);
     setVoidReason('');
+    setVoidActionError(null);
     setShowRefundConfirm(false);
     setRefundReason('');
   }, [selectedTransaction?.id]);
@@ -994,6 +1011,7 @@ const TransactionsPage: React.FC = () => {
                       onClick={() => {
                         setShowRefundConfirm(true);
                         setShowVoidConfirm(false);
+                        setVoidActionError(null);
                       }}
                       disabled={
                         selectedTransaction.status !== 'completed' ||
@@ -1008,6 +1026,7 @@ const TransactionsPage: React.FC = () => {
                       onClick={() => {
                         setShowVoidConfirm(true);
                         setShowRefundConfirm(false);
+                        setVoidActionError(null);
                       }}
                       disabled={selectedTransaction.status === 'voided'}
                       className="py-2.5 border-2 border-red-200 text-red-700 font-semibold rounded-xl hover:bg-red-50 transition-colors text-sm disabled:opacity-60"
@@ -1025,11 +1044,14 @@ const TransactionsPage: React.FC = () => {
                       className="w-full px-3 py-2 border border-red-300 rounded-lg text-sm"
                       rows={2}
                     />
+                    {voidActionError && (
+                      <p className="text-xs font-medium text-red-700">{voidActionError}</p>
+                    )}
                     <div className="flex gap-2">
                       <button onClick={handleVoid} className="flex-1 py-2 bg-red-600 text-white font-semibold rounded-lg text-sm hover:bg-red-700">
                         Confirm Void
                       </button>
-                      <button onClick={() => { setShowVoidConfirm(false); setVoidReason(''); }} className="flex-1 py-2 bg-gray-200 text-gray-700 font-semibold rounded-lg text-sm hover:bg-gray-300">
+                      <button onClick={() => { setShowVoidConfirm(false); setVoidReason(''); setVoidActionError(null); }} className="flex-1 py-2 bg-gray-200 text-gray-700 font-semibold rounded-lg text-sm hover:bg-gray-300">
                         Cancel
                       </button>
                     </div>

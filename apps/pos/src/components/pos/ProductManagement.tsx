@@ -66,6 +66,13 @@ const formatDepartmentError = (error: unknown, fallback: string): string => {
   return fallback;
 };
 
+const formatActionError = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message.replace(/^Error:\s*/i, '').replace(/^POS Error:\s*/i, '');
+  }
+  return fallback;
+};
+
 const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementProps>(({ onShowNewRow }, ref) => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -74,6 +81,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
   const [departments, setDepartments] = useState<POSDepartment[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -744,13 +752,15 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
         return next;
       });
       setError(null);
+      setSuccessMessage(null);
 
       try {
         await posService.deleteProduct(product.id);
         removeProductsFromState([product.id]);
+        setSuccessMessage(`Deleted "${product.name}" successfully.`);
       } catch (deleteError) {
         console.error(`Failed to delete product ${product.id}:`, deleteError);
-        setError(`Failed to delete "${product.name}". Please try again.`);
+        setError(formatActionError(deleteError, `Failed to delete "${product.name}". Please try again.`));
       } finally {
         setDeletingProductIds((prev) => {
           const next = new Set(prev);
@@ -773,14 +783,19 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
 
     setIsBulkDeleting(true);
     setError(null);
+    setSuccessMessage(null);
 
     const failedIds: string[] = [];
+    const failureMessages: string[] = [];
     for (const id of ids) {
       try {
         await posService.deleteProduct(id);
       } catch (deleteError) {
         console.error(`Failed to delete product ${id}:`, deleteError);
         failedIds.push(id);
+        failureMessages.push(
+          formatActionError(deleteError, `Failed to delete product ${id}.`)
+        );
       }
     }
 
@@ -789,11 +804,15 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
     removeProductsFromState(deletedIds);
 
     if (failedIds.length > 0) {
+      const uniqueFailureMessages = Array.from(new Set(failureMessages));
+      const details = uniqueFailureMessages.slice(0, 2).join(' | ');
       setError(
-        `Deleted ${deletedIds.length} product${deletedIds.length === 1 ? '' : 's'}, but ${failedIds.length} failed. Please retry the failed items.`
+        `Deleted ${deletedIds.length} product${deletedIds.length === 1 ? '' : 's'}, but ${failedIds.length} failed. ${details}`
       );
+      setSuccessMessage(null);
     } else {
       setError(null);
+      setSuccessMessage(`Deleted ${deletedIds.length} product${deletedIds.length === 1 ? '' : 's'} successfully.`);
     }
 
     setIsBulkDeleting(false);
@@ -1140,6 +1159,11 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
         {error && (
           <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
             {error}
+          </div>
+        )}
+        {successMessage && (
+          <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            {successMessage}
           </div>
         )}
         <div className="bg-white rounded-xl shadow-medium overflow-hidden">

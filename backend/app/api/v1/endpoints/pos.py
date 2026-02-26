@@ -4,7 +4,7 @@ Nigerian Supermarket Focus
 """
 
 from fastapi import APIRouter, HTTPException, Depends, status, Query, Header, Body
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Set
 from datetime import datetime, date, timedelta
 import uuid
 import logging
@@ -654,6 +654,10 @@ INVENTORY_EDITOR_ROLES = MANAGER_LEVEL_ROLES | {'pharmacist', 'accountant', 'inv
 STOCKTAKE_EDITOR_ROLES = MANAGER_LEVEL_ROLES | PHARMACY_ONLY_ROLES
 DISCOUNT_ALLOWED_ROLES = MANAGER_LEVEL_ROLES | PHARMACY_ONLY_ROLES
 DISCOUNT_PERMISSION_KEYS = {'apply_discounts', 'manage_discounts'}
+VOID_ALLOWED_ROLES = MANAGER_LEVEL_ROLES | PHARMACY_ONLY_ROLES
+VOID_PERMISSION_KEYS = {'void_transactions', 'pos:void_transaction'}
+RETURN_ALLOWED_ROLES = VOID_ALLOWED_ROLES
+RETURN_PERMISSION_KEYS = {'refund_transactions', 'process_returns', 'void_transactions', 'pos:void_transaction'}
 
 
 def _normalize_role(role: Any) -> str:
@@ -679,6 +683,25 @@ def _can_apply_discount(context: Dict[str, Any]) -> bool:
 
     permissions = set(_normalize_permissions(context.get('permissions')))
     return any(key in permissions for key in DISCOUNT_PERMISSION_KEYS)
+
+
+def _has_any_permission(context: Dict[str, Any], permission_keys: Set[str]) -> bool:
+    permissions = set(_normalize_permissions(context.get('permissions')))
+    return any(key in permissions for key in permission_keys)
+
+
+def _can_void_transaction(context: Dict[str, Any]) -> bool:
+    role = _normalize_role(context.get('role'))
+    if role in VOID_ALLOWED_ROLES:
+        return True
+    return _has_any_permission(context, VOID_PERMISSION_KEYS)
+
+
+def _can_process_return(context: Dict[str, Any]) -> bool:
+    role = _normalize_role(context.get('role'))
+    if role in RETURN_ALLOWED_ROLES:
+        return True
+    return _has_any_permission(context, RETURN_PERMISSION_KEYS)
 
 
 def _resolve_staff_context(
@@ -758,6 +781,36 @@ def _require_manager_role(
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Manager authorization required for this action"
+    )
+
+
+def _require_void_authorization(
+    supabase,
+    current_user: Dict[str, Any],
+    outlet_id: Optional[str],
+    staff_session_token: Optional[str]
+) -> Dict[str, Any]:
+    context = _resolve_staff_context(supabase, current_user, outlet_id, staff_session_token)
+    if _can_void_transaction(context):
+        return context
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Manager/pharmacist (or authorized cashier) is required to void transactions"
+    )
+
+
+def _require_return_authorization(
+    supabase,
+    current_user: Dict[str, Any],
+    outlet_id: Optional[str],
+    staff_session_token: Optional[str]
+) -> Dict[str, Any]:
+    context = _resolve_staff_context(supabase, current_user, outlet_id, staff_session_token)
+    if _can_process_return(context):
+        return context
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Manager/pharmacist (or authorized cashier) is required to process returns"
     )
 
 
@@ -2411,7 +2464,7 @@ async def void_transaction(
             )
 
         transaction = tx_result.data[0]
-        actor_context = _require_manager_role(
+        actor_context = _require_void_authorization(
             supabase,
             current_user,
             transaction.get('outlet_id'),
@@ -3627,7 +3680,7 @@ async def return_transaction(
             )
 
         original_transaction = tx_result.data[0]
-        actor_context = _require_manager_role(
+        actor_context = _require_return_authorization(
             supabase,
             current_user,
             original_transaction.get('outlet_id'),

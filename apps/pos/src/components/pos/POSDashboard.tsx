@@ -250,6 +250,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     cash?: number;
     card?: number;
     transfer?: number;
+    credit?: number;
   }>({});
 
   // Customer State
@@ -1893,7 +1894,11 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
   const calculateRemainingBalance = () => {
     const totals = calculateCartTotals();
     const dueTotal = exchangeContext ? exchangeBreakdown.netDue : totals.total;
-    const totalPaid = (activePayments.cash || 0) + (activePayments.card || 0) + (activePayments.transfer || 0);
+    const totalPaid =
+      (activePayments.cash || 0) +
+      (activePayments.card || 0) +
+      (activePayments.transfer || 0) +
+      (activePayments.credit || 0);
     return Math.max(0, dueTotal - totalPaid);
   };
 
@@ -1906,7 +1911,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     const otherPaid =
       (method === 'cash' ? 0 : (activePayments.cash || 0)) +
       (method === 'card' ? 0 : (activePayments.card || 0)) +
-      (method === 'transfer' ? 0 : (activePayments.transfer || 0));
+      (method === 'transfer' ? 0 : (activePayments.transfer || 0)) +
+      (activePayments.credit || 0);
     return Math.max(0, dueTotal - otherPaid);
   };
 
@@ -1930,7 +1936,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     if (numAmount <= 0) {
       // Remove this method if amount is cleared
       setActivePayments(prev => {
-        const updated: { cash?: number; card?: number; transfer?: number } = { ...prev };
+        const updated: { cash?: number; card?: number; transfer?: number; credit?: number } = { ...prev };
         delete updated[method];
         return updated;
       });
@@ -2035,6 +2041,28 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
       return;
     }
 
+    const customerPaid =
+      (activePayments.cash || 0) +
+      (activePayments.card || 0) +
+      (activePayments.transfer || 0);
+    const requiredCustomerPayment = exchangeBreakdown.netDue;
+    if (exchangeBreakdown.saleLines.length > 0) {
+      if (requiredCustomerPayment > 0 && customerPaid + 0.01 < requiredCustomerPayment) {
+        error(
+          `Collect ${formatCurrency(requiredCustomerPayment)} before processing this exchange return.`,
+          6000
+        );
+        return;
+      }
+      if (customerPaid - requiredCustomerPayment > 0.01) {
+        error(
+          `Customer payment (${formatCurrency(customerPaid)}) exceeds exchange due (${formatCurrency(requiredCustomerPayment)}). Adjust tender before processing.`,
+          6000
+        );
+        return;
+      }
+    }
+
     finalizeSaleLockRef.current = true;
     setIsFinalizingSale(true);
 
@@ -2053,21 +2081,40 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
 
       setExchangeContext(null);
       setDiscountOverrideGrant(null);
-      setActivePayments({});
       setTenderModal(null);
       setRestoredHeldReceiptId(null);
       setSelectedCustomer(null);
 
       if (replacementCart.length > 0) {
+        const exchangeCreditApplied = roundMoney(
+          Math.min(exchangeBreakdown.returnTotal, exchangeBreakdown.saleTotal)
+        );
+        const nextPayments: {
+          cash?: number;
+          card?: number;
+          transfer?: number;
+          credit?: number;
+        } = {};
+        if ((activePayments.cash || 0) > 0) nextPayments.cash = activePayments.cash;
+        if ((activePayments.card || 0) > 0) nextPayments.card = activePayments.card;
+        if ((activePayments.transfer || 0) > 0) nextPayments.transfer = activePayments.transfer;
+        if (exchangeCreditApplied > 0) nextPayments.credit = exchangeCreditApplied;
+
         setCart(replacementCart);
+        setActivePayments(nextPayments);
         success(
           exchangeBreakdown.refundDue > 0
-            ? `Return processed. Replacement items are loaded. Refund due: ${formatCurrency(exchangeBreakdown.refundDue)}.`
-            : 'Return processed. Replacement items are loaded for checkout.'
+            ? `Return posted. Exchange credit applied. Refund due: ${formatCurrency(exchangeBreakdown.refundDue)}. Then save replacement sale.`
+            : 'Return posted. Exchange credit applied. Save replacement sale to complete checkout.'
         );
       } else {
         clearCart();
-        success('Return processed successfully.');
+        setActivePayments({});
+        success(
+          exchangeBreakdown.refundDue > 0
+            ? `Return posted. Refund customer ${formatCurrency(exchangeBreakdown.refundDue)}.`
+            : 'Return processed successfully.'
+        );
       }
 
       await Promise.allSettled([
@@ -2113,9 +2160,11 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
         ? discountOverrideGrant?.sessionToken
         : undefined;
     const totalPaid = (activePayments.cash || 0) + (activePayments.card || 0) + (activePayments.transfer || 0);
+    const creditPaid = activePayments.credit || 0;
+    const totalPaidWithCredit = totalPaid + creditPaid;
 
-    if (totalPaid < totals.total) {
-      error(`Total paid (${formatCurrency(totalPaid)}) is less than amount due (${formatCurrency(totals.total)})`);
+    if (totalPaidWithCredit < totals.total) {
+      error(`Total paid (${formatCurrency(totalPaidWithCredit)}) is less than amount due (${formatCurrency(totals.total)})`);
       return;
     }
 
@@ -2138,9 +2187,13 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     if (activePayments.transfer && activePayments.transfer > 0) {
       splitPayments.push({ method: PaymentMethod.TRANSFER, amount: activePayments.transfer });
     }
+    if (activePayments.credit && activePayments.credit > 0) {
+      splitPayments.push({ method: PaymentMethod.CREDIT, amount: activePayments.credit });
+    }
 
-    const cashbackAmount = Math.max(0, totalPaid - totals.total);
-    if (cashbackAmount > 0 && splitPayments.length > 1) {
+    const cashbackAmount = Math.max(0, totalPaidWithCredit - totals.total);
+    const customerSplitCount = splitPayments.filter((payment) => payment.method !== PaymentMethod.CREDIT).length;
+    if (cashbackAmount > 0 && customerSplitCount > 1) {
       error(
         `Cashback (${formatCurrency(cashbackAmount)}) is only supported with a single payment method. Use one method or keep split total at ${formatCurrency(totals.total)}.`
       );
@@ -2152,7 +2205,9 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
         ? splitPayments.map((payment) => ({ method: payment.method, amount: payment.amount }))
         : undefined;
     const primaryPaymentMethod =
-      splitPayments.length > 0 ? splitPayments[0].method : PaymentMethod.CASH;
+      splitPayments.find((payment) => payment.method !== PaymentMethod.CREDIT)?.method
+      || splitPayments[0]?.method
+      || PaymentMethod.CASH;
 
     const hasCashComponent = (activePayments.cash || 0) > 0 || cashbackAmount > 0;
     const drawerCanOpen =
@@ -2174,7 +2229,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
       cashier_id: cashierStaffId,
       items,
       payment_method: primaryPaymentMethod,
-      tendered_amount: totalPaid,
+      tendered_amount: totalPaidWithCredit,
       discount_amount: 0,
       discount_authorizer_session_token: discountAuthorizerSessionToken,
       split_payments: splitPaymentPayload,
@@ -2196,7 +2251,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
       createdAtIso,
       cartSnapshot,
       totals,
-      totalPaid,
+      totalPaid: totalPaidWithCredit,
       splitPayments,
       customerName: selectedCustomer?.name,
       pendingSync: !isOnline,
@@ -2352,9 +2407,14 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
   const isFullyPaid = remainingBalance <= 0;
   const hasActivePayments = Object.keys(activePayments).length > 0;
   const exchangeModeActive = Boolean(exchangeContext);
+  const exchangeCustomerPaid =
+    (activePayments.cash || 0) +
+    (activePayments.card || 0) +
+    (activePayments.transfer || 0);
+  const exchangePaymentReady = exchangeCustomerPaid + 0.01 >= exchangeBreakdown.netDue;
   const canFinalize =
     exchangeModeActive
-      ? exchangeBreakdown.returnedItems.length > 0
+      ? (exchangeBreakdown.returnedItems.length > 0 && exchangePaymentReady)
       : hasActivePayments && remainingBalance <= 0;
 
   // Show Manager Login Screen
@@ -2429,6 +2489,11 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                     <span> · Refund due: {formatCurrency(exchangeBreakdown.refundDue)}</span>
                   )}
                 </div>
+                {exchangeBreakdown.netDue > 0 && !exchangePaymentReady && (
+                  <div className="mt-1 text-xs font-semibold text-amber-900">
+                    Collect {formatCurrency(exchangeBreakdown.netDue)} before processing this return.
+                  </div>
+                )}
               </div>
             )}
 
@@ -2506,8 +2571,14 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                     {activePayments.transfer && (
                       <span>Transfer {formatCurrency(activePayments.transfer)}</span>
                     )}
+                    {activePayments.credit && (
+                      <>
+                        {activePayments.cash || activePayments.card || activePayments.transfer ? <span> · </span> : null}
+                        <span>Credit {formatCurrency(activePayments.credit)}</span>
+                      </>
+                    )}
                     <span className="font-bold text-slate-800 ml-2">
-                      ({formatCurrency(totalPaid)} / {formatCurrency(exchangeModeActive ? exchangeBreakdown.netDue : cartTotals.total)})
+                      ({formatCurrency(totalPaid + (activePayments.credit || 0))} / {formatCurrency(exchangeModeActive ? exchangeBreakdown.netDue : cartTotals.total)})
                     </span>
                     {remainingBalance > 0 && (
                       <span className="text-amber-700 font-bold ml-2">
@@ -2612,7 +2683,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                       <button
                         onClick={() => {
                           setActivePayments(prev => {
-                            const updated: { cash?: number; card?: number; transfer?: number } = { ...prev };
+                            const updated: { cash?: number; card?: number; transfer?: number; credit?: number } = { ...prev };
                             delete updated[tenderModal.method];
                             return updated;
                           });
