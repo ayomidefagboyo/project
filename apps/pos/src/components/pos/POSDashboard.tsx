@@ -72,6 +72,8 @@ export interface CartItem {
   discount: number;
   saleUnit: SaleUnit;
   unitsPerSaleUnit: number;
+  isReturnLine?: boolean;
+  maxQuantity?: number;
 }
 
 export interface POSDashboardHandle {
@@ -128,23 +130,12 @@ interface DiscountOverrideGrant {
   approver: Pick<StaffProfile, 'id' | 'display_name' | 'role' | 'permissions'>;
 }
 
-interface ExchangeBaselineLine {
-  lineId: string;
-  productId: string;
-  productName: string;
-  saleUnit: SaleUnit;
-  quantity: number;
-  unitPrice: number;
-  discountPerUnit: number;
-  unitsPerSaleUnit: number;
-}
-
 interface ExchangeModeContext {
   originalTransactionId: string;
   originalTransactionNumber?: string;
+  originalPaymentMethod?: PaymentMethod;
   returnReason: string;
   loadedAt: string;
-  baselineLines: ExchangeBaselineLine[];
 }
 
 interface ExchangeBreakdown {
@@ -346,6 +337,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     const requestedSaleUnit = normalizeSaleUnit(input.saleUnit || input.sale_unit);
     const saleUnit: SaleUnit =
       requestedSaleUnit === 'pack' && isPackSaleConfigured(product) ? 'pack' : 'unit';
+    const isReturnLine = Boolean(input.isReturnLine || input.line_type === 'return');
     const quantity = Math.max(
       1,
       Number(input.quantity || input.sale_quantity || 1)
@@ -354,9 +346,13 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     const parsedUnitPrice = Number(
       input.unitPrice ?? input.sale_unit_price ?? input.unit_price ?? fallbackUnitPrice
     );
-    const unitPrice = Number.isFinite(parsedUnitPrice) && parsedUnitPrice >= 0
-      ? parsedUnitPrice
-      : fallbackUnitPrice;
+    let unitPrice = Number.isFinite(parsedUnitPrice) ? parsedUnitPrice : fallbackUnitPrice;
+    if (!isReturnLine && unitPrice < 0) {
+      unitPrice = fallbackUnitPrice;
+    }
+    if (isReturnLine && unitPrice > 0) {
+      unitPrice = -unitPrice;
+    }
     const unitsPerSaleUnit = Math.max(
       1,
       Number(
@@ -365,15 +361,26 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
         getLineUnitsPerSaleUnit(product, saleUnit)
       ) || 1
     );
+    const resolvedMaxQuantity = isReturnLine
+      ? Math.max(
+          quantity,
+          Number(input.maxQuantity ?? input.max_quantity ?? quantity) || quantity
+        )
+      : undefined;
 
     return {
-      lineId: String(input.lineId || buildCartLineId(product.id, saleUnit)),
+      lineId: String(
+        input.lineId ||
+          (isReturnLine ? `return:${buildCartLineId(product.id, saleUnit)}` : buildCartLineId(product.id, saleUnit))
+      ),
       product,
       quantity,
       unitPrice,
-      discount: Math.max(0, Number(input.discount || 0)),
+      discount: isReturnLine ? 0 : Math.max(0, Number(input.discount || 0)),
       saleUnit,
       unitsPerSaleUnit,
+      isReturnLine,
+      maxQuantity: resolvedMaxQuantity,
     };
   }, []);
 
@@ -389,7 +396,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     }
 
     const cartByLineId = new Map<string, CartItem>();
-    const baselineByLineId = new Map<string, ExchangeBaselineLine>();
 
     const resolveProduct = (line: RefundExchangeIntentLine): POSProduct => {
       const matchedProduct = products.find((product) => product.id === line.product_id);
@@ -440,41 +446,33 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
 
       const saleUnit: SaleUnit = line.sale_unit === 'pack' ? 'pack' : 'unit';
       const unitsPerSaleUnit = Math.max(1, Number(line.units_per_sale_unit || 1));
-      const unitPrice = Math.max(0, Number(line.unit_price || 0));
       const discountPerUnit = Math.max(0, Number(line.discount_per_unit || 0));
+      const listedUnitPrice = Math.max(0, Number(line.unit_price || 0));
+      const refundUnitPrice = roundMoney(Math.max(0, listedUnitPrice - discountPerUnit));
       const resolvedProduct = resolveProduct(line);
+      const returnLineId = `return:${buildCartLineId(productId, saleUnit)}`;
 
       const normalizedLine = normalizeCartLine({
-        lineId: buildCartLineId(productId, saleUnit),
+        lineId: returnLineId,
         product: resolvedProduct,
         quantity,
-        unitPrice,
-        discount: discountPerUnit,
+        unitPrice: -refundUnitPrice,
+        discount: 0,
         saleUnit,
         unitsPerSaleUnit,
+        isReturnLine: true,
+        maxQuantity: quantity,
       });
 
       const existingCartLine = cartByLineId.get(normalizedLine.lineId);
       if (existingCartLine) {
         existingCartLine.quantity += normalizedLine.quantity;
+        existingCartLine.maxQuantity = Math.max(
+          existingCartLine.maxQuantity || 0,
+          existingCartLine.quantity
+        );
       } else {
         cartByLineId.set(normalizedLine.lineId, { ...normalizedLine });
-      }
-
-      const existingBaseline = baselineByLineId.get(normalizedLine.lineId);
-      if (existingBaseline) {
-        existingBaseline.quantity += normalizedLine.quantity;
-      } else {
-        baselineByLineId.set(normalizedLine.lineId, {
-          lineId: normalizedLine.lineId,
-          productId: normalizedLine.product.id,
-          productName: normalizedLine.product.name,
-          saleUnit: normalizedLine.saleUnit,
-          quantity: normalizedLine.quantity,
-          unitPrice: normalizedLine.unitPrice,
-          discountPerUnit: normalizedLine.discount,
-          unitsPerSaleUnit: normalizedLine.unitsPerSaleUnit,
-        });
       }
     }
 
@@ -484,19 +482,29 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
       return;
     }
 
+    const originalPaymentMethodRaw = String(intent.original_payment_method || '').trim().toLowerCase();
+    const resolvedOriginalPaymentMethod =
+      originalPaymentMethodRaw === PaymentMethod.CASH ||
+      originalPaymentMethodRaw === PaymentMethod.POS ||
+      originalPaymentMethodRaw === PaymentMethod.TRANSFER ||
+      originalPaymentMethodRaw === PaymentMethod.CREDIT ||
+      originalPaymentMethodRaw === PaymentMethod.MOBILE
+        ? (originalPaymentMethodRaw as PaymentMethod)
+        : undefined;
+
     setCart(preloadedCart);
     setExchangeContext({
       originalTransactionId: intent.original_transaction_id,
       originalTransactionNumber: intent.original_transaction_number,
+      originalPaymentMethod: resolvedOriginalPaymentMethod,
       returnReason: intent.return_reason || 'Customer return',
       loadedAt: intent.created_at,
-      baselineLines: Array.from(baselineByLineId.values()),
     });
     setActivePayments({});
     setTenderModal(null);
     setSelectedCustomer(null);
     setDiscountOverrideGrant(null);
-    success('Return loaded. Remove returned items, keep replacements, then process return.');
+    success('Return loaded on register.');
   }, [currentOutlet?.id, products, normalizeCartLine, success, warning]);
 
   const paymentMethodLabel = (method: PaymentMethod): string => {
@@ -1300,7 +1308,15 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     setCart(prevCart =>
       prevCart.map(item =>
         item.lineId === lineId
-          ? { ...item, quantity }
+          ? {
+              ...item,
+              quantity: item.isReturnLine
+                ? Math.min(
+                    Math.max(1, Math.round(quantity)),
+                    Math.max(1, Math.round(Number(item.maxQuantity || item.quantity || 1)))
+                  )
+                : Math.max(1, Math.round(quantity)),
+            }
           : item
       )
     );
@@ -1312,7 +1328,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
   const updateCartItemDiscount = (lineId: string, discount: number) => {
     setCart(prevCart =>
       prevCart.map(item =>
-        item.lineId === lineId
+        item.lineId === lineId && !item.isReturnLine
           ? { ...item, discount }
           : item
       )
@@ -1326,6 +1342,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     setCart((prevCart) => {
       const sourceLine = prevCart.find((item) => item.lineId === lineId);
       if (!sourceLine) return prevCart;
+      if (sourceLine.isReturnLine) return prevCart;
 
       const normalizedNext = normalizeSaleUnit(nextSaleUnit);
       const resolvedNext: SaleUnit =
@@ -1829,45 +1846,25 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
       };
     }
 
-    const currentByLineId = new Map<string, CartItem>();
-    cart.forEach((line) => {
-      currentByLineId.set(line.lineId, line);
-    });
-
     const returnedItems: Array<{ product_id: string; sale_unit: SaleUnit; quantity: number }> = [];
     const saleLines: CartItem[] = [];
     let returnTotal = 0;
     let saleTotal = 0;
 
-    exchangeContext.baselineLines.forEach((baseline) => {
-      const currentLine = currentByLineId.get(baseline.lineId);
-      const currentQty = currentLine ? Math.max(0, Number(currentLine.quantity || 0)) : 0;
-      const returnedQty = Math.max(0, baseline.quantity - currentQty);
-      const addedQtyFromBaseline = currentLine ? Math.max(0, currentQty - baseline.quantity) : 0;
-
-      if (returnedQty > 0) {
-        returnedItems.push({
-          product_id: baseline.productId,
-          sale_unit: baseline.saleUnit,
-          quantity: returnedQty,
-        });
-        returnTotal += lineUnitNet(baseline.unitPrice, baseline.discountPerUnit) * returnedQty;
-      }
-
-      if (currentLine && addedQtyFromBaseline > 0) {
-        saleLines.push({
-          ...currentLine,
-          quantity: addedQtyFromBaseline,
-        });
-        saleTotal += lineUnitNet(currentLine.unitPrice, currentLine.discount) * addedQtyFromBaseline;
-      }
-
-      currentByLineId.delete(baseline.lineId);
-    });
-
-    currentByLineId.forEach((line) => {
-      const quantity = Math.max(0, Number(line.quantity || 0));
+    cart.forEach((line) => {
+      const quantity = Math.max(0, Math.round(Number(line.quantity || 0)));
       if (quantity <= 0) return;
+
+      if (line.isReturnLine) {
+        returnedItems.push({
+          product_id: line.product.id,
+          sale_unit: line.saleUnit,
+          quantity,
+        });
+        returnTotal += Math.max(0, Math.abs(Number(line.unitPrice || 0)) - Number(line.discount || 0)) * quantity;
+        return;
+      }
+
       saleLines.push({ ...line, quantity });
       saleTotal += lineUnitNet(line.unitPrice, line.discount) * quantity;
     });
@@ -2054,13 +2051,6 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
         );
         return;
       }
-      if (customerPaid - requiredCustomerPayment > 0.01) {
-        error(
-          `Customer payment (${formatCurrency(customerPaid)}) exceeds exchange due (${formatCurrency(requiredCustomerPayment)}). Adjust tender before processing.`,
-          6000
-        );
-        return;
-      }
     }
 
     finalizeSaleLockRef.current = true;
@@ -2104,8 +2094,8 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
         setActivePayments(nextPayments);
         success(
           exchangeBreakdown.refundDue > 0
-            ? `Return posted. Exchange credit applied. Refund due: ${formatCurrency(exchangeBreakdown.refundDue)}. Then save replacement sale.`
-            : 'Return posted. Exchange credit applied. Save replacement sale to complete checkout.'
+            ? `Return posted. Continue checkout for replacement items. Change due: ${formatCurrency(exchangeBreakdown.refundDue)}.`
+            : 'Return posted. Continue checkout for replacement items.'
         );
       } else {
         clearCart();
@@ -2407,11 +2397,18 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
   const isFullyPaid = remainingBalance <= 0;
   const hasActivePayments = Object.keys(activePayments).length > 0;
   const exchangeModeActive = Boolean(exchangeContext);
+  const exchangeOriginalPayment = exchangeContext?.originalPaymentMethod;
+  const exchangeOriginalPaymentLabel = exchangeOriginalPayment
+    ? paymentMethodLabel(exchangeOriginalPayment)
+    : null;
   const exchangeCustomerPaid =
     (activePayments.cash || 0) +
     (activePayments.card || 0) +
     (activePayments.transfer || 0);
   const exchangePaymentReady = exchangeCustomerPaid + 0.01 >= exchangeBreakdown.netDue;
+  const exchangeCashPreferred = exchangeModeActive && exchangeOriginalPayment === PaymentMethod.CASH && !activePayments.cash;
+  const exchangeCardPreferred = exchangeModeActive && exchangeOriginalPayment === PaymentMethod.POS && !activePayments.card;
+  const exchangeTransferPreferred = exchangeModeActive && exchangeOriginalPayment === PaymentMethod.TRANSFER && !activePayments.transfer;
   const canFinalize =
     exchangeModeActive
       ? (exchangeBreakdown.returnedItems.length > 0 && exchangePaymentReady)
@@ -2478,7 +2475,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
             {exchangeModeActive && exchangeContext && (
               <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
                 <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">
-                  Exchange Return
+                  Return Loaded
                 </div>
                 <div className="mt-1 text-sm text-amber-900">
                   {exchangeContext.originalTransactionNumber || exchangeContext.originalTransactionId}
@@ -2486,9 +2483,14 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                 <div className="mt-1 text-xs text-amber-800">
                   Return value: {formatCurrency(exchangeBreakdown.returnTotal)} · Replacement value: {formatCurrency(exchangeBreakdown.saleTotal)} · Net due: {formatCurrency(exchangeBreakdown.netDue)}
                   {exchangeBreakdown.refundDue > 0 && (
-                    <span> · Refund due: {formatCurrency(exchangeBreakdown.refundDue)}</span>
+                    <span> · Change due: {formatCurrency(exchangeBreakdown.refundDue)}</span>
                   )}
                 </div>
+                {exchangeOriginalPaymentLabel && (
+                  <div className="mt-1 text-xs text-amber-900">
+                    Original payment: {exchangeOriginalPaymentLabel}
+                  </div>
+                )}
                 {exchangeBreakdown.netDue > 0 && !exchangePaymentReady && (
                   <div className="mt-1 text-xs font-semibold text-amber-900">
                     Collect {formatCurrency(exchangeBreakdown.netDue)} before processing this return.
@@ -2506,12 +2508,15 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                     className={`min-h-[56px] sm:min-h-[60px] xl:min-h-[64px] min-w-[112px] sm:min-w-[124px] xl:min-w-[138px] px-4 sm:px-5 xl:px-6 py-3 text-base sm:text-lg font-extrabold tracking-wide rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                       activePayments.cash
                         ? 'btn-brand border-transparent'
-                        : 'btn-brand-soft hover:brightness-[0.97]'
+                        : exchangeCashPreferred
+                          ? 'border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200'
+                          : 'btn-brand-soft hover:brightness-[0.97]'
                     }`}
                   >
                     <span className="inline-flex items-center gap-2">
                       {activePayments.cash ? <Check className="w-5 h-5" /> : null}
                       CASH
+                      {!activePayments.cash && exchangeCashPreferred ? <span className="text-xs font-bold">(Default)</span> : null}
                       {activePayments.cash ? <span className="text-sm font-bold">{formatCurrency(activePayments.cash)}</span> : null}
                     </span>
                   </button>
@@ -2521,12 +2526,15 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                     className={`min-h-[56px] sm:min-h-[60px] xl:min-h-[64px] min-w-[112px] sm:min-w-[124px] xl:min-w-[138px] px-4 sm:px-5 xl:px-6 py-3 text-base sm:text-lg font-extrabold tracking-wide rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                       activePayments.card
                         ? 'btn-brand border-transparent'
-                        : 'btn-brand-soft hover:brightness-[0.97]'
+                        : exchangeCardPreferred
+                          ? 'border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200'
+                          : 'btn-brand-soft hover:brightness-[0.97]'
                     }`}
                   >
                     <span className="inline-flex items-center gap-2">
                       {activePayments.card ? <Check className="w-5 h-5" /> : null}
                       CARD
+                      {!activePayments.card && exchangeCardPreferred ? <span className="text-xs font-bold">(Default)</span> : null}
                       {activePayments.card ? <span className="text-sm font-bold">{formatCurrency(activePayments.card)}</span> : null}
                     </span>
                   </button>
@@ -2536,12 +2544,15 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                     className={`min-h-[56px] sm:min-h-[60px] xl:min-h-[64px] min-w-[112px] sm:min-w-[124px] xl:min-w-[138px] px-4 sm:px-5 xl:px-6 py-3 text-base sm:text-lg font-extrabold tracking-wide rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                       activePayments.transfer
                         ? 'btn-brand border-transparent'
-                        : 'btn-brand-soft hover:brightness-[0.97]'
+                        : exchangeTransferPreferred
+                          ? 'border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200'
+                          : 'btn-brand-soft hover:brightness-[0.97]'
                     }`}
                   >
                     <span className="inline-flex items-center gap-2">
                       {activePayments.transfer ? <Check className="w-5 h-5" /> : null}
                       TRANSFER
+                      {!activePayments.transfer && exchangeTransferPreferred ? <span className="text-xs font-bold">(Default)</span> : null}
                       {activePayments.transfer ? <span className="text-sm font-bold">{formatCurrency(activePayments.transfer)}</span> : null}
                     </span>
                   </button>
@@ -2554,6 +2565,12 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                   </span>
                 </div>
               </div>
+
+              {exchangeModeActive && exchangeBreakdown.refundDue > 0 && (
+                <div className="text-sm font-semibold text-emerald-700 xl:text-right">
+                  Change Due: {formatCurrency(exchangeBreakdown.refundDue)}
+                </div>
+              )}
 
               {hasActivePayments && (() => {
                 const totalPaid = (activePayments.cash || 0) + (activePayments.card || 0) + (activePayments.transfer || 0);

@@ -14,6 +14,7 @@ import { printReceiptContent } from '../lib/receiptPrinter';
 import type { ReceiptPrintStyle } from '../lib/receiptPrinter';
 import { readCachedReceiptTemplate } from '../lib/receiptTemplate';
 import { setRefundExchangeIntent } from '../lib/refundExchangeIntent';
+import { getParsedStaffSession } from '../lib/staffSessionStorage';
 
 // Extend base transaction type with UI-specific fields returned by API
 interface ExtendedTransaction extends POSTransaction {
@@ -26,9 +27,35 @@ interface ExtendedTransaction extends POSTransaction {
 }
 
 const TRANSACTIONS_PAGE_SIZE = 100;
+const VOID_ALLOWED_ROLES = new Set([
+  'manager',
+  'admin',
+  'business_owner',
+  'outlet_admin',
+  'super_admin',
+  'pharmacist',
+  'accountant',
+]);
+const VOID_ALLOWED_PERMISSIONS = new Set(['void_transactions', 'pos:void_transaction']);
+
+interface ParsedStaffSessionForVoid {
+  staff_profile?: {
+    role?: string;
+    permissions?: string[];
+  };
+}
+
+const hasVoidAccess = (role: unknown, permissions: unknown): boolean => {
+  const normalizedRole = String(role || '').trim().toLowerCase();
+  if (VOID_ALLOWED_ROLES.has(normalizedRole)) return true;
+  if (!Array.isArray(permissions)) return false;
+  return permissions.some((permission) =>
+    VOID_ALLOWED_PERMISSIONS.has(String(permission || '').trim().toLowerCase())
+  );
+};
 
 const TransactionsPage: React.FC = () => {
-  const { currentOutlet } = useOutlet();
+  const { currentOutlet, currentUser } = useOutlet();
   const navigate = useNavigate();
   const { success, error: showError } = useToast();
 
@@ -47,11 +74,14 @@ const TransactionsPage: React.FC = () => {
   const [showVoidConfirm, setShowVoidConfirm] = useState(false);
   const [voidReason, setVoidReason] = useState('');
   const [voidActionError, setVoidActionError] = useState<string | null>(null);
-  const [showRefundConfirm, setShowRefundConfirm] = useState(false);
-  const [refundReason, setRefundReason] = useState('');
   const [isRefunding, setIsRefunding] = useState(false);
   const [isPrintingReceipt, setIsPrintingReceipt] = useState(false);
   const requestIdRef = useRef(0);
+  const staffSession = getParsedStaffSession<ParsedStaffSessionForVoid>();
+  const hasStaffSessionProfile = Boolean(staffSession?.staff_profile);
+  const canVoidTransactions = hasStaffSessionProfile
+    ? hasVoidAccess(staffSession?.staff_profile?.role, staffSession?.staff_profile?.permissions)
+    : hasVoidAccess(currentUser?.role, currentUser?.permissions);
 
   const matchesActiveFilters = useCallback(
     (tx: {
@@ -501,6 +531,12 @@ const TransactionsPage: React.FC = () => {
   // Void handler
   const handleVoid = async () => {
     setVoidActionError(null);
+    if (!canVoidTransactions) {
+      const message = 'Void is disabled for this staff profile.';
+      setVoidActionError(message);
+      showError(message);
+      return;
+    }
     if (!selectedTransaction || !voidReason.trim()) {
       const message = 'Please provide a reason for voiding';
       setVoidActionError(message);
@@ -640,14 +676,13 @@ const TransactionsPage: React.FC = () => {
       setRefundExchangeIntent({
         original_transaction_id: selectedTransaction.id,
         original_transaction_number: selectedTransaction.transaction_number,
+        original_payment_method: selectedTransaction.payment_method,
         outlet_id: currentOutlet?.id,
-        return_reason: refundReason.trim() || 'Customer return',
+        return_reason: 'Customer return',
         created_at: new Date().toISOString(),
         lines: intentLines,
       });
       success('Loaded on Register for partial/full return.');
-      setShowRefundConfirm(false);
-      setRefundReason('');
       setSelectedTransaction(null);
       navigate('/');
     } catch (err: any) {
@@ -661,8 +696,6 @@ const TransactionsPage: React.FC = () => {
     setShowVoidConfirm(false);
     setVoidReason('');
     setVoidActionError(null);
-    setShowRefundConfirm(false);
-    setRefundReason('');
   }, [selectedTransaction?.id]);
 
   if (!currentOutlet) {
@@ -998,7 +1031,8 @@ const TransactionsPage: React.FC = () => {
             {/* Drawer footer */}
             {selectedTransaction.status !== 'pending' && (
               <div className="px-5 py-4 border-t border-gray-100">
-                {!showVoidConfirm && !showRefundConfirm ? (
+                {!showVoidConfirm ? (
+                  <>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <button
                       onClick={handleReprintReceipt}
@@ -1009,32 +1043,38 @@ const TransactionsPage: React.FC = () => {
                     </button>
                     <button
                       onClick={() => {
-                        setShowRefundConfirm(true);
                         setShowVoidConfirm(false);
                         setVoidActionError(null);
+                        void handleRefund();
                       }}
                       disabled={
+                        isRefunding ||
                         selectedTransaction.status !== 'completed' ||
                         (selectedTransaction.receipt_type || '').toLowerCase() === 'return' ||
                         Number(selectedTransaction.total_amount) <= 0
                       }
                       className="py-2.5 border border-amber-200 text-amber-700 font-semibold rounded-xl hover:bg-amber-50 transition-colors text-sm disabled:opacity-60"
                     >
-                      Return
+                      {isRefunding ? 'Loading...' : 'Return'}
                     </button>
                     <button
                       onClick={() => {
                         setShowVoidConfirm(true);
-                        setShowRefundConfirm(false);
                         setVoidActionError(null);
                       }}
-                      disabled={selectedTransaction.status === 'voided'}
+                      disabled={selectedTransaction.status === 'voided' || !canVoidTransactions}
                       className="py-2.5 border-2 border-red-200 text-red-700 font-semibold rounded-xl hover:bg-red-50 transition-colors text-sm disabled:opacity-60"
                     >
                       Void Transaction
                     </button>
                   </div>
-                ) : showVoidConfirm ? (
+                  {!canVoidTransactions && (
+                    <p className="mt-2 text-xs font-medium text-gray-500">
+                      Void is disabled for this staff profile.
+                    </p>
+                  )}
+                  </>
+                ) : (
                   <div className="space-y-3">
                     <p className="text-sm font-semibold text-red-800">Are you sure? This will restore stock.</p>
                     <textarea
@@ -1052,32 +1092,6 @@ const TransactionsPage: React.FC = () => {
                         Confirm Void
                       </button>
                       <button onClick={() => { setShowVoidConfirm(false); setVoidReason(''); setVoidActionError(null); }} className="flex-1 py-2 bg-gray-200 text-gray-700 font-semibold rounded-lg text-sm hover:bg-gray-300">
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <p className="text-sm font-semibold text-amber-800">Load this transaction on Register for partial/full return.</p>
-                    <textarea
-                      value={refundReason}
-                      onChange={e => setRefundReason(e.target.value)}
-                      placeholder="Reason for return..."
-                      className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm"
-                      rows={2}
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleRefund}
-                        disabled={isRefunding}
-                        className="flex-1 py-2 bg-amber-600 text-white font-semibold rounded-lg text-sm hover:bg-amber-700 disabled:opacity-60"
-                      >
-                        {isRefunding ? 'Loading...' : 'Load on Register'}
-                      </button>
-                      <button
-                        onClick={() => { setShowRefundConfirm(false); setRefundReason(''); }}
-                        className="flex-1 py-2 bg-gray-200 text-gray-700 font-semibold rounded-lg text-sm hover:bg-gray-300"
-                      >
                         Cancel
                       </button>
                     </div>

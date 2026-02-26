@@ -14,6 +14,7 @@ export interface RefundExchangeIntentLine {
 export interface RefundExchangeIntent {
   original_transaction_id: string;
   original_transaction_number?: string;
+  original_payment_method?: string;
   outlet_id?: string;
   return_reason?: string;
   created_at: string;
