@@ -6,6 +6,7 @@ Nigerian Supermarket Focus
 from fastapi import APIRouter, HTTPException, Depends, status, Query, Header, Body
 from typing import List, Optional, Dict, Any, Tuple, Set
 from datetime import datetime, date, timedelta
+import asyncio
 import uuid
 import logging
 import json
@@ -14,7 +15,9 @@ from decimal import Decimal
 
 from app.core.database import get_supabase_admin, Tables
 from app.core.security import CurrentUser
+from app.schemas.anomaly import AnomalyDetectionRequest
 from app.services.staff_service import StaffService
+from app.services.anomaly_service import anomaly_service
 from app.schemas.pos import (
     # Products
     POSProductCreate, POSProductUpdate, POSProductResponse,
@@ -465,6 +468,58 @@ def _log_pos_audit_entry(
             entity_type,
             entity_id,
             audit_error
+        )
+
+
+def _schedule_auto_anomaly_detection(
+    outlet_id: Optional[str],
+    entity_type: str,
+    entity_id: Optional[str],
+    source_event: str
+) -> None:
+    """Best-effort asynchronous anomaly detection trigger for high-risk POS events."""
+    resolved_outlet_id = str(outlet_id or "").strip()
+    resolved_entity_id = str(entity_id or "").strip()
+    resolved_entity_type = str(entity_type or "").strip().lower()
+    if not resolved_outlet_id or not resolved_entity_id or not resolved_entity_type:
+        return
+
+    async def _runner() -> None:
+        try:
+            result = await anomaly_service.detect_anomalies(
+                AnomalyDetectionRequest(
+                    entity_type=resolved_entity_type,
+                    entity_id=resolved_entity_id,
+                    force_detection=False,
+                ),
+                resolved_outlet_id,
+            )
+            if result.anomalies:
+                logger.warning(
+                    "Auto anomaly detection flagged %s anomaly(ies) from %s for %s:%s (risk=%.2f)",
+                    len(result.anomalies),
+                    source_event,
+                    resolved_entity_type,
+                    resolved_entity_id,
+                    float(result.risk_score or 0),
+                )
+        except Exception as detection_error:
+            logger.warning(
+                "Auto anomaly detection failed from %s for %s:%s in outlet %s: %s",
+                source_event,
+                resolved_entity_type,
+                resolved_entity_id,
+                resolved_outlet_id,
+                detection_error,
+            )
+
+    try:
+        asyncio.create_task(_runner())
+    except RuntimeError as task_error:
+        logger.warning(
+            "Unable to schedule auto anomaly detection task from %s: %s",
+            source_event,
+            task_error,
         )
 
 
@@ -2763,6 +2818,12 @@ async def void_transaction(
                 f"reason={void_reason}"
             )
         )
+        _schedule_auto_anomaly_detection(
+            outlet_id=str(transaction.get('outlet_id') or ''),
+            entity_type='inventory',
+            entity_id='outlet',
+            source_event='void_transaction',
+        )
 
         return {"message": "Transaction voided successfully"}
 
@@ -2865,6 +2926,12 @@ async def create_stock_adjustment(
                 f"Stock adjustment on product {movement.product_id}: "
                 f"{movement.quantity_change} ({movement.movement_type.value})"
             )
+        )
+        _schedule_auto_anomaly_detection(
+            outlet_id=movement.outlet_id,
+            entity_type='inventory',
+            entity_id=movement.product_id,
+            source_event='stock_adjustment',
         )
         return StockMovementResponse(**created_movement)
 
@@ -3148,6 +3215,12 @@ async def commit_stocktake(
             entity_type="stocktake",
             entity_id=session_id,
             details=audit_details
+        )
+        _schedule_auto_anomaly_detection(
+            outlet_id=stocktake.outlet_id,
+            entity_type='inventory',
+            entity_id='outlet',
+            source_event='stocktake_commit',
         )
 
         return StocktakeCommitResponse(
@@ -3508,6 +3581,18 @@ async def create_inventory_transfer(
             entity_type="inventory_transfer",
             entity_id=transfer_id,
             details=destination_audit_details
+        )
+        _schedule_auto_anomaly_detection(
+            outlet_id=transfer.from_outlet_id,
+            entity_type='inventory',
+            entity_id='outlet',
+            source_event='inventory_transfer_out',
+        )
+        _schedule_auto_anomaly_detection(
+            outlet_id=transfer.to_outlet_id,
+            entity_type='inventory',
+            entity_id='outlet',
+            source_event='inventory_transfer_in',
         )
 
         return InventoryTransferResponse(**transfer_response)
@@ -4414,6 +4499,12 @@ async def return_transaction(
                 f"{original_transaction.get('transaction_number') or transaction_id}; "
                 f"amount={float(total_to_record):.2f}, items={len(returned_item_lines)}, reason={return_reason}"
             )
+        )
+        _schedule_auto_anomaly_detection(
+            outlet_id=str(original_transaction.get('outlet_id') or ''),
+            entity_type='inventory',
+            entity_id='outlet',
+            source_event='transaction_return',
         )
 
         return {

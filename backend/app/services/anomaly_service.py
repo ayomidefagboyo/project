@@ -215,6 +215,12 @@ class AnomalyService:
                 )
 
             risk_score = min(100.0, risk_score)
+            anomalies = self._dedupe_detected_anomalies(anomalies)
+            self._persist_detected_anomalies(
+                outlet_id=outlet_id,
+                anomalies=anomalies,
+                force_detection=bool(detection_request.force_detection),
+            )
             recommendations = self._dedupe_recommendations(recommendations)
 
             if anomalies:
@@ -243,6 +249,108 @@ class AnomalyService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to detect anomalies"
             )
+
+    def _dedupe_detected_anomalies(self, anomalies: List[AnomalyResponse]) -> List[AnomalyResponse]:
+        """Drop duplicate anomaly signatures produced in a single detection run."""
+        deduped: List[AnomalyResponse] = []
+        seen: set[str] = set()
+
+        for anomaly in anomalies:
+            anomaly_type = anomaly.type.value if hasattr(anomaly.type, "value") else str(anomaly.type)
+            signature = "|".join([
+                str(anomaly_type or "").lower(),
+                str(anomaly.related_entity or "").lower(),
+                str(anomaly.related_id or "").lower(),
+                str(anomaly.description or "").strip().lower(),
+            ])
+            if signature in seen:
+                continue
+            seen.add(signature)
+            deduped.append(anomaly)
+
+        return deduped
+
+    def _persist_detected_anomalies(
+        self,
+        outlet_id: str,
+        anomalies: List[AnomalyResponse],
+        force_detection: bool = False,
+    ) -> None:
+        """Persist detected anomalies to DB so dashboard alerts/stats reflect auto detection."""
+        if not anomalies:
+            return
+
+        now = datetime.now()
+        duplicate_window_start = (now - timedelta(hours=24)).isoformat()
+
+        for anomaly in anomalies:
+            row = self._anomaly_to_insert_row(anomaly)
+            anomaly_type = str(row.get("type") or "").strip()
+            related_entity = str(row.get("related_entity") or "").strip()
+            related_id = str(row.get("related_id") or "").strip()
+            description = str(row.get("description") or "").strip()
+
+            if not (anomaly_type and related_entity and related_id and description):
+                continue
+
+            if not force_detection:
+                try:
+                    existing = self.supabase.table(Tables.ANOMALIES).select(
+                        "id,description"
+                    ).eq("outlet_id", outlet_id)\
+                        .eq("type", anomaly_type)\
+                        .eq("related_entity", related_entity)\
+                        .eq("related_id", related_id)\
+                        .eq("resolved", False)\
+                        .gte("detected_at", duplicate_window_start)\
+                        .limit(20)\
+                        .execute()
+
+                    if any(
+                        str(item.get("description") or "").strip().lower() == description.lower()
+                        for item in (existing.data or [])
+                    ):
+                        continue
+                except Exception as dedupe_error:
+                    logger.warning("Anomaly dedupe check failed; continuing with insert: %s", dedupe_error)
+
+            try:
+                self.supabase.table(Tables.ANOMALIES).insert(row).execute()
+            except Exception as insert_error:
+                logger.warning(
+                    "Failed to persist detected anomaly %s/%s (%s): %s",
+                    related_entity,
+                    related_id,
+                    anomaly_type,
+                    insert_error,
+                )
+
+    def _anomaly_to_insert_row(self, anomaly: AnomalyResponse) -> Dict[str, Any]:
+        """Serialize anomaly response model to DB insert row with JSON-safe primitive values."""
+        if hasattr(anomaly, "model_dump"):
+            row = anomaly.model_dump(mode="json")
+        else:
+            row = anomaly.dict()
+
+        # Handle enum-like fields when model_dump(mode="json") is not available.
+        for key in ("type", "severity"):
+            value = row.get(key)
+            if hasattr(value, "value"):
+                row[key] = value.value
+
+        for key in ("detected_at", "created_at", "updated_at", "resolved_at"):
+            value = row.get(key)
+            if isinstance(value, datetime):
+                row[key] = value.isoformat()
+
+        row["outlet_id"] = str(row.get("outlet_id") or "")
+        row["related_id"] = str(row.get("related_id") or "")
+        row["related_entity"] = str(row.get("related_entity") or "")
+        row["description"] = str(row.get("description") or "")
+        row["id"] = str(row.get("id") or f"anomaly_{uuid4()}")
+        row["resolved"] = bool(row.get("resolved", False))
+
+        return row
 
     async def resolve_anomaly(
         self,

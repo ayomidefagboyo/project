@@ -5,10 +5,13 @@ EOD (End of Day) reporting endpoints
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Dict, Any, Optional
 from datetime import datetime
+import asyncio
 import uuid
 from app.core.security import require_auth
 from app.core.database import get_supabase_admin, Tables
+from app.schemas.anomaly import AnomalyDetectionRequest
 from app.schemas.reports import EODCreate, EODUpdate, EnhancedDailyReport, EODListResponse
+from app.services.anomaly_service import anomaly_service
 from app.services.eod_service import eod_service
 import logging
 
@@ -39,6 +42,45 @@ def _log_audit_entry(
         }).execute()
     except Exception as audit_error:
         logger.warning(f"Failed to write EOD audit entry: {audit_error}")
+
+
+def _schedule_eod_anomaly_detection(outlet_id: Optional[str], report_id: Optional[str], source_event: str) -> None:
+    """Run EOD anomaly detection asynchronously and never block report writes."""
+    resolved_outlet_id = str(outlet_id or "").strip()
+    resolved_report_id = str(report_id or "").strip()
+    if not resolved_outlet_id or not resolved_report_id:
+        return
+
+    async def _runner() -> None:
+        try:
+            result = await anomaly_service.detect_anomalies(
+                AnomalyDetectionRequest(
+                    entity_type="eod_report",
+                    entity_id=resolved_report_id,
+                    force_detection=False,
+                ),
+                resolved_outlet_id,
+            )
+            if result.anomalies:
+                logger.warning(
+                    "Auto EOD anomaly detection flagged %s anomaly(ies) for report %s from %s (risk=%.2f)",
+                    len(result.anomalies),
+                    resolved_report_id,
+                    source_event,
+                    float(result.risk_score or 0),
+                )
+        except Exception as detection_error:
+            logger.warning(
+                "Auto EOD anomaly detection failed for report %s from %s: %s",
+                resolved_report_id,
+                source_event,
+                detection_error,
+            )
+
+    try:
+        asyncio.create_task(_runner())
+    except RuntimeError as task_error:
+        logger.warning("Unable to schedule EOD anomaly detection from %s: %s", source_event, task_error)
 
 
 @router.post("/reports", response_model=EnhancedDailyReport)
@@ -78,6 +120,7 @@ async def create_eod_report(
                 report_id,
                 f"Created EOD report for {eod_data.date}"
             )
+            _schedule_eod_anomaly_detection(outlet_id, report_id, "create_eod_report")
 
         return report
     except HTTPException:
@@ -162,6 +205,7 @@ async def update_eod_report(
             report_id,
             f"Updated EOD report {report_id}"
         )
+        _schedule_eod_anomaly_detection(outlet_id, report_id, "update_eod_report")
 
         return report
     except HTTPException:

@@ -7,6 +7,7 @@ When a vendor invoice is marked as "received", items auto-add to inventory/produ
 from fastapi import APIRouter, HTTPException, Depends, status, Query
 from typing import List, Optional, Dict, Any
 from datetime import datetime, date
+import asyncio
 from decimal import Decimal
 import uuid
 import logging
@@ -14,10 +15,51 @@ import re
 
 from app.core.database import get_supabase_admin, Tables
 from app.core.security import CurrentUser, get_user_outlet_id
+from app.schemas.anomaly import AnomalyDetectionRequest
+from app.services.anomaly_service import anomaly_service
 from pydantic import BaseModel, Field
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _schedule_invoice_anomaly_detection(outlet_id: Optional[str], invoice_id: Optional[str], source_event: str) -> None:
+    """Run invoice anomaly detection asynchronously without blocking invoice writes."""
+    resolved_outlet_id = str(outlet_id or "").strip()
+    resolved_invoice_id = str(invoice_id or "").strip()
+    if not resolved_outlet_id or not resolved_invoice_id:
+        return
+
+    async def _runner() -> None:
+        try:
+            result = await anomaly_service.detect_anomalies(
+                AnomalyDetectionRequest(
+                    entity_type="invoice",
+                    entity_id=resolved_invoice_id,
+                    force_detection=False,
+                ),
+                resolved_outlet_id,
+            )
+            if result.anomalies:
+                logger.warning(
+                    "Auto invoice anomaly detection flagged %s anomaly(ies) for invoice %s from %s (risk=%.2f)",
+                    len(result.anomalies),
+                    resolved_invoice_id,
+                    source_event,
+                    float(result.risk_score or 0),
+                )
+        except Exception as detection_error:
+            logger.warning(
+                "Auto invoice anomaly detection failed for invoice %s from %s: %s",
+                resolved_invoice_id,
+                source_event,
+                detection_error,
+            )
+
+    try:
+        asyncio.create_task(_runner())
+    except RuntimeError as task_error:
+        logger.warning("Unable to schedule invoice anomaly detection from %s: %s", source_event, task_error)
 
 
 def _extract_missing_column_name(exc: Exception) -> Optional[str]:
@@ -416,6 +458,7 @@ async def create_invoice(
         # Log audit entry
         _log_audit(supabase, invoice.outlet_id, current_user, 'create', 'invoice', invoice_id,
                    f"Created {'vendor' if invoice.vendor_id else 'customer'} invoice {invoice_number} for {total:.2f}")
+        _schedule_invoice_anomaly_detection(invoice.outlet_id, invoice_id, "create_invoice")
 
         # Return the full invoice with items
         full_result = supabase.table(Tables.INVOICES)\
@@ -517,6 +560,7 @@ async def update_invoice(
         # Log audit
         _log_audit(supabase, invoice['outlet_id'], current_user, 'update', 'invoice', invoice_id,
                    f"Updated invoice {invoice['invoice_number']}: {update_data}")
+        _schedule_invoice_anomaly_detection(invoice.get('outlet_id'), invoice_id, "update_invoice")
 
         return invoice
 
@@ -942,6 +986,7 @@ async def receive_invoice_goods(
                    f"Received invoice {invoice['invoice_number']}: "
                    f"{len(products_created)} new products, {len(products_updated)} updated; "
                    f"payment_status={payment_status}")
+        _schedule_invoice_anomaly_detection(invoice.get('outlet_id'), invoice_id, "receive_invoice")
 
         return {
             "message": "Invoice goods received successfully",
@@ -1025,6 +1070,7 @@ async def add_invoice_item(
                 f"{item.description} x{item.quantity} @ {item.unit_price}"
             )
         )
+        _schedule_invoice_anomaly_detection(inv_check.data.get('outlet_id'), invoice_id, "add_invoice_item")
 
         # Return updated invoice
         result = supabase.table(Tables.INVOICES)\
@@ -1093,6 +1139,7 @@ async def remove_invoice_item(
                 f"{item_check.data.get('description')} x{item_check.data.get('quantity')} @ {item_check.data.get('unit_price')}"
             )
         )
+        _schedule_invoice_anomaly_detection(inv_check.data.get('outlet_id'), invoice_id, "remove_invoice_item")
 
         return {"message": "Item removed successfully"}
 
