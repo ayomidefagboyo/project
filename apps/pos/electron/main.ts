@@ -92,12 +92,16 @@ const normalizeUpdaterErrorMessage = (message: string): string => {
   const lowered = trimmed.toLowerCase();
   if (
     lowered.includes('please double check that your authentication token is correct') ||
+    lowered.includes('status code 401') ||
+    lowered.includes('status code 403') ||
     lowered.includes('status code 404') ||
     lowered.includes('status code 405') ||
+    lowered.includes('repository not found') ||
+    lowered.includes('private') ||
     lowered.includes('method not allowed') ||
     lowered.includes('not found')
   ) {
-    return 'Update server unavailable (404/405). Verify release assets (including latest.yml) are published.';
+    return 'Update server unavailable. Verify release assets are published and publicly reachable.';
   }
 
   return trimmed;
