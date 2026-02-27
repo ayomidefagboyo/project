@@ -6,7 +6,6 @@ import {
   TrendingUp, 
   BarChart3, 
   ChevronDown, 
-  Building2, 
   Filter,
   Calendar,
   Users,
@@ -121,12 +120,41 @@ const Dashboard: React.FC = () => {
   const [customDateTo, setCustomDateTo] = useState('');
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
   const [isOutletSelectorOpen, setIsOutletSelectorOpen] = useState(false);
+  const [outletSelectionDraft, setOutletSelectionDraft] = useState<string[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showCompanyOnboarding, setShowCompanyOnboarding] = useState(false);
   const [showTrialExpired, setShowTrialExpired] = useState(false);
   const [trialDaysRemaining, setTrialDaysRemaining] = useState(0);
   const [outletName, setOutletName] = useState('');
   const [businessType, setBusinessType] = useState<'supermarket' | 'restaurant' | 'lounge' | 'retail' | 'cafe'>('retail');
+
+  const toggleOutletSelector = () => {
+    if (!isOutletSelectorOpen) {
+      setOutletSelectionDraft([...dashboardView.selectedOutlets]);
+    }
+    setIsOutletSelectorOpen((previous) => !previous);
+  };
+
+  const handleOutletDraftToggle = (outletId: string, checked: boolean) => {
+    setOutletSelectionDraft((previous) => {
+      if (checked) {
+        return previous.includes(outletId) ? previous : [...previous, outletId];
+      }
+      return previous.filter((id) => id !== outletId);
+    });
+  };
+
+  const applyOutletSelection = () => {
+    setDashboardView((previous) => ({
+      ...previous,
+      selectedOutlets: [...outletSelectionDraft],
+    }));
+    setIsOutletSelectorOpen(false);
+  };
+
+  const selectedOutletsUnchanged =
+    outletSelectionDraft.length === dashboardView.selectedOutlets.length &&
+    outletSelectionDraft.every((outletId) => dashboardView.selectedOutlets.includes(outletId));
   
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -618,7 +646,7 @@ const Dashboard: React.FC = () => {
             timestamp: String(entry.timestamp || ''),
           }))
           .sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime())
-          .slice(0, 8);
+          .slice(0, 4);
 
         setRecentActivities(mappedActivities);
       } catch (activityError) {
@@ -893,6 +921,18 @@ const Dashboard: React.FC = () => {
   const selectedOutletNames = dashboardView.selectedOutlets
     .map(id => userOutlets?.find(outlet => outlet.id === id)?.name)
     .filter(Boolean);
+  const resolvedOutletCount =
+    selectedOutletNames.length > 0
+      ? selectedOutletNames.length
+      : dashboardView.selectedOutlets.length > 0
+      ? dashboardView.selectedOutlets.length
+      : currentOutlet
+      ? 1
+      : 0;
+  const selectedOutletSummary =
+    selectedOutletNames.length > 0
+      ? selectedOutletNames.join(', ')
+      : currentOutlet?.name || 'All locations';
 
   const unpaidInvoices = dashboardInvoices.filter((invoice) => {
     const status = String(invoice.status || '').toLowerCase();
@@ -1024,36 +1064,22 @@ const Dashboard: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
         {/* Compact Dashboard Header Card */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6 mb-6 sm:mb-8">
-          <div className="flex flex-col lg:flex-row lg:items-center gap-6">
-            {/* Title and Info */}
-            <div className="flex items-center space-x-4 flex-1 min-w-0">
-              <div>
-                <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Dashboard</h1>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Overview of your business performance
-                  {canViewAllOutlets() && (
-                    <span className="ml-2">• Viewing data for {selectedOutletNames.length} location{selectedOutletNames.length !== 1 ? 's' : ''}</span>
-                  )}
-                </p>
-                {canViewAllOutlets() && (
-                  <div className="flex items-center gap-2 mt-2">
-                    <Building2 className="w-4 h-4 text-blue-500" />
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300 break-words">
-                      {selectedOutletNames.length > 0 ? selectedOutletNames.join(', ') : 'All locations'}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
+          <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3 sm:gap-4">
+            <p
+              className="text-sm text-gray-500 dark:text-gray-400 truncate"
+              title={`Overview of your business performance • Viewing data for ${resolvedOutletCount} location${resolvedOutletCount === 1 ? '' : 's'} • ${selectedOutletSummary}`}
+            >
+              Overview of your business performance • Viewing data for {resolvedOutletCount} location{resolvedOutletCount === 1 ? '' : 's'} • {selectedOutletSummary}
+            </p>
 
             {/* Controls Row */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 lg:gap-6 w-full lg:w-auto">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full xl:w-auto">
               {/* Custom Date Range Selector */}
-              <div className="relative w-full sm:w-auto" data-dropdown="date-picker">
+              <div className="relative" data-dropdown="date-picker">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="flex items-center space-x-2 w-full sm:w-auto justify-between"
+                  className="flex items-center space-x-2"
                   onClick={() => setShowCustomDatePicker(!showCustomDatePicker)}
                 >
                   <Calendar className="w-4 h-4" />
@@ -1138,14 +1164,14 @@ const Dashboard: React.FC = () => {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-2 w-full sm:w-auto flex-wrap">
+              <div className="flex flex-wrap items-center gap-2">
                 {canViewAllOutlets() && (
-                  <div className="relative w-full sm:w-auto" data-dropdown="outlet-selector">
+                  <div className="relative" data-dropdown="outlet-selector">
                     <Button
                       variant="outline"
                       size="sm"
-                      className="flex items-center space-x-2 w-full sm:w-auto justify-between"
-                      onClick={() => setIsOutletSelectorOpen(!isOutletSelectorOpen)}
+                      className="flex items-center space-x-2"
+                      onClick={toggleOutletSelector}
                     >
                       <Filter className="w-4 h-4" />
                       <span>Filter</span>
@@ -1159,19 +1185,9 @@ const Dashboard: React.FC = () => {
                             <label key={outlet.id} className="flex items-center space-x-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
                               <input
                                 type="checkbox"
-                                checked={dashboardView.selectedOutlets.includes(outlet.id)}
+                                checked={outletSelectionDraft.includes(outlet.id)}
                                 onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setDashboardView(prev => ({
-                                      ...prev,
-                                      selectedOutlets: [...prev.selectedOutlets, outlet.id]
-                                    }));
-                                  } else {
-                                    setDashboardView(prev => ({
-                                      ...prev,
-                                      selectedOutlets: prev.selectedOutlets.filter(id => id !== outlet.id)
-                                    }));
-                                  }
+                                  handleOutletDraftToggle(outlet.id, e.target.checked);
                                 }}
                                 className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                               />
@@ -1185,6 +1201,27 @@ const Dashboard: React.FC = () => {
                               </div>
                             </label>
                           ))}
+                          <div className="pt-2 mt-2 border-t border-gray-200 dark:border-gray-700">
+                            <div className="flex items-center justify-between gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setIsOutletSelectorOpen(false);
+                                  setOutletSelectionDraft([...dashboardView.selectedOutlets]);
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={applyOutletSelection}
+                                disabled={outletSelectionDraft.length === 0 || selectedOutletsUnchanged}
+                              >
+                                Apply
+                              </Button>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -1207,7 +1244,7 @@ const Dashboard: React.FC = () => {
                 >
                   <Button
                     size="sm"
-                    className="flex items-center space-x-2 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 w-full sm:w-auto justify-center"
+                    className="flex items-center space-x-2 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 justify-center"
                     onClick={() => handleExportReport()}
                   >
                     <BarChart3 className="w-4 h-4" />
@@ -1221,7 +1258,7 @@ const Dashboard: React.FC = () => {
         </div>
 
         {/* Key Metrics Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6 mb-8 sm:mb-12">
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6 mb-8 sm:mb-12">
           <DashboardCard
             title="Total Sales"
             value={eodStats ? currencyService.formatCurrency(eodStats.total_sales) : currencyService.formatCurrency(0)}

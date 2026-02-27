@@ -3,7 +3,6 @@ import { Search, Filter, CalendarDays, Download, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/Button';
 import { useOutlet } from '@/contexts/OutletContext';
 import { apiClient } from '@/lib/apiClient';
-import { formatDate } from '@/lib/utils';
 
 interface AuditTrailEntry {
   id: string;
@@ -71,6 +70,19 @@ const formatLabel = (value: string): string =>
   value
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const formatDateTime = (value?: string | null): string => {
+  if (!value) return 'N/A';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+};
 
 const getActionColor = (action: string) => {
   const normalized = action.toLowerCase();
@@ -360,7 +372,7 @@ const AuditTrail: React.FC = () => {
                           </div>
                         </div>
                         <div className="text-sm whitespace-nowrap text-gray-500 dark:text-gray-400 sm:text-right">
-                          {formatDate(entry.timestamp)}
+                          {formatDateTime(entry.timestamp)}
                         </div>
                       </div>
                     </div>
