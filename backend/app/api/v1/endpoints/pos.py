@@ -52,6 +52,7 @@ from app.schemas.pos import (
 router = APIRouter()
 logger = logging.getLogger(__name__)
 PAYMENT_METHOD_VALUES = {method.value for method in PaymentMethod}
+POS_TRANSACTIONS_MISSING_COLUMNS: Set[str] = set()
 
 
 def _is_missing_cashier_name_error(exc: Exception) -> bool:
@@ -105,6 +106,9 @@ def _insert_pos_transaction_compat(supabase, transaction_data: Dict[str, Any]):
     If a column is missing in prod schema cache, remove it and retry.
     """
     payload = dict(transaction_data)
+    if POS_TRANSACTIONS_MISSING_COLUMNS:
+        for missing_column in POS_TRANSACTIONS_MISSING_COLUMNS:
+            payload.pop(missing_column, None)
     removed_columns = []
 
     for _ in range(12):
@@ -120,6 +124,7 @@ def _insert_pos_transaction_compat(supabase, transaction_data: Dict[str, Any]):
             if missing_column and missing_column in payload:
                 payload.pop(missing_column, None)
                 removed_columns.append(missing_column)
+                POS_TRANSACTIONS_MISSING_COLUMNS.add(missing_column)
                 logger.warning(
                     "pos_transactions.%s missing in schema cache; retrying insert without it",
                     missing_column
@@ -2441,11 +2446,13 @@ async def create_transaction(
             'transaction_date': datetime.utcnow().isoformat(),
             'sync_status': SyncStatus.SYNCED.value,
             'notes': persisted_notes,
-            'split_payments': split_payments if len(split_payments) > 1 else None,
             'receipt_printed': False,
             'created_at': datetime.utcnow().isoformat(),
             'updated_at': datetime.utcnow().isoformat()
         }
+
+        if len(split_payments) > 1:
+            transaction_data['split_payments'] = split_payments
 
         if normalized_offline_id:
             transaction_data['offline_id'] = normalized_offline_id
@@ -6251,18 +6258,6 @@ async def get_outlet_info(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Outlet not found"
             )
-
-        changed_fields = sorted([field for field in allowed_fields if field in outlet_data])
-        _log_pos_audit_entry(
-            supabase=supabase,
-            outlet_id=outlet_id,
-            user_id=str(current_user.get('id') or ''),
-            user_name=current_user.get('name') or current_user.get('email'),
-            action='update',
-            entity_type='outlet',
-            entity_id=outlet_id,
-            details=f"Updated outlet business info fields={','.join(changed_fields) if changed_fields else 'none'}"
-        )
 
         return result.data[0]
         

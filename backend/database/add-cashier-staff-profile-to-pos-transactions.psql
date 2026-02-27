@@ -166,7 +166,7 @@ BEGIN
         SELECT
           t.outlet_id,
           lower(btrim(t.cashier_name)) AS normalized_cashier_name,
-          MIN(t.cashier_staff_profile_id) AS staff_profile_id
+          MIN(t.cashier_staff_profile_id::text)::uuid AS staff_profile_id
         FROM public.pos_transactions t
         WHERE t.cashier_staff_profile_id IS NOT NULL
           AND t.cashier_name IS NOT NULL

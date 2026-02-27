@@ -1,0 +1,86 @@
+-- Add first-class split payment storage to POS transactions.
+-- Safe to run multiple times.
+
+BEGIN;
+
+DO $$
+DECLARE
+  has_pos_transactions BOOLEAN := to_regclass('public.pos_transactions') IS NOT NULL;
+  has_notes_column BOOLEAN := FALSE;
+BEGIN
+  IF NOT has_pos_transactions THEN
+    RAISE NOTICE 'Skipping migration: public.pos_transactions does not exist. Run POS base migration first.';
+    RETURN;
+  END IF;
+
+  EXECUTE 'ALTER TABLE public.pos_transactions ADD COLUMN IF NOT EXISTS split_payments JSONB';
+  EXECUTE '
+    COMMENT ON COLUMN public.pos_transactions.split_payments IS
+    ''Split-tender breakdown for POS transactions (e.g., cash + card).''
+  ';
+
+  SELECT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'pos_transactions'
+      AND column_name = 'notes'
+  ) INTO has_notes_column;
+
+  IF NOT has_notes_column THEN
+    RETURN;
+  END IF;
+
+  EXECUTE '
+    CREATE OR REPLACE FUNCTION public._compazz_try_parse_jsonb(value text)
+    RETURNS jsonb
+    LANGUAGE plpgsql
+    STABLE
+    AS $inner$
+    BEGIN
+      IF value IS NULL OR btrim(value) = '''' THEN
+        RETURN NULL;
+      END IF;
+      RETURN value::jsonb;
+    EXCEPTION
+      WHEN OTHERS THEN
+        RETURN NULL;
+    END;
+    $inner$
+  ';
+
+  EXECUTE '
+    WITH parsed AS (
+      SELECT
+        t.id AS transaction_id,
+        CASE
+          WHEN jsonb_typeof(public._compazz_try_parse_jsonb(t.notes)->''split_payments'') = ''array''
+            THEN public._compazz_try_parse_jsonb(t.notes)->''split_payments''
+          ELSE NULL
+        END AS split_payload
+      FROM public.pos_transactions t
+      WHERE t.split_payments IS NULL
+        AND t.notes IS NOT NULL
+        AND btrim(t.notes) <> ''''
+    )
+    UPDATE public.pos_transactions t
+    SET split_payments = p.split_payload
+    FROM parsed p
+    WHERE t.id = p.transaction_id
+      AND t.split_payments IS NULL
+      AND p.split_payload IS NOT NULL
+  ';
+
+  EXECUTE 'DROP FUNCTION IF EXISTS public._compazz_try_parse_jsonb(text)';
+END $$;
+
+COMMIT;
+
+-- Refresh PostgREST schema cache (Supabase/PostgREST)
+DO $$
+BEGIN
+  PERFORM pg_notify('pgrst', 'reload schema');
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE NOTICE 'PostgREST schema reload notify failed: %', SQLERRM;
+END $$;
