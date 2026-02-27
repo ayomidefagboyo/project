@@ -109,6 +109,7 @@ const StocktakeReports: React.FC = () => {
       );
     });
   }, [sessions, search]);
+  const showEmptyState = !isLoading && filteredSessions.length === 0;
 
   if (!currentOutlet) {
     return (
@@ -129,7 +130,8 @@ const StocktakeReports: React.FC = () => {
         </div>
         <Button
           variant="outline"
-          className="inline-flex items-center gap-2"
+          size="sm"
+          className="inline-flex items-center gap-2 w-fit"
           onClick={() => void loadSessions()}
           disabled={isLoading}
         >
@@ -138,20 +140,20 @@ const StocktakeReports: React.FC = () => {
         </Button>
       </div>
 
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
-          <div className="relative lg:col-span-2">
+      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-3 sm:p-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+          <div className="relative sm:col-span-2">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search by session, staff, terminal"
-              className="w-full h-10 rounded-lg border border-gray-300 dark:border-gray-600 pl-9 pr-3 text-sm bg-white dark:bg-gray-800"
+              className="w-full h-9 sm:h-10 rounded-lg border border-gray-300 dark:border-gray-600 pl-9 pr-3 text-sm bg-white dark:bg-gray-800"
             />
           </div>
           <div className="relative">
-            <Calendar size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Calendar size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="date"
               value={dateFrom}
@@ -159,11 +161,12 @@ const StocktakeReports: React.FC = () => {
                 setPage(1);
                 setDateFrom(event.target.value);
               }}
-              className="w-full h-10 rounded-lg border border-gray-300 dark:border-gray-600 pl-9 pr-3 text-sm bg-white dark:bg-gray-800"
+              aria-label="From date"
+              className="w-full h-9 sm:h-10 rounded-lg border border-gray-300 dark:border-gray-600 pl-8 pr-2 text-xs sm:text-sm bg-white dark:bg-gray-800"
             />
           </div>
           <div className="relative">
-            <Calendar size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Calendar size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="date"
               value={dateTo}
@@ -171,7 +174,8 @@ const StocktakeReports: React.FC = () => {
                 setPage(1);
                 setDateTo(event.target.value);
               }}
-              className="w-full h-10 rounded-lg border border-gray-300 dark:border-gray-600 pl-9 pr-3 text-sm bg-white dark:bg-gray-800"
+              aria-label="To date"
+              className="w-full h-9 sm:h-10 rounded-lg border border-gray-300 dark:border-gray-600 pl-8 pr-2 text-xs sm:text-sm bg-white dark:bg-gray-800"
             />
           </div>
         </div>
@@ -184,7 +188,61 @@ const StocktakeReports: React.FC = () => {
       )}
 
       <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="md:hidden divide-y divide-gray-100 dark:divide-gray-800">
+          {isLoading && (
+            <div className="px-4 py-10 text-center text-sm text-gray-500">Loading stocktake reports...</div>
+          )}
+          {showEmptyState && (
+            <div className="px-4 py-10 text-center text-sm text-gray-500">No stocktake sessions found.</div>
+          )}
+          {!isLoading && filteredSessions.map((session) => (
+            <div key={session.id} className="p-4 space-y-2">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    {session.id.slice(0, 8).toUpperCase()}
+                  </p>
+                  <p className="text-xs text-gray-500">{session.terminal_id || 'No terminal'}</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-3 text-xs inline-flex items-center gap-1"
+                  onClick={() => void openDetail(session.id)}
+                >
+                  <Eye size={14} />
+                  View
+                </Button>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <p className="text-gray-500">Completed</p>
+                  <p className="text-gray-800 dark:text-gray-200">{formatDateTime(session.completed_at)}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">By</p>
+                  <p className="text-gray-800 dark:text-gray-200">{session.performed_by_name || 'System'}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Adjusted</p>
+                  <p className="text-gray-800 dark:text-gray-200">{session.adjusted_items} / {session.total_items}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Net Variance</p>
+                  <p className={session.net_quantity_variance >= 0 ? 'text-emerald-700 font-medium' : 'text-red-700 font-medium'}>
+                    {session.net_quantity_variance >= 0 ? '+' : ''}
+                    {session.net_quantity_variance}
+                  </p>
+                </div>
+              </div>
+              <p className="text-sm text-gray-700 dark:text-gray-300">
+                Value Impact: {formatNaira(session.total_variance_value)}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        <div className="hidden md:block overflow-x-auto">
           <table className="min-w-full">
             <thead className="bg-gray-50 dark:bg-gray-800">
               <tr>
@@ -204,7 +262,7 @@ const StocktakeReports: React.FC = () => {
                 </tr>
               )}
 
-              {!isLoading && filteredSessions.length === 0 && (
+              {showEmptyState && (
                 <tr>
                   <td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-500">
                     No stocktake sessions found.
@@ -253,14 +311,15 @@ const StocktakeReports: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
         <p className="text-sm text-gray-600 dark:text-gray-300">
           Page {page} of {totalPages} ({total} total sessions)
         </p>
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
-            className="h-9 px-3"
+            size="sm"
+            className="h-8 px-3"
             disabled={page <= 1 || isLoading}
             onClick={() => setPage((prev) => Math.max(1, prev - 1))}
           >
@@ -268,7 +327,8 @@ const StocktakeReports: React.FC = () => {
           </Button>
           <Button
             variant="outline"
-            className="h-9 px-3"
+            size="sm"
+            className="h-8 px-3"
             disabled={page >= totalPages || isLoading}
             onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
           >
@@ -280,7 +340,7 @@ const StocktakeReports: React.FC = () => {
       {selectedSessionId && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
           <div className="w-full max-w-5xl max-h-[90vh] overflow-hidden rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4 border-b border-gray-200 dark:border-gray-700">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Stocktake Session Details</h2>
                 <p className="text-xs text-gray-500 mt-1">{selectedSessionId}</p>
@@ -297,7 +357,7 @@ const StocktakeReports: React.FC = () => {
               </button>
             </div>
 
-            <div className="p-5 overflow-auto max-h-[75vh] space-y-4">
+            <div className="p-4 sm:p-5 overflow-auto max-h-[75vh] space-y-4">
               {isDetailLoading && (
                 <p className="text-sm text-gray-600 dark:text-gray-300">Loading session details...</p>
               )}
@@ -329,7 +389,34 @@ const StocktakeReports: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="overflow-x-auto border border-gray-200 dark:border-gray-700 rounded-lg">
+                  <div className="md:hidden space-y-2">
+                    {selectedDetail.items.map((item) => (
+                      <div key={item.movement_id} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-1">
+                        <p className="text-sm font-semibold">{item.product_name}</p>
+                        <p className="text-xs text-gray-500">SKU: {item.sku || '-'}</p>
+                        <div className="grid grid-cols-3 gap-2 text-xs">
+                          <div>
+                            <p className="text-gray-500">System</p>
+                            <p>{item.system_quantity}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500">Counted</p>
+                            <p>{item.counted_quantity}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500">Variance</p>
+                            <p className={item.quantity_change >= 0 ? 'text-emerald-700 font-medium' : 'text-red-700 font-medium'}>
+                              {item.quantity_change >= 0 ? '+' : ''}
+                              {item.quantity_change}
+                            </p>
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-600 dark:text-gray-300">Reason: {item.reason || '-'}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="hidden md:block overflow-x-auto border border-gray-200 dark:border-gray-700 rounded-lg">
                     <table className="min-w-full">
                       <thead className="bg-gray-50 dark:bg-gray-800">
                         <tr>

@@ -225,10 +225,11 @@ const AuditTrail: React.FC = () => {
             Track all changes and activities for {currentOutlet.name}
           </p>
         </div>
-        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           <Button
             variant="outline"
-            className="flex items-center w-full sm:w-auto justify-center"
+            size="sm"
+            className="flex items-center justify-center"
             onClick={() => void loadAuditTrail()}
             disabled={loading}
           >
@@ -237,7 +238,8 @@ const AuditTrail: React.FC = () => {
           </Button>
           <Button
             variant="outline"
-            className="flex items-center w-full sm:w-auto justify-center"
+            size="sm"
+            className="flex items-center justify-center"
             onClick={handleExportCsv}
             disabled={entries.length === 0}
           >
@@ -253,7 +255,7 @@ const AuditTrail: React.FC = () => {
         </div>
       )}
 
-      <div className="flex flex-col lg:flex-row gap-3">
+      <div className="flex flex-col lg:flex-row gap-2">
         <div className="relative flex-grow">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
             <Search size={18} className="text-gray-400" />
@@ -261,16 +263,16 @@ const AuditTrail: React.FC = () => {
           <input
             type="text"
             placeholder="Search audit entries..."
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full h-9 sm:h-10 pl-10 pr-3 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
           />
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
-          <div className="relative w-full sm:w-auto">
+        <div className="grid grid-cols-2 gap-2 w-full lg:w-auto lg:flex lg:flex-row">
+          <div className="relative min-w-0 lg:w-auto">
             <select
-              className="appearance-none w-full pl-3 pr-8 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="appearance-none w-full h-9 pl-3 pr-7 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-xs sm:text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               value={entityFilter}
               onChange={(event) => setEntityFilter(event.target.value)}
             >
@@ -280,13 +282,13 @@ const AuditTrail: React.FC = () => {
               ))}
             </select>
             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700 dark:text-gray-300">
-              <Filter size={16} />
+              <Filter size={14} />
             </div>
           </div>
 
-          <div className="relative w-full sm:w-auto">
+          <div className="relative min-w-0 lg:w-auto">
             <select
-              className="appearance-none w-full pl-3 pr-8 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="appearance-none w-full h-9 pl-3 pr-7 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-xs sm:text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               value={actionFilter}
               onChange={(event) => setActionFilter(event.target.value)}
             >
@@ -296,27 +298,29 @@ const AuditTrail: React.FC = () => {
               ))}
             </select>
             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700 dark:text-gray-300">
-              <Filter size={16} />
+              <Filter size={14} />
             </div>
           </div>
 
-          <div className="relative w-full sm:w-auto">
-            <CalendarDays size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <div className="relative min-w-0 lg:w-auto">
+            <CalendarDays size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="date"
               value={dateFrom}
               onChange={(event) => setDateFrom(event.target.value)}
-              className="w-full sm:w-40 pl-9 pr-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              aria-label="From date"
+              className="w-full h-9 lg:w-36 xl:w-40 pl-8 pr-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-xs sm:text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
 
-          <div className="relative w-full sm:w-auto">
-            <CalendarDays size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <div className="relative min-w-0 lg:w-auto">
+            <CalendarDays size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="date"
               value={dateTo}
               onChange={(event) => setDateTo(event.target.value)}
-              className="w-full sm:w-40 pl-9 pr-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              aria-label="To date"
+              className="w-full h-9 lg:w-36 xl:w-40 pl-8 pr-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-xs sm:text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
         </div>
