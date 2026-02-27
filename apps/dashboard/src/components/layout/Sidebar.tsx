@@ -194,12 +194,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
         {/* Header */}
         <div className={`flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-800 ${isCollapsed ? 'px-4' : ''}`}>
           {!isCollapsed && (
-            <OutletSelector onCreateStore={() => {
-              console.log('Create store clicked from sidebar - opening modal');
-              console.log('showCreateStoreModal before:', showCreateStoreModal);
-              setShowCreateStoreModal(true);
-              console.log('setShowCreateStoreModal(true) called');
-            }} />
+            <OutletSelector onCreateStore={() => setShowCreateStoreModal(true)} />
           )}
 
           <div className="flex items-center space-x-2">
@@ -269,7 +264,6 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
       </div>
 
       {/* Create Store Modal */}
-      {console.log('Sidebar render - showCreateStoreModal:', showCreateStoreModal)}
       {showCreateStoreModal && (
         <CreateStoreModal
           isOpen={showCreateStoreModal}

@@ -1,15 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Upload, FileText, Building2, Calendar, DollarSign, Camera, Scan, CreditCard, Tag, Paperclip } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useOutlet } from '@/contexts/OutletContext';
 import { ocrService } from '@/lib/services';
-import { ExpenseCategory } from '@/types';
+import { apiClient } from '@/lib/apiClient';
 import { formatCurrency } from '@/lib/utils';
 import Toast from '@/components/ui/Toast';
 
 interface ExpenseFormData {
-  category: ExpenseCategory;
+  category: string;
   amount: number;
   description: string;
   notes: string;
@@ -21,15 +21,15 @@ interface ExpenseFormData {
 
 type InputMode = 'manual' | 'scan';
 
-const expenseCategories: { value: ExpenseCategory; label: string; description: string }[] = [
-  { value: 'outlet_operational', label: 'Operational', description: 'Day-to-day business operations' },
-  { value: 'outlet_marketing', label: 'Marketing', description: 'Advertising and promotional expenses' },
-  { value: 'outlet_utilities', label: 'Utilities', description: 'Electricity, water, internet, etc.' },
-  { value: 'outlet_rent', label: 'Rent', description: 'Property lease and rental costs' },
-  { value: 'outlet_supplies', label: 'Supplies', description: 'Office and business supplies' },
-  { value: 'outlet_maintenance', label: 'Maintenance', description: 'Repairs and upkeep' },
-  { value: 'outlet_travel', label: 'Travel', description: 'Business travel expenses' },
-  { value: 'outlet_meals', label: 'Meals', description: 'Business meals and entertainment' },
+const expenseCategories: { value: string; label: string; description: string }[] = [
+  { value: 'supplies', label: 'Supplies', description: 'Daily operating supplies and consumables' },
+  { value: 'inventory', label: 'Inventory', description: 'Inventory and stock replenishment costs' },
+  { value: 'utilities', label: 'Utilities', description: 'Electricity, water, internet, and utility bills' },
+  { value: 'rent', label: 'Rent', description: 'Store rent, lease, and occupancy expenses' },
+  { value: 'transport', label: 'Transport', description: 'Logistics, delivery, and transport costs' },
+  { value: 'maintenance', label: 'Maintenance', description: 'Repairs and equipment maintenance' },
+  { value: 'marketing', label: 'Marketing', description: 'Promotion and customer acquisition spend' },
+  { value: 'miscellaneous', label: 'Miscellaneous', description: 'Other business expenses' },
 ];
 
 const paymentMethods = [
@@ -49,7 +49,7 @@ const CreateExpense: React.FC = () => {
   const [inputMode, setInputMode] = useState<InputMode>('manual');
   
   const [formData, setFormData] = useState<ExpenseFormData>({
-    category: 'outlet_operational',
+    category: 'supplies',
     amount: 0,
     description: '',
     notes: '',
@@ -142,6 +142,11 @@ const CreateExpense: React.FC = () => {
   };
 
   const validateForm = (): boolean => {
+    if (!formData.category) {
+      showToast('Please select an expense category', 'error');
+      return false;
+    }
+
     if (formData.amount <= 0) {
       showToast('Please enter a valid amount', 'error');
       return false;
@@ -167,20 +172,34 @@ const CreateExpense: React.FC = () => {
     
     try {
       setLoading(true);
-      
-      // Here you would typically call an expense service to create the expense
-      // const { data, error } = await expenseService.createExpense(formData, currentOutlet.id, currentUser.id);
-      
-      // For now, we'll simulate success
-      await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate API call
-      
-      showToast('Expense created successfully! It has been submitted for approval.', 'success');
+
+      const payload = {
+        outlet_id: currentOutlet.id,
+        date: formData.expenseDate,
+        amount: Number(formData.amount),
+        category: formData.category,
+        subcategory: formData.merchantName?.trim() || null,
+        description: formData.notes.trim()
+          ? `${formData.description.trim()} | Notes: ${formData.notes.trim()}`
+          : formData.description.trim(),
+        vendor_id: null,
+        payment_method: formData.paymentMethod,
+        receipt_url: formData.receiptUrl || null,
+        is_recurring: false,
+      };
+
+      const response = await apiClient.post<any>('/expenses/', payload);
+      if (response.error || !response.data) {
+        throw new Error(response.error || 'Failed to create expense');
+      }
+
+      showToast('Expense created successfully!', 'success');
       setTimeout(() => {
         navigate('/dashboard/expenses');
-      }, 2000);
+      }, 800);
     } catch (err) {
       console.error('Error creating expense:', err);
-      showToast('Failed to create expense. Please try again.', 'error');
+      showToast(err instanceof Error ? err.message : 'Failed to create expense. Please try again.', 'error');
     } finally {
       setLoading(false);
     }
@@ -191,10 +210,10 @@ const CreateExpense: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="container-width">
+      <div className="container-width px-4 sm:px-6">
         {/* Header */}
-        <div className="flex items-center justify-between py-8">
-          <div className="flex items-center space-x-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 py-6 sm:py-8">
+          <div className="flex items-start sm:items-center space-x-3 sm:space-x-4">
             <button
               onClick={() => navigate('/dashboard/expenses')}
               className="btn-secondary p-2"
@@ -214,7 +233,7 @@ const CreateExpense: React.FC = () => {
         </div>
 
         {/* Input Mode Selection */}
-        <div className="card p-6 mb-8">
+        <div className="card p-4 sm:p-6 mb-6 sm:mb-8">
           <h2 className="text-lg font-semibold text-foreground mb-4">Input Method</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <button
@@ -272,7 +291,7 @@ const CreateExpense: React.FC = () => {
 
         {/* File Upload (for scan mode) */}
         {inputMode === 'scan' && (
-          <div className="card p-8 mb-8">
+          <div className="card p-4 sm:p-8 mb-6 sm:mb-8">
             <div className="text-center">
               <input
                 ref={fileInputRef}
@@ -283,7 +302,7 @@ const CreateExpense: React.FC = () => {
               />
               <div 
                 onClick={triggerFileUpload}
-                className="border-2 border-dashed border-border rounded-xl p-12 cursor-pointer hover:border-primary/60 hover:bg-primary/5 transition-all duration-200"
+                className="border-2 border-dashed border-border rounded-xl p-6 sm:p-12 cursor-pointer hover:border-primary/60 hover:bg-primary/5 transition-all duration-200"
               >
                 {processingOCR ? (
                   <div className="flex flex-col items-center space-y-4">
@@ -316,7 +335,7 @@ const CreateExpense: React.FC = () => {
 
         <form onSubmit={handleSubmit} className="space-y-8 pb-32">
           {/* Expense Category */}
-          <div className="card p-8">
+          <div className="card p-4 sm:p-8">
             <div className="flex items-center space-x-3 mb-6">
               <div className="w-10 h-10 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-lg flex items-center justify-center">
                 <Tag className="w-5 h-5 text-blue-600 dark:text-blue-400" />
@@ -367,7 +386,7 @@ const CreateExpense: React.FC = () => {
           </div>
 
           {/* Expense Details */}
-          <div className="card p-8">
+          <div className="card p-4 sm:p-8">
             <div className="flex items-center space-x-3 mb-6">
               <div className="w-10 h-10 bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/20 dark:to-emerald-800/20 rounded-lg flex items-center justify-center">
                 <DollarSign className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
@@ -456,7 +475,7 @@ const CreateExpense: React.FC = () => {
           </div>
 
           {/* Payment Method */}
-          <div className="card p-8">
+          <div className="card p-4 sm:p-8">
             <div className="flex items-center space-x-3 mb-6">
               <div className="w-10 h-10 bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-900/20 dark:to-indigo-800/20 rounded-lg flex items-center justify-center">
                 <CreditCard className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
@@ -509,7 +528,7 @@ const CreateExpense: React.FC = () => {
 
           {/* Summary */}
           {formData.amount > 0 && (
-            <div className="card p-8 bg-gradient-to-br from-primary/5 to-primary/10 border-primary/20">
+            <div className="card p-4 sm:p-8 bg-gradient-to-br from-primary/5 to-primary/10 border-primary/20">
               <div className="text-center">
                 <p className="text-sm font-medium text-muted-foreground mb-2">Expense Total</p>
                 <p className="text-4xl font-bold text-foreground mb-2">
@@ -528,7 +547,7 @@ const CreateExpense: React.FC = () => {
         {/* Fixed Submit Button */}
         <div className="fixed bottom-0 left-0 right-0 bg-background/80 backdrop-blur-sm border-t border-border p-4 sm:p-6">
           <div className="container-width">
-            <div className="flex space-x-4">
+            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
               <button
                 type="button"
                 onClick={() => navigate('/dashboard/expenses')}

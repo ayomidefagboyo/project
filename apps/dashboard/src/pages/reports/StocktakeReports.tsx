@@ -112,14 +112,14 @@ const StocktakeReports: React.FC = () => {
 
   if (!currentOutlet) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <p className="text-sm text-gray-600 dark:text-gray-300">Select an outlet to view stocktake reports.</p>
       </div>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Stocktake Reports</h1>
@@ -253,7 +253,7 @@ const StocktakeReports: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <p className="text-sm text-gray-600 dark:text-gray-300">
           Page {page} of {totalPages} ({total} total sessions)
         </p>
@@ -310,7 +310,7 @@ const StocktakeReports: React.FC = () => {
 
               {selectedDetail && (
                 <>
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
                       <p className="text-xs text-gray-500">Adjusted Items</p>
                       <p className="text-lg font-semibold">{selectedDetail.session.adjusted_items}</p>

@@ -269,7 +269,7 @@ const StaffManagement: React.FC = () => {
   // Show loading or error states
   if (!currentOutlet) {
     return (
-      <div className="p-6 max-w-6xl mx-auto">
+      <div className="p-4 sm:p-6 max-w-6xl mx-auto">
         <div className="text-center py-12">
           <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <User className="w-8 h-8 text-yellow-600" />
@@ -282,8 +282,8 @@ const StaffManagement: React.FC = () => {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Staff Management</h1>
           <p className="text-gray-600">
@@ -293,7 +293,7 @@ const StaffManagement: React.FC = () => {
         <button
           onClick={() => setShowCreateForm(true)}
           disabled={isLoading || !canManageStaff}
-          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors w-full sm:w-auto"
           title={canManageStaff ? 'Add staff profile' : 'You do not have permission to add staff'}
         >
           <Plus className="w-4 h-4" />
@@ -320,7 +320,7 @@ const StaffManagement: React.FC = () => {
 
       {/* Create Staff Form */}
       {showCreateForm && (
-        <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6 shadow-sm">
+        <div className="bg-white border border-gray-200 rounded-lg p-4 sm:p-6 mb-6 shadow-sm">
           <h2 className="text-lg font-semibold mb-4">Create New Staff Profile</h2>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -398,7 +398,7 @@ const StaffManagement: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex gap-3 mt-6">
+          <div className="flex flex-col sm:flex-row gap-3 mt-6">
             <button
               onClick={createStaffProfile}
               disabled={isLoading}
@@ -431,20 +431,20 @@ const StaffManagement: React.FC = () => {
         ) : (
           <div className="divide-y divide-gray-200">
             {staffProfiles.map((staff) => (
-              <div key={staff.id} className="px-6 py-4 hover:bg-gray-50">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
+              <div key={staff.id} className="px-4 sm:px-6 py-4 hover:bg-gray-50">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
                     <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
                       <User className="w-5 h-5 text-blue-600" />
                     </div>
-                    <div>
-                      <h4 className="font-medium text-gray-900">{staff.display_name}</h4>
+                    <div className="min-w-0">
+                      <h4 className="font-medium text-gray-900 truncate">{staff.display_name}</h4>
                       <p className="text-sm text-gray-600">Code: {staff.staff_code}</p>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
+                  <div className="flex items-center justify-between sm:justify-end gap-4">
+                    <div className="text-left sm:text-right">
                       <div className="flex items-center gap-1">
                         <Shield className="w-4 h-4 text-gray-400" />
                         <span className="text-sm font-medium capitalize">
@@ -503,8 +503,8 @@ const StaffManagement: React.FC = () => {
 
       {/* Edit Staff Modal */}
       {editingStaff && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-lg w-full mx-4 shadow-xl">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-4 sm:p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-xl">
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">Edit Staff Profile</h3>
@@ -564,7 +564,7 @@ const StaffManagement: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 mt-6">
+            <div className="flex flex-col sm:flex-row sm:justify-end gap-3 mt-6">
               <button
                 onClick={closeEditStaffForm}
                 disabled={isSavingEdit}
@@ -586,8 +586,8 @@ const StaffManagement: React.FC = () => {
 
       {/* Success Modal */}
       {successModal.visible && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-4 sm:p-6 max-w-md w-full max-h-[90vh] overflow-y-auto shadow-xl">
             <div className="text-center">
               <CheckCircle className="mx-auto h-16 w-16 text-green-500 mb-4" />
               <h3 className="text-lg font-semibold text-gray-900 mb-2">

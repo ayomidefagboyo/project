@@ -35,6 +35,7 @@ import { trackUserJourney, trackTrialEvent, trackFeatureUsage, trackDashboardInt
 const Dashboard: React.FC = () => {
   const {
     currentUser,
+    currentOutlet,
     userOutlets,
     canViewAllOutlets,
     getAccessibleOutlets,
@@ -45,7 +46,7 @@ const Dashboard: React.FC = () => {
 
   // Multi-store dashboard state
   const [dashboardView, setDashboardView] = useState<DashboardView>({
-    scope: canViewAllOutlets() ? 'all' : 'outlet_specific',
+    scope: 'outlet_specific',
     selectedOutlets: [],
     dateRange: {
       startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
@@ -223,12 +224,26 @@ const Dashboard: React.FC = () => {
 
       // User has outlets - proceed with normal dashboard loading
       const accessibleOutlets = getAccessibleOutlets();
-      const selectedOutlets = canViewAllOutlets() ? accessibleOutlets : [accessibleOutlets[0]].filter(Boolean);
+      const defaultOutletId =
+        currentOutlet?.id && accessibleOutlets.includes(currentOutlet.id)
+          ? currentOutlet.id
+          : accessibleOutlets[0] || null;
 
-      setDashboardView(prev => ({
-        ...prev,
-        selectedOutlets
-      }));
+      setDashboardView(prev => {
+        const hasValidSelection =
+          prev.selectedOutlets.length > 0 &&
+          prev.selectedOutlets.every((outletId) => accessibleOutlets.includes(outletId));
+
+        if (hasValidSelection) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          scope: 'outlet_specific',
+          selectedOutlets: defaultOutletId ? [defaultOutletId] : []
+        };
+      });
 
       // Track dashboard access and device info (only for users with outlets)
       try {
@@ -258,7 +273,7 @@ const Dashboard: React.FC = () => {
 
       setLoading(false);
     }
-  }, [currentUser, canViewAllOutlets]);
+  }, [currentUser, currentOutlet?.id, userOutlets.length, canViewAllOutlets]);
 
   // Date range calculation helper
   const getDateRange = (range: string) => {
@@ -746,7 +761,7 @@ const Dashboard: React.FC = () => {
         <>
           {/* Onboarding Popup */}
       {showOnboarding && (
-        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 p-6">
+        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6">
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl max-w-lg w-full relative border border-gray-100 dark:border-gray-800">
             <button
               onClick={() => setShowOnboarding(false)}
@@ -834,12 +849,12 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
       )}
-      <div className="max-w-7xl mx-auto px-6 py-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
         {/* Compact Dashboard Header Card */}
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6 mb-8">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6 mb-6 sm:mb-8">
           <div className="flex flex-col lg:flex-row lg:items-center gap-6">
             {/* Title and Info */}
-            <div className="flex items-center space-x-4 flex-1">
+            <div className="flex items-center space-x-4 flex-1 min-w-0">
               <div>
                 <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Dashboard</h1>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -851,7 +866,7 @@ const Dashboard: React.FC = () => {
                 {canViewAllOutlets() && (
                   <div className="flex items-center gap-2 mt-2">
                     <Building2 className="w-4 h-4 text-blue-500" />
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300 break-words">
                       {selectedOutletNames.length > 0 ? selectedOutletNames.join(', ') : 'All locations'}
                     </span>
                   </div>
@@ -860,13 +875,13 @@ const Dashboard: React.FC = () => {
             </div>
 
             {/* Controls Row */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 lg:gap-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 lg:gap-6 w-full lg:w-auto">
               {/* Custom Date Range Selector */}
-              <div className="relative" data-dropdown="date-picker">
+              <div className="relative w-full sm:w-auto" data-dropdown="date-picker">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="flex items-center space-x-2"
+                  className="flex items-center space-x-2 w-full sm:w-auto justify-between"
                   onClick={() => setShowCustomDatePicker(!showCustomDatePicker)}
                 >
                   <Calendar className="w-4 h-4" />
@@ -875,7 +890,7 @@ const Dashboard: React.FC = () => {
                 </Button>
 
                 {showCustomDatePicker && (
-                  <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-lg z-20">
+                  <div className="absolute left-0 sm:left-auto sm:right-0 mt-2 w-[min(20rem,calc(100vw-2rem))] bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-lg z-20">
                     <div className="p-4">
                       <div className="space-y-3">
                         {/* Quick Date Options */}
@@ -951,13 +966,13 @@ const Dashboard: React.FC = () => {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-2">
+              <div className="flex gap-2 w-full sm:w-auto flex-wrap">
                 {canViewAllOutlets() && (
-                  <div className="relative" data-dropdown="outlet-selector">
+                  <div className="relative w-full sm:w-auto" data-dropdown="outlet-selector">
                     <Button
                       variant="outline"
                       size="sm"
-                      className="flex items-center space-x-2"
+                      className="flex items-center space-x-2 w-full sm:w-auto justify-between"
                       onClick={() => setIsOutletSelectorOpen(!isOutletSelectorOpen)}
                     >
                       <Filter className="w-4 h-4" />
@@ -966,7 +981,7 @@ const Dashboard: React.FC = () => {
                     </Button>
 
                     {isOutletSelectorOpen && (
-                      <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-lg z-10">
+                      <div className="absolute left-0 sm:left-auto sm:right-0 mt-2 w-[min(20rem,calc(100vw-2rem))] bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-lg z-10">
                         <div className="p-4 space-y-2">
                           {userOutlets.map(outlet => (
                             <label key={outlet.id} className="flex items-center space-x-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
@@ -1020,7 +1035,7 @@ const Dashboard: React.FC = () => {
                 >
                   <Button
                     size="sm"
-                    className="flex items-center space-x-2 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100"
+                    className="flex items-center space-x-2 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 w-full sm:w-auto justify-center"
                     onClick={() => handleExportReport()}
                   >
                     <BarChart3 className="w-4 h-4" />
@@ -1034,7 +1049,7 @@ const Dashboard: React.FC = () => {
         </div>
 
         {/* Key Metrics Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6 mb-8 sm:mb-12">
           <DashboardCard
             title="Total Sales"
             value={eodStats ? currencyService.formatCurrency(eodStats.total_sales) : currencyService.formatCurrency(0)}
@@ -1065,12 +1080,12 @@ const Dashboard: React.FC = () => {
         </div>
 
         {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
           {/* Recent Vendor Invoices */}
           <div className="lg:col-span-2">
             <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700">
-              <div className="p-8 border-b border-gray-100 dark:border-gray-700">
-                <div className="flex items-center justify-between">
+              <div className="p-4 sm:p-6 border-b border-gray-100 dark:border-gray-700">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <div>
                     <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Recent Invoices</h2>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -1084,7 +1099,7 @@ const Dashboard: React.FC = () => {
                 </div>
               </div>
               
-              <div className="p-8">
+              <div className="p-4 sm:p-6">
                 {vendorInvoices.length > 0 ? (
                   <VendorInvoiceTable
                     invoices={vendorInvoices.slice(0, 5)}
@@ -1111,7 +1126,7 @@ const Dashboard: React.FC = () => {
 
           {/* Activity Feed */}
           <div className="space-y-8">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-8">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
               <div className="flex items-center space-x-3 mb-6">
                 <div className="w-10 h-10 bg-green-50 dark:bg-green-900/20 rounded-xl flex items-center justify-center">
                   <Activity className="w-5 h-5 text-green-600 dark:text-green-400" />
@@ -1126,7 +1141,7 @@ const Dashboard: React.FC = () => {
             </div>
 
             {/* Quick Actions */}
-            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-8">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-6">Quick Actions</h2>
               <div className="space-y-3">
                 <button className="w-full flex items-center space-x-3 p-4 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 text-left transition-colors">
@@ -1166,10 +1181,10 @@ const Dashboard: React.FC = () => {
         {/* Per-Outlet Breakdown */}
         {canViewAllOutlets() && dashboardView.selectedOutlets.length > 1 && (
           <div className="mt-12">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-8">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-8">Outlet Performance</h2>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
                 {dashboardView.selectedOutlets.length > 0 ? (
                   dashboardView.selectedOutlets.map(outletId => {
                     const outlet = userOutlets.find(o => o.id === outletId);

@@ -667,8 +667,8 @@ Ask me about specific metrics, trends, or any concerns about your business opera
     <div className="h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       <div className="h-full flex flex-col">
         {error && (
-          <div className="bg-destructive/10 border-b border-destructive/20 px-6 py-4">
-            <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <div className="bg-destructive/10 border-b border-destructive/20 px-4 sm:px-6 py-4">
+            <div className="max-w-6xl mx-auto flex items-center justify-between gap-3">
               <div className="flex items-center space-x-3">
                 <AlertTriangle className="w-5 h-5 text-destructive" />
                 <span className="text-destructive font-medium">{error}</span>
@@ -685,22 +685,22 @@ Ask me about specific metrics, trends, or any concerns about your business opera
 
         {/* Header */}
         <div className="border-b border-border bg-card flex-shrink-0">
-          <div className="max-w-6xl mx-auto px-6 py-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="flex items-center space-x-3 sm:space-x-4">
                 <div className="w-10 h-10 bg-gradient-to-tr from-primary to-primary/80 rounded-xl flex items-center justify-center shadow-sm">
                   <Brain className="w-5 h-5 text-primary-foreground" />
                 </div>
                 <div>
-                  <h1 className="text-2xl font-light text-foreground tracking-tight">
+                  <h1 className="text-xl sm:text-2xl font-light text-foreground tracking-tight">
                     Compazz Insights
                   </h1>
                 </div>
               </div>
-              <div className="flex items-center space-x-3">
+              <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
                 <button
                   onClick={() => createNewConversation()}
-                  className="btn-primary px-4 py-2 text-sm font-medium"
+                  className="btn-primary px-4 py-2 text-sm font-medium w-full sm:w-auto"
                 >
                   <Plus className="w-4 h-4 mr-2" />
                   New Chat
@@ -853,7 +853,7 @@ Ask me about specific metrics, trends, or any concerns about your business opera
           {/* Chat Area */}
           <div className="flex-1 flex flex-col bg-card relative">
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-6">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6">
               <div className="max-w-4xl mx-auto">
                 {/* Welcome Screen */}
                 {!activeConversationId || conversations.find(c => c.id === activeConversationId)?.messages.length === 0 ? (
@@ -925,7 +925,7 @@ Ask me about specific metrics, trends, or any concerns about your business opera
                   <div className="space-y-8 pb-24">
                     {conversations.find(c => c.id === activeConversationId)?.messages.map((message) => (
                       <div key={message.id} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-3xl ${message.type === 'user' ? 'ml-16' : 'mr-16'}`}>
+                        <div className={`max-w-3xl ${message.type === 'user' ? 'ml-0 sm:ml-16' : 'mr-0 sm:mr-16'}`}>
                           {message.type === 'ai' && (
                             <div className="flex items-center mb-3">
                               <div className="w-8 h-8 bg-gradient-to-tr from-primary to-primary/80 rounded-lg flex items-center justify-center mr-3">
@@ -957,7 +957,7 @@ Ask me about specific metrics, trends, or any concerns about your business opera
                     {/* Loading State */}
                     {aiLoading && (
                       <div className="flex justify-start">
-                        <div className="max-w-3xl mr-16">
+                        <div className="max-w-3xl mr-0 sm:mr-16">
                           <div className="flex items-center mb-3">
                             <div className="w-8 h-8 bg-gradient-to-tr from-primary to-primary/80 rounded-lg flex items-center justify-center mr-3">
                               <Brain className="w-4 h-4 text-primary-foreground" />
@@ -980,8 +980,8 @@ Ask me about specific metrics, trends, or any concerns about your business opera
 
             {/* Fixed Input Area */}
             <div className="absolute bottom-0 left-0 right-0 border-t border-border bg-card/95 backdrop-blur-sm">
-              <div className="max-w-4xl mx-auto p-6">
-                <div className="flex items-end space-x-4">
+              <div className="max-w-4xl mx-auto p-3 sm:p-6">
+                <div className="flex items-end gap-2 sm:gap-4">
                   <div className="flex-1">
                     <textarea
                       value={currentMessage}

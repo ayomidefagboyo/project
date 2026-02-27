@@ -293,19 +293,19 @@ const ProductManagement: React.FC = () => {
   const potentialProfit = totals.totalSellingValue - totals.totalStockValue;
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-6">
       {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between mb-6">
+      <div className="mb-6 sm:mb-8">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Product Management</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Product Management</h1>
             <p className="text-gray-600 mt-1">{currentOutlet?.name} • {totals.totalProducts} products</p>
           </div>
 
-          <div className="flex items-center space-x-3">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 w-full lg:w-auto">
             <button
               onClick={addNewProduct}
-              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              className="flex items-center justify-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors w-full sm:w-auto"
             >
               <Plus className="w-4 h-4 mr-2" />
               Add Product
@@ -313,7 +313,7 @@ const ProductManagement: React.FC = () => {
 
             <button
               onClick={exportToCSV}
-              className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              className="flex items-center justify-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors w-full sm:w-auto"
             >
               <Download className="w-4 h-4 mr-2" />
               Export CSV
@@ -322,7 +322,7 @@ const ProductManagement: React.FC = () => {
             <button
               onClick={loadProducts}
               disabled={isLoading}
-              className="flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-50"
+              className="flex items-center justify-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-50 w-full sm:w-auto"
             >
               <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
               Refresh
@@ -356,7 +356,7 @@ const ProductManagement: React.FC = () => {
 
         {/* Filters */}
         <div className="bg-white rounded-lg shadow p-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Search</label>
               <div className="relative">
@@ -399,7 +399,7 @@ const ProductManagement: React.FC = () => {
               </select>
             </div>
 
-            <div className="flex items-end">
+            <div className="flex items-end md:col-span-2 xl:col-span-1">
               <button
                 onClick={loadProducts}
                 className="w-full flex items-center justify-center px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"

@@ -233,7 +233,7 @@ const DailyReports: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-      <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 sm:space-y-8">
         {/* Header Section */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="space-y-2">
@@ -247,18 +247,18 @@ const DailyReports: React.FC = () => {
               Track your daily business performance across all outlets with precision
             </p>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4 w-full lg:w-auto">
             {canViewMultiOutlet && (
               <input
                 type="date"
                 value={selectedDate}
                 onChange={(e) => setSelectedDate(e.target.value)}
-                className="px-4 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-white focus:border-transparent transition-all duration-200"
+                className="px-4 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-white focus:border-transparent transition-all duration-200 w-full sm:w-auto"
               />
             )}
             <Button 
               asChild 
-              className="bg-gray-900 hover:bg-gray-800 text-white border-0 px-6 py-3 rounded-xl font-medium transition-all duration-200 shadow-sm hover:shadow-md dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100"
+              className="bg-gray-900 hover:bg-gray-800 text-white border-0 px-6 py-3 rounded-xl font-medium transition-all duration-200 shadow-sm hover:shadow-md dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100 w-full sm:w-auto"
             >
               <Link to="/dashboard/eod" className="flex items-center space-x-2">
                 <Plus className="w-4 h-4" />
@@ -283,7 +283,7 @@ const DailyReports: React.FC = () => {
           <>
             {/* Tabs */}
             <div className="card p-0">
-              <div className="flex border-b border-gray-200 dark:border-gray-700">
+              <div className="flex border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
                 {[
                   { id: 'overview', label: 'Multi-Outlet Overview', icon: BarChart3 },
                   { id: 'outlets', label: 'Outlet Details', icon: Building2 },
@@ -292,7 +292,7 @@ const DailyReports: React.FC = () => {
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id as any)}
-                    className={`flex items-center px-6 py-4 font-medium text-sm transition-all duration-200 ${
+                    className={`flex items-center px-4 sm:px-6 py-4 font-medium text-sm transition-all duration-200 whitespace-nowrap ${
                       activeTab === tab.id
                         ? 'border-b-2 border-gray-900 dark:border-white text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-800/50'
                         : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-800/30'
@@ -309,7 +309,7 @@ const DailyReports: React.FC = () => {
             {activeTab === 'overview' && analytics && (
               <div className="space-y-8">
                 {/* Key Metrics */}
-                <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6">
                   <div className="card p-6 hover:shadow-lg transition-all duration-200">
                     <div className="flex items-center justify-between">
                       <div className="space-y-3">
@@ -368,7 +368,7 @@ const DailyReports: React.FC = () => {
               </div>
 
                 {/* Performance Highlights */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6">
                   <div className="card p-6 hover:shadow-lg transition-all duration-200">
                     <h3 className="text-lg font-medium text-foreground mb-6 tracking-tight">
                       Best Performing Outlet
@@ -419,7 +419,7 @@ const DailyReports: React.FC = () => {
 
           {/* Outlets Tab */}
           {activeTab === 'outlets' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
               {outletSummaries.map((outlet) => (
                 <div
                   key={outlet.outlet_id}
@@ -518,7 +518,7 @@ const DailyReports: React.FC = () => {
             </div>
             <Button 
               variant="outline" 
-              className="border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 px-4 py-3 rounded-xl"
+              className="border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 px-4 py-3 rounded-xl w-full lg:w-auto"
             >
               <Download className="w-4 h-4 mr-2" />
               Export
@@ -600,7 +600,7 @@ const DailyReports: React.FC = () => {
         {/* Summary */}
         <div className="card p-6">
           <h2 className="text-lg font-medium mb-6 text-foreground tracking-tight">Report Summary</h2>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
             <div className="p-6 bg-gray-50 dark:bg-gray-800/50 rounded-xl">
               <div className="space-y-2">
                 <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Total Sales (Period)</p>

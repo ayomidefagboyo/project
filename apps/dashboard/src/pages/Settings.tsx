@@ -299,7 +299,7 @@ const Settings: React.FC = () => {
   return (
     <div className="container-width section-padding">
       {/* Header */}
-      <div className="mb-12">
+      <div className="mb-8 sm:mb-12">
         <div className="flex items-center space-x-4 mb-4">
           <div className="w-12 h-12 bg-gradient-to-br from-primary/10 to-primary/5 rounded-xl flex items-center justify-center">
             <SettingsIcon className="w-6 h-6 text-primary" />
@@ -314,11 +314,11 @@ const Settings: React.FC = () => {
       </div>
 
       {/* Settings Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
         
         {/* Business Information */}
-        <div className="card p-8">
-          <div className="flex items-center justify-between mb-6">
+        <div className="card p-5 sm:p-8">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
             <div className="flex items-center space-x-3">
               <div className="w-10 h-10 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-lg flex items-center justify-center">
                 <Building2 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
@@ -373,8 +373,8 @@ const Settings: React.FC = () => {
         </div>
 
         {/* Team Management */}
-        <div className="card p-8">
-          <div className="flex items-center justify-between mb-6">
+        <div className="card p-5 sm:p-8">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
             <div className="flex items-center space-x-3">
               <div className="w-10 h-10 bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/20 dark:to-emerald-800/20 rounded-lg flex items-center justify-center">
                 <Users className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
@@ -419,8 +419,8 @@ const Settings: React.FC = () => {
 
         {/* Outlet Management */}
         {canManageOutlets && (
-          <div className="card p-8 lg:col-span-2">
-            <div className="flex items-center justify-between mb-6">
+          <div className="card p-5 sm:p-8 lg:col-span-2">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/20 dark:to-rose-800/20 rounded-lg flex items-center justify-center">
                   <Building2 className="w-5 h-5 text-rose-600 dark:text-rose-400" />
@@ -472,8 +472,8 @@ const Settings: React.FC = () => {
 
 
         {/* Notifications */}
-        <div className="card p-8">
-          <div className="flex items-center justify-between mb-6">
+        <div className="card p-5 sm:p-8">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
             <div className="flex items-center space-x-3">
               <div className="w-10 h-10 bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 rounded-lg flex items-center justify-center">
                 <Bell className="w-5 h-5 text-orange-600 dark:text-orange-400" />
@@ -511,8 +511,8 @@ const Settings: React.FC = () => {
 
         {/* Billing */}
         {isOwner && (
-          <div className="card p-8">
-            <div className="flex items-center justify-between mb-6">
+          <div className="card p-5 sm:p-8">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-900/20 dark:to-indigo-800/20 rounded-lg flex items-center justify-center">
                   <CreditCard className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
@@ -547,7 +547,7 @@ const Settings: React.FC = () => {
               <div className="space-y-6">
                 <div>
                   <label className="block text-sm font-medium text-muted-foreground mb-2">Current Plan</label>
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                     <div>
                       <p className="text-foreground font-medium">{getCurrentPlan().name}</p>
                       <p className="text-xs text-muted-foreground mt-1">{getCurrentPlan().description}</p>
@@ -697,4 +697,3 @@ const Settings: React.FC = () => {
 };
 
 export default Settings;
-

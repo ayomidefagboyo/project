@@ -558,7 +558,7 @@ const Invoices: React.FC = () => {
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-        <div className="max-w-7xl mx-auto px-6 py-12">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
           <div className="flex items-center justify-center h-64">
             <div className="text-center">
               <div className="relative">
@@ -575,14 +575,14 @@ const Invoices: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-      <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-2">
-            <div className="flex items-center space-x-3">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <div className="w-10 h-10 bg-gradient-to-tr from-gray-900 to-gray-700 dark:from-white dark:to-gray-200 rounded-xl flex items-center justify-center shadow-sm">
                 <Store className="w-5 h-5 text-white dark:text-gray-900" />
               </div>
-              <h1 className="text-3xl font-light text-gray-900 dark:text-white tracking-tight">
+              <h1 className="text-2xl sm:text-3xl font-light text-gray-900 dark:text-white tracking-tight">
                 Outlet Invoice Insights
               </h1>
               <span
@@ -601,9 +601,9 @@ const Invoices: React.FC = () => {
             </p>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap w-full lg:w-auto">
             <select
-              className="appearance-none px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white"
+              className="appearance-none px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white w-full sm:w-auto"
               value={selectedOutletId}
               onChange={(event) => setSelectedOutletId(event.target.value)}
             >
@@ -618,6 +618,7 @@ const Invoices: React.FC = () => {
             <Button
               variant="outline"
               size="sm"
+              className="w-full sm:w-auto"
               onClick={() => {
                 void loadVendorInvoices();
               }}
@@ -626,7 +627,12 @@ const Invoices: React.FC = () => {
               Refresh
             </Button>
 
-            <Button variant="outline" size="sm" onClick={() => handleExportInsightsCsv(selectedOutletId === 'all' ? 'all' : selectedOutletId)}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full sm:w-auto"
+              onClick={() => handleExportInsightsCsv(selectedOutletId === 'all' ? 'all' : selectedOutletId)}
+            >
               <Download className="w-4 h-4 mr-1" />
               Export
             </Button>
@@ -662,7 +668,7 @@ const Invoices: React.FC = () => {
           </div>
         )}
 
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           <div className="card p-5">
             <p className="text-xs uppercase tracking-wider text-muted-foreground">Outlets in Scope</p>
             <p className="text-2xl font-semibold mt-1 text-gray-900 dark:text-white">{summary.outlets}</p>
@@ -695,7 +701,7 @@ const Invoices: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <div className="card p-6">
+          <div className="card p-4 sm:p-6">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Business Type Insights</h3>
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
               Unpaid and overdue exposure by outlet type (supermarket, restaurant, etc).
@@ -707,7 +713,7 @@ const Invoices: React.FC = () => {
                 businessTypeInsights.map((entry) => (
                   <div
                     key={entry.businessType}
-                    className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-between"
+                    className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
                   >
                     <div>
                       <p className="text-sm font-medium text-gray-900 dark:text-white">
@@ -731,7 +737,7 @@ const Invoices: React.FC = () => {
             </div>
           </div>
 
-          <div className="card p-6">
+          <div className="card p-4 sm:p-6">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Outlet Priority List</h3>
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
               Ranked by outstanding amount to guide follow-up.
@@ -745,14 +751,14 @@ const Invoices: React.FC = () => {
                     key={insight.outletId}
                     className="p-3 rounded-lg border border-gray-200 dark:border-gray-700"
                   >
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-medium text-gray-900 dark:text-white">{insight.outletName}</p>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
                           {formatBusinessTypeLabel(insight.businessType)} | {insight.unpaidCount} unpaid | {insight.overdueCount} overdue
                         </p>
                       </div>
-                      <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white text-right">
                         {formatMoney(insight.unpaidAmount, insight.outletId)}
                       </p>
                     </div>
@@ -763,7 +769,7 @@ const Invoices: React.FC = () => {
           </div>
         </div>
 
-        <div className="card p-6">
+        <div className="card p-4 sm:p-6">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Outlet-Level Invoice Insights</h3>
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
             This view is focused only on outlet insights and owner-level actions.
@@ -805,7 +811,7 @@ const Invoices: React.FC = () => {
                         {formatMoney(insight.unpaidAmount, insight.outletId)}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <div className="inline-flex items-center gap-2">
+                        <div className="inline-flex flex-wrap items-center justify-end gap-2">
                           <Button
                             variant="ghost"
                             size="sm"
@@ -856,7 +862,7 @@ const Invoices: React.FC = () => {
           </div>
         </div>
 
-        <div className="card p-6">
+        <div className="card p-4 sm:p-6">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Latest Invoices (Context)</h3>
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
             Recent items for the selected outlet scope to support follow-up decisions.

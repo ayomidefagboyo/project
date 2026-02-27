@@ -2,9 +2,9 @@ import React from 'react';
 
 const CreateReport: React.FC = () => {
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <h1 className="text-2xl font-bold mb-6">Create New Report</h1>
-      <div className="bg-white rounded-lg shadow p-6">
+      <div className="bg-white rounded-lg shadow p-4 sm:p-6">
         <p className="text-gray-600">Report creation form will be implemented here.</p>
       </div>
     </div>
@@ -12,5 +12,4 @@ const CreateReport: React.FC = () => {
 };
 
 export default CreateReport;
-
 

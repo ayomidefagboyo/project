@@ -43,7 +43,7 @@ const Layout: React.FC = () => {
   }, [isDarkMode]);
 
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-900">
       {/* Sidebar */}
       <Sidebar 
         isOpen={isSidebarOpen} 
@@ -61,7 +61,7 @@ const Layout: React.FC = () => {
       )}
 
       {/* Main content */}
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden min-w-0">
         <Header 
           isDarkMode={isDarkMode} 
           toggleDarkMode={toggleDarkMode} 
@@ -69,7 +69,7 @@ const Layout: React.FC = () => {
         />
         
         {/* Main content area */}
-        <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden bg-gray-50 dark:bg-gray-900">
           <div className="min-h-full">
             <Outlet />
           </div>
