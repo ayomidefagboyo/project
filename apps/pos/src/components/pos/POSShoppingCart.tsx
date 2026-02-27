@@ -106,7 +106,11 @@ const POSShoppingCart: React.FC<POSShoppingCartProps> = ({
   return (
     <div className="space-y-2">
       {cart.map((item) => {
-        const isReturnLine = Boolean(item.isReturnLine);
+        const isReturnLine = Boolean(
+          item.isReturnLine ||
+          Number(item.unitPrice || 0) < 0 ||
+          String(item.lineId || '').startsWith('return:')
+        );
         const maxReturnQuantity = Math.max(1, Math.round(Number(item.maxQuantity || item.quantity || 1)));
         const canIncreaseQuantity = !isReturnLine || item.quantity < maxReturnQuantity;
         const itemTotal = calculateItemTotal(item);

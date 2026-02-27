@@ -188,6 +188,12 @@ const buildCartLineId = (productId: string, saleUnit: SaleUnit): string => `${pr
 const roundMoney = (amount: number): number => Math.round((amount + Number.EPSILON) * 100) / 100;
 const lineUnitNet = (unitPrice: number, discountPerUnit: number): number =>
   Math.max(0, Number(unitPrice || 0) - Number(discountPerUnit || 0));
+const isReturnCartLine = (line: Pick<CartItem, 'isReturnLine' | 'unitPrice' | 'lineId'>): boolean =>
+  Boolean(
+    line.isReturnLine ||
+    Number(line.unitPrice || 0) < 0 ||
+    String(line.lineId || '').startsWith('return:')
+  );
 const DISCOUNT_APPROVER_ROLES = new Set([
   'manager',
   'pharmacist',
@@ -1333,7 +1339,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
         item.lineId === lineId
           ? {
               ...item,
-              quantity: item.isReturnLine
+              quantity: isReturnCartLine(item)
                 ? Math.min(
                     Math.max(1, Math.round(quantity)),
                     Math.max(1, Math.round(Number(item.maxQuantity || item.quantity || 1)))
@@ -1351,7 +1357,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
   const updateCartItemDiscount = (lineId: string, discount: number) => {
     setCart(prevCart =>
       prevCart.map(item =>
-        item.lineId === lineId && !item.isReturnLine
+        item.lineId === lineId && !isReturnCartLine(item)
           ? { ...item, discount }
           : item
       )
@@ -1365,7 +1371,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     setCart((prevCart) => {
       const sourceLine = prevCart.find((item) => item.lineId === lineId);
       if (!sourceLine) return prevCart;
-      if (sourceLine.isReturnLine) return prevCart;
+      if (isReturnCartLine(sourceLine)) return prevCart;
 
       const normalizedNext = normalizeSaleUnit(nextSaleUnit);
       const resolvedNext: SaleUnit =
@@ -1878,13 +1884,17 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
       const quantity = Math.max(0, Math.round(Number(line.quantity || 0)));
       if (quantity <= 0) return;
 
-      if (line.isReturnLine) {
+      if (isReturnCartLine(line)) {
         returnedItems.push({
           product_id: line.product.id,
           sale_unit: line.saleUnit,
           quantity,
         });
-        returnTotal += Math.max(0, Math.abs(Number(line.unitPrice || 0)) - Number(line.discount || 0)) * quantity;
+        const refundUnitPrice = Math.max(
+          0,
+          Math.abs(Number(line.unitPrice || 0)) - Math.max(0, Number(line.discount || 0))
+        );
+        returnTotal += refundUnitPrice * quantity;
         return;
       }
 
@@ -2493,6 +2503,14 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     (activePayments.card || 0) +
     (activePayments.transfer || 0);
   const exchangePaymentReady = exchangeCustomerPaid + 0.01 >= exchangeBreakdown.netDue;
+  const exchangeMethodLockActive =
+    exchangeModeActive && exchangeBreakdown.netDue <= 0 && !hasActivePayments;
+  const exchangeCashLockedSelected =
+    exchangeMethodLockActive && exchangeOriginalPayment === PaymentMethod.CASH;
+  const exchangeCardLockedSelected =
+    exchangeMethodLockActive && exchangeOriginalPayment === PaymentMethod.POS;
+  const exchangeTransferLockedSelected =
+    exchangeMethodLockActive && exchangeOriginalPayment === PaymentMethod.TRANSFER;
   const exchangeCashPreferred = exchangeModeActive && exchangeOriginalPayment === PaymentMethod.CASH && !activePayments.cash;
   const exchangeCardPreferred = exchangeModeActive && exchangeOriginalPayment === PaymentMethod.POS && !activePayments.card;
   const exchangeTransferPreferred = exchangeModeActive && exchangeOriginalPayment === PaymentMethod.TRANSFER && !activePayments.transfer;
@@ -2591,9 +2609,9 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                 <div className="flex items-center gap-2 flex-wrap justify-start">
                   <button
                     onClick={() => openTenderModal('cash')}
-                    disabled={cart.length === 0 || (isFullyPaid && !activePayments.cash)}
+                    disabled={cart.length === 0 || exchangeMethodLockActive || (isFullyPaid && !activePayments.cash)}
                     className={`min-h-[56px] sm:min-h-[60px] xl:min-h-[64px] min-w-[112px] sm:min-w-[124px] xl:min-w-[138px] px-4 sm:px-5 xl:px-6 py-3 text-base sm:text-lg font-extrabold tracking-wide rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                      activePayments.cash
+                      activePayments.cash || exchangeCashLockedSelected
                         ? 'btn-brand border-transparent'
                         : exchangeCashPreferred
                           ? 'border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200'
@@ -2601,17 +2619,18 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                     }`}
                   >
                     <span className="inline-flex items-center gap-2">
-                      {activePayments.cash ? <Check className="w-5 h-5" /> : null}
+                      {activePayments.cash || exchangeCashLockedSelected ? <Check className="w-5 h-5" /> : null}
                       CASH
+                      {exchangeCashLockedSelected ? <span className="text-xs font-bold">(Original)</span> : null}
                       {!activePayments.cash && exchangeCashPreferred ? <span className="text-xs font-bold">(Default)</span> : null}
                       {activePayments.cash ? <span className="text-sm font-bold">{formatCurrency(activePayments.cash)}</span> : null}
                     </span>
                   </button>
                   <button
                     onClick={() => openTenderModal('card')}
-                    disabled={cart.length === 0 || (isFullyPaid && !activePayments.card)}
+                    disabled={cart.length === 0 || exchangeMethodLockActive || (isFullyPaid && !activePayments.card)}
                     className={`min-h-[56px] sm:min-h-[60px] xl:min-h-[64px] min-w-[112px] sm:min-w-[124px] xl:min-w-[138px] px-4 sm:px-5 xl:px-6 py-3 text-base sm:text-lg font-extrabold tracking-wide rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                      activePayments.card
+                      activePayments.card || exchangeCardLockedSelected
                         ? 'btn-brand border-transparent'
                         : exchangeCardPreferred
                           ? 'border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200'
@@ -2619,17 +2638,18 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                     }`}
                   >
                     <span className="inline-flex items-center gap-2">
-                      {activePayments.card ? <Check className="w-5 h-5" /> : null}
+                      {activePayments.card || exchangeCardLockedSelected ? <Check className="w-5 h-5" /> : null}
                       CARD
+                      {exchangeCardLockedSelected ? <span className="text-xs font-bold">(Original)</span> : null}
                       {!activePayments.card && exchangeCardPreferred ? <span className="text-xs font-bold">(Default)</span> : null}
                       {activePayments.card ? <span className="text-sm font-bold">{formatCurrency(activePayments.card)}</span> : null}
                     </span>
                   </button>
                   <button
                     onClick={() => openTenderModal('transfer')}
-                    disabled={cart.length === 0 || (isFullyPaid && !activePayments.transfer)}
+                    disabled={cart.length === 0 || exchangeMethodLockActive || (isFullyPaid && !activePayments.transfer)}
                     className={`min-h-[56px] sm:min-h-[60px] xl:min-h-[64px] min-w-[112px] sm:min-w-[124px] xl:min-w-[138px] px-4 sm:px-5 xl:px-6 py-3 text-base sm:text-lg font-extrabold tracking-wide rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                      activePayments.transfer
+                      activePayments.transfer || exchangeTransferLockedSelected
                         ? 'btn-brand border-transparent'
                         : exchangeTransferPreferred
                           ? 'border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200'
@@ -2637,8 +2657,9 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                     }`}
                   >
                     <span className="inline-flex items-center gap-2">
-                      {activePayments.transfer ? <Check className="w-5 h-5" /> : null}
+                      {activePayments.transfer || exchangeTransferLockedSelected ? <Check className="w-5 h-5" /> : null}
                       TRANSFER
+                      {exchangeTransferLockedSelected ? <span className="text-xs font-bold">(Original)</span> : null}
                       {!activePayments.transfer && exchangeTransferPreferred ? <span className="text-xs font-bold">(Default)</span> : null}
                       {activePayments.transfer ? <span className="text-sm font-bold">{formatCurrency(activePayments.transfer)}</span> : null}
                     </span>
