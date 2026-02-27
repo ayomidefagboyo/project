@@ -15,9 +15,20 @@ from app.schemas.anomaly import (
 import logging
 import math
 import json
+import re
 from uuid import uuid4
 
 logger = logging.getLogger(__name__)
+
+_ANOMALY_SAFE_OPTIONAL_COLUMNS = {
+    "ai_reasoning",
+    "updated_at",
+    "created_at",
+    "resolved_by",
+    "resolved_at",
+    "resolution_notes",
+    "ai_confidence",
+}
 
 
 class AnomalyService:
@@ -31,6 +42,82 @@ class AnomalyService:
         if self._supabase is None:
             self._supabase = get_supabase_admin()
         return self._supabase
+
+    @staticmethod
+    def _extract_missing_column_name(error: Exception) -> Optional[str]:
+        """Extract missing column name from Postgres/PostgREST error messages."""
+        message = str(error or "")
+        patterns = [
+            r"column\s+[\w\.]*\.([a-zA-Z_][\w]*)\s+does not exist",
+            r"column\s+([a-zA-Z_][\w]*)\s+does not exist",
+            r"Could not find the '([^']+)' column",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, message, flags=re.IGNORECASE)
+            if match:
+                return match.group(1).strip().lower()
+        return None
+
+    def _normalize_anomaly_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normalize DB rows for schema drift compatibility.
+        Keeps API responses stable when optional/new columns are missing.
+        """
+        normalized = dict(row or {})
+        now_iso = datetime.now().isoformat()
+
+        created_at = normalized.get("created_at") or normalized.get("detected_at") or now_iso
+        detected_at = normalized.get("detected_at") or created_at
+        updated_at = normalized.get("updated_at") or created_at
+
+        normalized["detected_at"] = detected_at
+        normalized["created_at"] = created_at
+        normalized["updated_at"] = updated_at
+        normalized["ai_reasoning"] = normalized.get("ai_reasoning")
+        normalized["resolved_by"] = normalized.get("resolved_by")
+        normalized["resolved_at"] = normalized.get("resolved_at")
+        normalized["resolution_notes"] = normalized.get("resolution_notes")
+
+        resolved_value = normalized.get("resolved")
+        if isinstance(resolved_value, str):
+            normalized["resolved"] = resolved_value.strip().lower() in {"1", "true", "t", "yes", "y"}
+        elif resolved_value is None:
+            normalized["resolved"] = False
+        else:
+            normalized["resolved"] = bool(resolved_value)
+
+        return normalized
+
+    def _insert_anomaly_row_compat(self, row: Dict[str, Any]) -> None:
+        """Insert anomaly row with safe retries when optional columns are absent."""
+        payload = dict(row or {})
+        removed_columns: List[str] = []
+
+        for _ in range(12):
+            try:
+                self.supabase.table(Tables.ANOMALIES).insert(payload).execute()
+                return
+            except Exception as exc:
+                missing_column = self._extract_missing_column_name(exc)
+                if (
+                    missing_column
+                    and missing_column in _ANOMALY_SAFE_OPTIONAL_COLUMNS
+                    and missing_column in payload
+                ):
+                    payload.pop(missing_column, None)
+                    removed_columns.append(missing_column)
+                    logger.warning(
+                        "anomalies.%s missing in schema cache/schema; retrying insert without it",
+                        missing_column,
+                    )
+                    continue
+
+                raise
+
+        raise Exception(
+            "Failed to insert anomaly after compatibility retries; "
+            f"removed columns={removed_columns}"
+        )
 
     async def create_anomaly(self, anomaly_data: AnomalyCreate, outlet_id: str) -> AnomalyResponse:
         """Create a new anomaly record"""
@@ -49,7 +136,7 @@ class AnomalyService:
                     detail="Failed to create anomaly"
                 )
 
-            anomaly = response.data[0]
+            anomaly = self._normalize_anomaly_row(response.data[0])
             return AnomalyResponse(**anomaly)
 
         except HTTPException:
@@ -88,7 +175,10 @@ class AnomalyService:
 
             response = query.execute()
 
-            anomalies = [AnomalyResponse(**anomaly) for anomaly in (response.data or [])]
+            anomalies = [
+                AnomalyResponse(**self._normalize_anomaly_row(anomaly))
+                for anomaly in (response.data or [])
+            ]
             total = response.count or 0
             pages = (total + size - 1) // size
 
@@ -118,7 +208,7 @@ class AnomalyService:
                     detail="Anomaly not found"
                 )
 
-            anomaly = response.data[0]
+            anomaly = self._normalize_anomaly_row(response.data[0])
             return AnomalyResponse(**anomaly)
 
         except HTTPException:
@@ -147,7 +237,7 @@ class AnomalyService:
                     detail="Failed to update anomaly"
                 )
 
-            anomaly = response.data[0]
+            anomaly = self._normalize_anomaly_row(response.data[0])
             return AnomalyResponse(**anomaly)
 
         except HTTPException:
@@ -315,7 +405,7 @@ class AnomalyService:
                     logger.warning("Anomaly dedupe check failed; continuing with insert: %s", dedupe_error)
 
             try:
-                self.supabase.table(Tables.ANOMALIES).insert(row).execute()
+                self._insert_anomaly_row_compat(row)
             except Exception as insert_error:
                 logger.warning(
                     "Failed to persist detected anomaly %s/%s (%s): %s",
@@ -349,6 +439,10 @@ class AnomalyService:
         row["description"] = str(row.get("description") or "")
         row["id"] = str(row.get("id") or f"anomaly_{uuid4()}")
         row["resolved"] = bool(row.get("resolved", False))
+        now_iso = datetime.now().isoformat()
+        row["created_at"] = row.get("created_at") or row.get("detected_at") or now_iso
+        row["detected_at"] = row.get("detected_at") or row["created_at"]
+        row["updated_at"] = row.get("updated_at") or row["created_at"]
 
         return row
 
@@ -477,7 +571,10 @@ class AnomalyService:
 
             response = query.execute()
 
-            anomalies = [AnomalyResponse(**anomaly) for anomaly in (response.data or [])]
+            anomalies = [
+                AnomalyResponse(**self._normalize_anomaly_row(anomaly))
+                for anomaly in (response.data or [])
+            ]
             total = response.count or 0
 
             return {

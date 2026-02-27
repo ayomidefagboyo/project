@@ -45,12 +45,13 @@ class CurrentUser:
             outlet_id = str(payload.get("outlet_id") or "").strip()
             role = str(payload.get("role") or "").strip().lower() or "cashier"
             permissions: list[str] = []
+            display_name = ""
 
             if staff_profile_id:
                 supabase = get_supabase_admin()
                 profile_result = (
                     supabase.table(Tables.STAFF_PROFILES)
-                    .select("id,parent_account_id,outlet_id,role,permissions,is_active")
+                    .select("id,parent_account_id,outlet_id,display_name,role,permissions,is_active")
                     .eq("id", staff_profile_id)
                     .limit(1)
                     .execute()
@@ -61,6 +62,7 @@ class CurrentUser:
                         return None
                     parent_account_id = str(profile.get("parent_account_id") or parent_account_id).strip()
                     outlet_id = str(profile.get("outlet_id") or outlet_id).strip()
+                    display_name = str(profile.get("display_name") or "").strip()
                     role = str(profile.get("role") or role).strip().lower() or role
                     permissions_raw = profile.get("permissions")
                     if isinstance(permissions_raw, list):
@@ -73,18 +75,108 @@ class CurrentUser:
             return {
                 "id": actor_id,
                 "email": "",
-                "name": "",
+                "name": display_name,
                 "role": role,
                 "outlet_id": outlet_id or None,
                 "permissions": permissions,
                 "is_owner": False,
                 "is_active": True,
                 "staff_profile_id": staff_profile_id or None,
+                "staff_profile_name": display_name or None,
                 "auth_source": "staff_session",
             }
         except Exception as exc:
             logger.warning(f"Failed POS staff-session auth fallback: {exc}")
             return None
+
+    def _resolve_staff_session_profile_context(self, request: Request) -> Optional[Dict[str, Any]]:
+        """
+        Resolve signed staff-session metadata (any endpoint) for actor attribution.
+        This does not replace bearer auth; it only enriches identity context.
+        """
+        try:
+            session_token = str(request.headers.get("X-POS-Staff-Session") or "").strip()
+            if not session_token:
+                return None
+
+            payload = StaffService.parse_session_token(session_token)
+            if not payload:
+                return None
+
+            staff_profile_id = str(payload.get("staff_profile_id") or "").strip()
+            if not staff_profile_id:
+                return None
+
+            parent_account_id = str(payload.get("parent_account_id") or "").strip()
+            outlet_id = str(payload.get("outlet_id") or "").strip()
+
+            supabase = get_supabase_admin()
+            profile_result = (
+                supabase.table(Tables.STAFF_PROFILES)
+                .select("id,parent_account_id,outlet_id,display_name,role,permissions,is_active")
+                .eq("id", staff_profile_id)
+                .limit(1)
+                .execute()
+            )
+            profile = profile_result.data[0] if profile_result.data else None
+            if not profile or profile.get("is_active") is False:
+                return None
+
+            resolved_parent = str(profile.get("parent_account_id") or parent_account_id).strip()
+            resolved_outlet = str(profile.get("outlet_id") or outlet_id).strip()
+            display_name = str(profile.get("display_name") or "").strip()
+            role = str(profile.get("role") or payload.get("role") or "").strip().lower() or "cashier"
+            permissions_raw = profile.get("permissions")
+            permissions: list[str] = []
+            if isinstance(permissions_raw, list):
+                permissions = [str(permission) for permission in permissions_raw if isinstance(permission, str)]
+
+            return {
+                "staff_profile_id": staff_profile_id,
+                "staff_profile_name": display_name or None,
+                "parent_account_id": resolved_parent or None,
+                "outlet_id": resolved_outlet or None,
+                "role": role,
+                "permissions": permissions,
+            }
+        except Exception as exc:
+            logger.warning(f"Failed to resolve staff-session profile context: {exc}")
+            return None
+
+    def _enrich_authenticated_user_with_staff_context(self, request: Request, user: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Enrich authenticated API user with staff actor metadata when a valid signed
+        staff-session header is present and matches the authenticated account scope.
+        """
+        if user.get("staff_profile_id"):
+            return user
+
+        profile_context = self._resolve_staff_session_profile_context(request)
+        if not profile_context:
+            return user
+
+        user_id = str(user.get("id") or "").strip()
+        user_outlet_id = str(user.get("outlet_id") or "").strip()
+        parent_account_id = str(profile_context.get("parent_account_id") or "").strip()
+        profile_outlet_id = str(profile_context.get("outlet_id") or "").strip()
+
+        # Prevent cross-account or cross-outlet staff identity spoofing.
+        if user_id and parent_account_id and user_id != parent_account_id:
+            return user
+        if user_outlet_id and profile_outlet_id and user_outlet_id != profile_outlet_id:
+            return user
+
+        enriched = dict(user)
+        enriched["staff_profile_id"] = profile_context.get("staff_profile_id")
+        enriched["staff_profile_name"] = profile_context.get("staff_profile_name")
+        enriched["staff_role"] = profile_context.get("role")
+        enriched["staff_permissions"] = profile_context.get("permissions") or []
+
+        display_name = str(profile_context.get("staff_profile_name") or "").strip()
+        if display_name:
+            enriched["name"] = display_name
+
+        return enriched
     
     async def __call__(
         self,
@@ -120,6 +212,10 @@ class CurrentUser:
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Could not validate credentials"
                 )
+
+            # If request carries a valid POS staff session for this authenticated account,
+            # attach staff actor identity so audit logs use staff profile name consistently.
+            user = self._enrich_authenticated_user_with_staff_context(request, user)
             
             # Check if user is active
             if not user.get("is_active", False):

@@ -4,7 +4,7 @@ Handles both vendor invoices (purchase orders / receiving goods) and customer in
 When a vendor invoice is marked as "received", items auto-add to inventory/products.
 """
 
-from fastapi import APIRouter, HTTPException, Depends, status, Query
+from fastapi import APIRouter, HTTPException, Depends, status, Query, Header
 from typing import List, Optional, Dict, Any
 from datetime import datetime, date
 import asyncio
@@ -17,6 +17,7 @@ from app.core.database import get_supabase_admin, Tables
 from app.core.security import CurrentUser, get_user_outlet_id
 from app.schemas.anomaly import AnomalyDetectionRequest
 from app.services.anomaly_service import anomaly_service
+from app.services.staff_service import StaffService
 from pydantic import BaseModel, Field
 
 router = APIRouter()
@@ -60,6 +61,73 @@ def _schedule_invoice_anomaly_detection(outlet_id: Optional[str], invoice_id: Op
         asyncio.create_task(_runner())
     except RuntimeError as task_error:
         logger.warning("Unable to schedule invoice anomaly detection from %s: %s", source_event, task_error)
+
+
+def _resolve_invoice_audit_actor(
+    supabase,
+    current_user: Dict[str, Any],
+    outlet_id: Optional[str],
+    staff_session_token: Optional[str]
+) -> Dict[str, Optional[str]]:
+    """Resolve audit actor identity, preferring active POS staff session profile."""
+    actor_user_id = str(current_user.get('id') or '').strip()
+    actor_name = str(
+        current_user.get('staff_profile_name')
+        or current_user.get('name')
+        or current_user.get('email')
+        or 'Unknown'
+    ).strip() or 'Unknown'
+    staff_profile_id = str(current_user.get('staff_profile_id') or '').strip()
+
+    if staff_profile_id and actor_name:
+        return {
+            'user_id': actor_user_id or None,
+            'user_name': actor_name or 'Unknown',
+            'staff_profile_id': staff_profile_id,
+        }
+
+    token = str(staff_session_token or '').strip()
+    if token:
+        payload = StaffService.parse_session_token(token)
+        if payload:
+            token_staff_profile_id = str(payload.get('staff_profile_id') or '').strip()
+            if token_staff_profile_id:
+                profile_result = (
+                    supabase.table(Tables.STAFF_PROFILES)
+                    .select('id,display_name,outlet_id,parent_account_id,is_active')
+                    .eq('id', token_staff_profile_id)
+                    .limit(1)
+                    .execute()
+                )
+                profile = profile_result.data[0] if profile_result.data else None
+                if profile and profile.get('is_active') is not False:
+                    profile_outlet_id = str(profile.get('outlet_id') or '').strip()
+                    if not outlet_id or not profile_outlet_id or profile_outlet_id == str(outlet_id):
+                        staff_profile_id = str(profile.get('id') or '').strip()
+                        actor_name = str(profile.get('display_name') or actor_name).strip() or actor_name
+                        parent_account_id = str(profile.get('parent_account_id') or '').strip()
+                        if parent_account_id:
+                            actor_user_id = parent_account_id
+
+    if not actor_name and staff_profile_id:
+        try:
+            profile_result = (
+                supabase.table(Tables.STAFF_PROFILES)
+                .select('display_name')
+                .eq('id', staff_profile_id)
+                .limit(1)
+                .execute()
+            )
+            if profile_result.data:
+                actor_name = str(profile_result.data[0].get('display_name') or '').strip() or actor_name
+        except Exception as lookup_error:
+            logger.warning("Failed to resolve staff display_name for invoice audit actor: %s", lookup_error)
+
+    return {
+        'user_id': actor_user_id or None,
+        'user_name': actor_name or 'Unknown',
+        'staff_profile_id': staff_profile_id or None,
+    }
 
 
 def _extract_missing_column_name(exc: Exception) -> Optional[str]:
@@ -368,11 +436,18 @@ async def get_invoices(
 @router.post("/")
 async def create_invoice(
     invoice: InvoiceCreate,
-    current_user: Dict[str, Any] = Depends(CurrentUser())
+    current_user: Dict[str, Any] = Depends(CurrentUser()),
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session")
 ):
     """Create a new invoice (vendor purchase order or customer invoice)"""
     try:
         supabase = get_supabase_admin()
+        actor = _resolve_invoice_audit_actor(
+            supabase=supabase,
+            current_user=current_user,
+            outlet_id=invoice.outlet_id,
+            staff_session_token=x_pos_staff_session
+        )
 
         # Generate invoice number if not provided
         invoice_number = invoice.invoice_number
@@ -456,7 +531,7 @@ async def create_invoice(
                 logger.warning(f"Could not update vendor balance: {ve}")
 
         # Log audit entry
-        _log_audit(supabase, invoice.outlet_id, current_user, 'create', 'invoice', invoice_id,
+        _log_audit(supabase, invoice.outlet_id, actor, 'create', 'invoice', invoice_id,
                    f"Created {'vendor' if invoice.vendor_id else 'customer'} invoice {invoice_number} for {total:.2f}")
         _schedule_invoice_anomaly_detection(invoice.outlet_id, invoice_id, "create_invoice")
 
@@ -516,7 +591,8 @@ async def get_invoice(
 async def update_invoice(
     invoice_id: str,
     update: InvoiceUpdate,
-    current_user: Dict[str, Any] = Depends(CurrentUser())
+    current_user: Dict[str, Any] = Depends(CurrentUser()),
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session")
 ):
     """Update invoice status, notes, etc."""
     try:
@@ -556,9 +632,15 @@ async def update_invoice(
             )
 
         invoice = result.data[0]
+        actor = _resolve_invoice_audit_actor(
+            supabase=supabase,
+            current_user=current_user,
+            outlet_id=invoice.get('outlet_id'),
+            staff_session_token=x_pos_staff_session
+        )
 
         # Log audit
-        _log_audit(supabase, invoice['outlet_id'], current_user, 'update', 'invoice', invoice_id,
+        _log_audit(supabase, invoice['outlet_id'], actor, 'update', 'invoice', invoice_id,
                    f"Updated invoice {invoice['invoice_number']}: {update_data}")
         _schedule_invoice_anomaly_detection(invoice.get('outlet_id'), invoice_id, "update_invoice")
 
@@ -577,7 +659,8 @@ async def update_invoice(
 @router.delete("/{invoice_id}")
 async def delete_invoice(
     invoice_id: str,
-    current_user: Dict[str, Any] = Depends(CurrentUser())
+    current_user: Dict[str, Any] = Depends(CurrentUser()),
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session")
 ):
     """Delete an invoice (only drafts can be deleted)"""
     try:
@@ -603,7 +686,13 @@ async def delete_invoice(
         supabase.table(Tables.INVOICE_ITEMS).delete().eq('invoice_id', invoice_id).execute()
         supabase.table(Tables.INVOICES).delete().eq('id', invoice_id).execute()
 
-        _log_audit(supabase, check.data['outlet_id'], current_user, 'delete', 'invoice', invoice_id,
+        actor = _resolve_invoice_audit_actor(
+            supabase=supabase,
+            current_user=current_user,
+            outlet_id=check.data.get('outlet_id'),
+            staff_session_token=x_pos_staff_session
+        )
+        _log_audit(supabase, check.data['outlet_id'], actor, 'delete', 'invoice', invoice_id,
                    f"Deleted draft invoice {check.data['invoice_number']}")
 
         return {"message": "Invoice deleted successfully"}
@@ -626,7 +715,8 @@ async def delete_invoice(
 async def receive_invoice_goods(
     invoice_id: str,
     receive_req: ReceiveInvoiceRequest,
-    current_user: Dict[str, Any] = Depends(CurrentUser())
+    current_user: Dict[str, Any] = Depends(CurrentUser()),
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session")
 ):
     """
     Mark a vendor invoice as received and auto-add items to inventory.
@@ -648,6 +738,12 @@ async def receive_invoice_goods(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
 
         invoice = inv_result.data
+        actor = _resolve_invoice_audit_actor(
+            supabase=supabase,
+            current_user=current_user,
+            outlet_id=invoice.get('outlet_id'),
+            staff_session_token=x_pos_staff_session
+        )
 
         invoice_type = str(invoice.get('invoice_type') or '').strip().lower()
         customer_id = invoice.get('customer_id')
@@ -929,7 +1025,7 @@ async def receive_invoice_goods(
         received_notes = _append_received_marker(
             invoice.get('notes'),
             now,
-            str(current_user.get('name', 'Staff'))
+            str(actor.get('user_name') or current_user.get('name') or 'Staff')
         )
         received_notes = _upsert_note_marker(
             received_notes,
@@ -982,7 +1078,7 @@ async def receive_invoice_goods(
                 raise
 
         # Log audit
-        _log_audit(supabase, invoice['outlet_id'], current_user, 'receive', 'invoice', invoice_id,
+        _log_audit(supabase, invoice['outlet_id'], actor, 'receive', 'invoice', invoice_id,
                    f"Received invoice {invoice['invoice_number']}: "
                    f"{len(products_created)} new products, {len(products_updated)} updated; "
                    f"payment_status={payment_status}")
@@ -1017,7 +1113,8 @@ async def receive_invoice_goods(
 async def add_invoice_item(
     invoice_id: str,
     item: InvoiceItemCreate,
-    current_user: Dict[str, Any] = Depends(CurrentUser())
+    current_user: Dict[str, Any] = Depends(CurrentUser()),
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session")
 ):
     """Add an item to an existing invoice"""
     try:
@@ -1032,6 +1129,12 @@ async def add_invoice_item(
 
         if not inv_check.data:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+        actor = _resolve_invoice_audit_actor(
+            supabase=supabase,
+            current_user=current_user,
+            outlet_id=inv_check.data.get('outlet_id'),
+            staff_session_token=x_pos_staff_session
+        )
 
         if inv_check.data['status'] not in ('draft', 'pending'):
             raise HTTPException(
@@ -1061,7 +1164,7 @@ async def add_invoice_item(
         _log_audit(
             supabase,
             inv_check.data['outlet_id'],
-            current_user,
+            actor,
             'update',
             'invoice',
             invoice_id,
@@ -1095,7 +1198,8 @@ async def add_invoice_item(
 async def remove_invoice_item(
     invoice_id: str,
     item_id: str,
-    current_user: Dict[str, Any] = Depends(CurrentUser())
+    current_user: Dict[str, Any] = Depends(CurrentUser()),
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session")
 ):
     """Remove an item from an invoice"""
     try:
@@ -1108,6 +1212,12 @@ async def remove_invoice_item(
             .execute()
         if not inv_check.data:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+        actor = _resolve_invoice_audit_actor(
+            supabase=supabase,
+            current_user=current_user,
+            outlet_id=inv_check.data.get('outlet_id'),
+            staff_session_token=x_pos_staff_session
+        )
 
         item_check = supabase.table(Tables.INVOICE_ITEMS)\
             .select('id, description, quantity, unit_price')\
@@ -1130,7 +1240,7 @@ async def remove_invoice_item(
         _log_audit(
             supabase,
             inv_check.data['outlet_id'],
-            current_user,
+            actor,
             'update',
             'invoice',
             invoice_id,
@@ -1245,11 +1355,25 @@ def _recalculate_invoice_totals(supabase, invoice_id: str):
 def _log_audit(supabase, outlet_id: str, user: Dict, action: str, entity_type: str, entity_id: str, details: str):
     """Log an audit entry"""
     try:
+        user_id = str(user.get('user_id') or user.get('id') or '').strip()
+        user_name = (
+            str(user.get('user_name') or user.get('name') or user.get('email') or 'Unknown').strip()
+            or 'Unknown'
+        )
+        if not user_id:
+            logger.warning(
+                "Skipping invoice audit entry with missing user_id (action=%s, entity=%s, entity_id=%s)",
+                action,
+                entity_type,
+                entity_id
+            )
+            return
+
         supabase.table(Tables.AUDIT_ENTRIES).insert({
             'id': str(uuid.uuid4()),
             'outlet_id': outlet_id,
-            'user_id': user['id'],
-            'user_name': user.get('name', 'Unknown'),
+            'user_id': user_id,
+            'user_name': user_name,
             'action': action,
             'entity_type': entity_type,
             'entity_id': entity_id,
