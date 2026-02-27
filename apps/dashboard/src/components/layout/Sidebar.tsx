@@ -99,6 +99,13 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
     { name: 'Audit Trail', href: '/dashboard/audit-trail', icon: Shield },
   ];
 
+  const closeSidebarOnMobile = () => {
+    if (typeof window === 'undefined') return;
+    if (window.innerWidth < 1024 && isOpen) {
+      onToggle();
+    }
+  };
+
 
 
   const isActive = (href: string) => {
@@ -114,6 +121,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
     return (
       <Link
         to={item.href}
+        onClick={closeSidebarOnMobile}
         className={`
           group relative flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-200 ease-in-out
           ${active
@@ -147,6 +155,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
   const QuickActionItem = ({ item, isCollapsed = false }: { item: any; isCollapsed?: boolean }) => (
     <Link
       to={item.href}
+      onClick={closeSidebarOnMobile}
       className={`
         group flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-800/50
         ${isCollapsed ? 'justify-center px-3' : ''}
@@ -238,6 +247,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
         <div className={`p-6 border-t border-gray-100 dark:border-gray-800 ${isCollapsed ? 'px-4' : ''}`}>
           <Link
             to="/dashboard/settings"
+            onClick={closeSidebarOnMobile}
             className={`
               group flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-800/50
               ${isActive('/dashboard/settings')
