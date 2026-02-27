@@ -126,11 +126,6 @@ const POSShoppingCart: React.FC<POSShoppingCartProps> = ({
                 {formatCurrency(item.unitPrice)} per {String(item.saleUnit === 'pack' ? (item.product.pack_name || 'Pack') : (item.product.base_unit_name || 'Unit')).toLowerCase()}
                 {item.product.sku ? ` · ${item.product.sku}` : ''}
               </p>
-              {isReturnLine && (
-                <div className="mt-1 inline-flex items-center gap-1 rounded-md bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
-                  RETURN LINE
-                </div>
-              )}
               {!isReturnLine &&
                 Boolean(item.product.pack_enabled && Number(item.product.pack_price || 0) > 0 && Number(item.product.units_per_pack || 0) >= 2) && (
                   <div className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-stone-300 bg-white p-1">

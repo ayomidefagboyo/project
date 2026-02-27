@@ -510,7 +510,11 @@ const TransactionsPage: React.FC = () => {
     return trimmed;
   };
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (tx: Pick<ExtendedTransaction, 'status' | 'receipt_type' | 'has_returns'>) => {
+    if ((tx.receipt_type || '').toLowerCase() !== 'return' && tx.has_returns) {
+      return <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-cyan-100 text-cyan-800">Returned</span>;
+    }
+    const status = tx.status;
     if (status === 'pending') return <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-amber-100 text-amber-800">Pending Sync</span>;
     if (status === 'voided') return <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-red-100 text-red-800">Voided</span>;
     if (status === 'refunded') return <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">Refunded</span>;
@@ -612,11 +616,16 @@ const TransactionsPage: React.FC = () => {
 
   const handleRefund = async () => {
     if (!selectedTransaction) return;
+    const remainingRefundableAmount = Number(selectedTransaction.remaining_refundable_amount ?? selectedTransaction.total_amount ?? 0);
     if (selectedTransaction.status !== 'completed') {
       showError('Only completed transactions can be refunded.');
       return;
     }
-    if ((selectedTransaction.receipt_type || '').toLowerCase() === 'return' || Number(selectedTransaction.total_amount) <= 0) {
+    if (
+      (selectedTransaction.receipt_type || '').toLowerCase() === 'return' ||
+      Number(selectedTransaction.total_amount) <= 0 ||
+      remainingRefundableAmount <= 0
+    ) {
       showError('This transaction cannot be refunded again.');
       return;
     }
@@ -682,7 +691,6 @@ const TransactionsPage: React.FC = () => {
         created_at: new Date().toISOString(),
         lines: intentLines,
       });
-      success('Loaded on Register for partial/full return.');
       setSelectedTransaction(null);
       navigate('/');
     } catch (err: any) {
@@ -796,7 +804,7 @@ const TransactionsPage: React.FC = () => {
                   <div className="flex items-center gap-3 min-w-0">
                     <span className="text-sm font-mono font-semibold text-gray-800">{tx.transaction_number}</span>
                     {renderPaymentDisplay(tx)}
-                    {getStatusBadge(tx.status)}
+                    {getStatusBadge(tx)}
                   </div>
                   <div className="flex items-center gap-4 flex-shrink-0">
                     <span className="text-sm text-gray-500">{formatTime(tx.transaction_date)}</span>
@@ -871,7 +879,7 @@ const TransactionsPage: React.FC = () => {
                 <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Receipt Number</p>
                 <div className="flex items-center gap-2">
                   <span className="text-lg font-mono font-bold text-gray-900">{selectedTransaction.transaction_number}</span>
-                  {getStatusBadge(selectedTransaction.status)}
+                  {getStatusBadge(selectedTransaction)}
                 </div>
               </div>
 
@@ -1051,7 +1059,8 @@ const TransactionsPage: React.FC = () => {
                         isRefunding ||
                         selectedTransaction.status !== 'completed' ||
                         (selectedTransaction.receipt_type || '').toLowerCase() === 'return' ||
-                        Number(selectedTransaction.total_amount) <= 0
+                        Number(selectedTransaction.total_amount) <= 0 ||
+                        Number(selectedTransaction.remaining_refundable_amount ?? selectedTransaction.total_amount ?? 0) <= 0
                       }
                       className="py-2.5 border border-amber-200 text-amber-700 font-semibold rounded-xl hover:bg-amber-50 transition-colors text-sm disabled:opacity-60"
                     >

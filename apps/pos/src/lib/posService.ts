@@ -88,6 +88,10 @@ export interface POSTransaction {
   items: POSTransactionItemResponse[];
   split_payments?: SplitPaymentLine[];
   notes?: string;
+  has_returns?: boolean;
+  return_count?: number;
+  returned_amount?: number;
+  remaining_refundable_amount?: number;
   receipt_printed: boolean;
   created_at: string;
 }

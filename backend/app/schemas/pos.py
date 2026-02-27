@@ -504,6 +504,10 @@ class POSTransactionResponse(BaseModel):
     void_reason: Optional[str] = Field(None, description="Reason for voiding")
     voided_at: Optional[datetime] = Field(None, description="When transaction was voided")
     notes: Optional[str] = Field(None, description="Transaction notes")
+    has_returns: bool = Field(False, description="Whether this sale has one or more return transactions")
+    return_count: int = Field(0, description="Number of returns linked to this transaction")
+    returned_amount: Decimal = Field(0, description="Total amount already returned")
+    remaining_refundable_amount: Decimal = Field(0, description="Amount still available to return")
     receipt_printed: bool = Field(False, description="Whether receipt was printed")
     created_at: datetime = Field(..., description="Creation timestamp")
 

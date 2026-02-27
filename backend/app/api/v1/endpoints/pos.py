@@ -568,6 +568,74 @@ def _decorate_transaction_record(record: Dict[str, Any]) -> Dict[str, Any]:
     return row
 
 
+def _extract_return_origin_transaction_id(payment_reference: Any) -> Optional[str]:
+    raw_reference = str(payment_reference or "").strip()
+    if not raw_reference:
+        return None
+    prefix = "return_of:"
+    if raw_reference.lower().startswith(prefix):
+        transaction_id = raw_reference[len(prefix):].strip()
+        return transaction_id or None
+    return None
+
+
+def _attach_return_summary_to_transactions(
+    supabase,
+    rows: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    if not rows:
+        return rows
+
+    sale_rows: List[Dict[str, Any]] = [
+        row for row in rows
+        if str(row.get("receipt_type") or "sale").strip().lower() != "return"
+    ]
+    sale_ids = [str(row.get("id") or "").strip() for row in sale_rows if str(row.get("id") or "").strip()]
+
+    return_summary_by_transaction_id: Dict[str, Dict[str, Any]] = {}
+    if sale_ids:
+        references = [f"return_of:{transaction_id}" for transaction_id in sale_ids]
+        returns_result = supabase.table("pos_transactions")\
+            .select("id,payment_reference,total_amount,receipt_type")\
+            .in_("payment_reference", references)\
+            .eq("receipt_type", "return")\
+            .execute()
+
+        for return_row in (returns_result.data or []):
+            origin_transaction_id = _extract_return_origin_transaction_id(return_row.get("payment_reference"))
+            if not origin_transaction_id:
+                continue
+
+            summary = return_summary_by_transaction_id.setdefault(
+                origin_transaction_id,
+                {"count": 0, "returned_amount": Decimal("0")}
+            )
+            summary["count"] += 1
+            summary["returned_amount"] += abs(Decimal(str(return_row.get("total_amount") or 0)))
+
+    for row in rows:
+        transaction_id = str(row.get("id") or "").strip()
+        receipt_type = str(row.get("receipt_type") or "sale").strip().lower()
+        is_sale_row = receipt_type != "return" and bool(transaction_id)
+        summary = return_summary_by_transaction_id.get(transaction_id) if is_sale_row else None
+
+        has_returns = bool(summary and summary.get("count", 0) > 0)
+        returned_amount = Decimal(str((summary or {}).get("returned_amount") or 0))
+
+        if is_sale_row:
+            base_total = abs(Decimal(str(row.get("total_amount") or 0)))
+            remaining_refundable = max(Decimal("0"), base_total - returned_amount)
+        else:
+            remaining_refundable = Decimal("0")
+
+        row["has_returns"] = has_returns
+        row["return_count"] = int((summary or {}).get("count") or 0)
+        row["returned_amount"] = returned_amount
+        row["remaining_refundable_amount"] = remaining_refundable
+
+    return rows
+
+
 def _allocate_transaction_amount_by_method(record: Dict[str, Any]) -> Dict[str, Decimal]:
     """Allocate a transaction amount across payment methods (split-aware)."""
     total_amount = Decimal(str(record.get("total_amount") or 0))
@@ -2382,6 +2450,7 @@ async def get_transactions(
 
             total = len(filtered)
             items = filtered[offset: offset + size]
+            items = _attach_return_summary_to_transactions(supabase, items)
             return TransactionListResponse(
                 items=items,
                 total=total,
@@ -2398,6 +2467,7 @@ async def get_transactions(
         result = query.execute()
         total = int(getattr(result, 'count', 0) or len(result.data or []))
         items = [_decorate_transaction_record(row) for row in (result.data or [])]
+        items = _attach_return_summary_to_transactions(supabase, items)
 
         return TransactionListResponse(
             items=items,
@@ -2432,7 +2502,9 @@ async def get_transaction(
                 detail="Transaction not found"
             )
 
-        return POSTransactionResponse(**_decorate_transaction_record(result.data[0]))
+        decorated = _decorate_transaction_record(result.data[0])
+        decorated_rows = _attach_return_summary_to_transactions(supabase, [decorated])
+        return POSTransactionResponse(**decorated_rows[0])
 
     except HTTPException:
         raise

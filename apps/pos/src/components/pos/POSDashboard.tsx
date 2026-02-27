@@ -504,8 +504,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     setTenderModal(null);
     setSelectedCustomer(null);
     setDiscountOverrideGrant(null);
-    success('Return loaded on register.');
-  }, [currentOutlet?.id, products, normalizeCartLine, success, warning]);
+  }, [currentOutlet?.id, products, normalizeCartLine, warning]);
 
   const paymentMethodLabel = (method: PaymentMethod): string => {
     if (method === PaymentMethod.CASH) return 'Cash';
@@ -714,6 +713,30 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
       warning('Receipt print failed. Verify printer connection/mapping in Hardware Setup.', 5000);
     }
     return opened;
+  };
+
+  const printServerTransactionReceipt = async (
+    transactionId: string,
+    title: string,
+    copies = 1
+  ): Promise<boolean> => {
+    try {
+      const printResult = await posService.printReceipt(transactionId, copies);
+      const receiptContent = printResult?.receipt_content;
+      if (!receiptContent) {
+        warning('Receipt content was empty for print request.', 5000);
+        return false;
+      }
+      const printed = await openReceiptPrintWindow(receiptContent, { title, copies });
+      if (!printed) {
+        warning('Receipt print failed. Verify printer connection/mapping in Hardware Setup.', 5000);
+      }
+      return printed;
+    } catch (printError) {
+      logger.error('Server receipt print failed:', printError);
+      warning('Receipt print failed. Verify printer connection/mapping in Hardware Setup.', 5000);
+      return false;
+    }
   };
 
   const getHardwareRuntimeForTerminal = (outletId?: string, activeTerminalId?: string) => {
@@ -2023,9 +2046,11 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
 
 
   /**
-   * Process return lines for exchange mode, then keep replacement lines in cart.
+   * Process return/exchange in one action.
+   * - Saves return transaction immediately.
+   * - If replacement lines exist, saves replacement sale in the same action.
    */
-  const processExchangeReturn = async (): Promise<void> => {
+  const processExchangeReturn = async (mode: 'save' | 'save_and_print' = 'save'): Promise<void> => {
     if (!currentOutlet?.id || !currentStaff?.id || !exchangeContext) return;
 
     if (!isOnline) {
@@ -2038,10 +2063,25 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
       return;
     }
 
+    const hasDiscountedSaleLines = exchangeBreakdown.saleLines.some((line) => line.discount > 0);
+    if (hasDiscountedSaleLines && !canApplyDiscount) {
+      error('Discount approval is required from manager/pharmacist before completing sale.', 5000);
+      requestDiscountApproval();
+      return;
+    }
+
+    const discountAuthorizerSessionToken =
+      hasDiscountedSaleLines && !hasRoleDiscountPrivilege
+        ? discountOverrideGrant?.sessionToken
+        : undefined;
+
     const customerPaid =
       (activePayments.cash || 0) +
       (activePayments.card || 0) +
       (activePayments.transfer || 0);
+    const exchangeCreditApplied = roundMoney(
+      Math.min(exchangeBreakdown.returnTotal, exchangeBreakdown.saleTotal)
+    );
     const requiredCustomerPayment = exchangeBreakdown.netDue;
     if (exchangeBreakdown.saleLines.length > 0) {
       if (requiredCustomerPayment > 0 && customerPaid + 0.01 < requiredCustomerPayment) {
@@ -2053,11 +2093,25 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
       }
     }
 
+    const totalPaidWithCredit = customerPaid + exchangeCreditApplied;
+    const cashbackAmount = Math.max(0, totalPaidWithCredit - exchangeBreakdown.saleTotal);
+    const customerSplitCount =
+      ((activePayments.cash || 0) > 0 ? 1 : 0) +
+      ((activePayments.card || 0) > 0 ? 1 : 0) +
+      ((activePayments.transfer || 0) > 0 ? 1 : 0);
+    if (cashbackAmount > 0 && customerSplitCount > 1) {
+      error(
+        `Cashback (${formatCurrency(cashbackAmount)}) is only supported with a single payment method. Use one method or keep split total at ${formatCurrency(exchangeBreakdown.saleTotal)}.`,
+        6000
+      );
+      return;
+    }
+
     finalizeSaleLockRef.current = true;
     setIsFinalizingSale(true);
 
     try {
-      await posService.refundTransaction(exchangeContext.originalTransactionId, {
+      const returnResult = await posService.refundTransaction(exchangeContext.originalTransactionId, {
         return_reason: exchangeContext.returnReason || 'Customer return',
         amount: exchangeBreakdown.returnTotal,
         items: exchangeBreakdown.returnedItems.map((line) => ({
@@ -2067,43 +2121,76 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
         })),
       });
 
-      const replacementCart = exchangeBreakdown.saleLines.map((line) => normalizeCartLine(line));
+      let replacementSaleId: string | null = null;
+      if (exchangeBreakdown.saleLines.length > 0) {
+        const replacementItems = exchangeBreakdown.saleLines.map((item) => ({
+          product_id: item.product.id,
+          quantity: item.quantity,
+          unit_price: item.unitPrice,
+          discount_amount: item.discount * item.quantity,
+          sale_unit: item.saleUnit,
+          units_per_sale_unit: item.unitsPerSaleUnit,
+        }));
 
-      setExchangeContext(null);
-      setDiscountOverrideGrant(null);
-      setTenderModal(null);
-      setRestoredHeldReceiptId(null);
+        const splitPayments: Array<{ method: PaymentMethod; amount: number }> = [];
+        if ((activePayments.cash || 0) > 0) {
+          splitPayments.push({ method: PaymentMethod.CASH, amount: activePayments.cash || 0 });
+        }
+        if ((activePayments.card || 0) > 0) {
+          splitPayments.push({ method: PaymentMethod.POS, amount: activePayments.card || 0 });
+        }
+        if ((activePayments.transfer || 0) > 0) {
+          splitPayments.push({ method: PaymentMethod.TRANSFER, amount: activePayments.transfer || 0 });
+        }
+        if (exchangeCreditApplied > 0) {
+          splitPayments.push({ method: PaymentMethod.CREDIT, amount: exchangeCreditApplied });
+        }
+
+        const primaryPaymentMethod =
+          splitPayments.find((payment) => payment.method !== PaymentMethod.CREDIT)?.method
+          || splitPayments[0]?.method
+          || PaymentMethod.CASH;
+
+        const replacementSale = await posService.createTransaction({
+          outlet_id: currentOutlet.id,
+          cashier_id: currentStaff.id,
+          customer_id: selectedCustomer?.id,
+          customer_name: selectedCustomer?.name,
+          items: replacementItems,
+          payment_method: primaryPaymentMethod,
+          tendered_amount: totalPaidWithCredit,
+          discount_amount: 0,
+          discount_authorizer_session_token: discountAuthorizerSessionToken,
+          split_payments: splitPayments.length > 1 ? splitPayments : undefined,
+          notes: `Exchange replacement for ${exchangeContext.originalTransactionNumber || exchangeContext.originalTransactionId}`,
+        });
+        replacementSaleId = replacementSale.id;
+      }
+
+      clearCart();
       setSelectedCustomer(null);
 
-      if (replacementCart.length > 0) {
-        const exchangeCreditApplied = roundMoney(
-          Math.min(exchangeBreakdown.returnTotal, exchangeBreakdown.saleTotal)
-        );
-        const nextPayments: {
-          cash?: number;
-          card?: number;
-          transfer?: number;
-          credit?: number;
-        } = {};
-        if ((activePayments.cash || 0) > 0) nextPayments.cash = activePayments.cash;
-        if ((activePayments.card || 0) > 0) nextPayments.card = activePayments.card;
-        if ((activePayments.transfer || 0) > 0) nextPayments.transfer = activePayments.transfer;
-        if (exchangeCreditApplied > 0) nextPayments.credit = exchangeCreditApplied;
+      if (mode === 'save_and_print') {
+        const returnTitle = returnResult?.return_transaction_number
+          ? `Return ${returnResult.return_transaction_number}`
+          : 'Return Receipt';
+        await printServerTransactionReceipt(returnResult.return_transaction_id, returnTitle, 1);
+        if (replacementSaleId) {
+          await printServerTransactionReceipt(replacementSaleId, 'Replacement Sale', 1);
+        }
+      }
 
-        setCart(replacementCart);
-        setActivePayments(nextPayments);
+      if (replacementSaleId) {
         success(
           exchangeBreakdown.refundDue > 0
-            ? `Return posted. Continue checkout for replacement items. Change due: ${formatCurrency(exchangeBreakdown.refundDue)}.`
-            : 'Return posted. Continue checkout for replacement items.'
+            ? `Return and replacement sale saved. Change due: ${formatCurrency(exchangeBreakdown.refundDue)}.`
+            : 'Return and replacement sale saved.'
         );
       } else {
-        clearCart();
-        setActivePayments({});
         success(
           exchangeBreakdown.refundDue > 0
             ? `Return posted. Refund customer ${formatCurrency(exchangeBreakdown.refundDue)}.`
-            : 'Return processed successfully.'
+            : 'Return saved successfully.'
         );
       }
 
@@ -2113,7 +2200,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
       ]);
     } catch (err: any) {
       logger.error('Exchange return processing failed:', err);
-      error(err?.message || 'Failed to process return. No local sale changes were saved.', 6000);
+      error(err?.message || 'Failed to save return/exchange. No local sale changes were saved.', 6000);
     } finally {
       setIsFinalizingSale(false);
       finalizeSaleLockRef.current = false;
@@ -2127,7 +2214,7 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     if (!currentUser?.id || !currentStaff?.id || !currentOutlet?.id || isFinalizingSale || finalizeSaleLockRef.current) return;
 
     if (exchangeContext) {
-      await processExchangeReturn();
+      await processExchangeReturn(mode);
       return;
     }
 
@@ -2767,23 +2854,23 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
                 className="min-h-[56px] sm:min-h-[60px] xl:min-h-[64px] px-4 sm:px-5 xl:px-6 py-3 text-stone-100 text-base sm:text-lg font-extrabold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed btn-brand"
               >
                 {exchangeModeActive
-                  ? (isFinalizingSale ? 'Processing...' : 'Process Return')
+                  ? (isFinalizingSale ? 'Saving...' : 'Save Return')
                   : (isFinalizingSale ? 'Saving...' : 'Save Only')}
               </button>
-              {!exchangeModeActive && (
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    void handleSplitPayment('save_and_print');
-                  }}
-                  disabled={!canFinalize || isFinalizingSale}
-                  className="min-h-[56px] sm:min-h-[60px] xl:min-h-[64px] px-4 sm:px-5 xl:px-6 py-3 text-stone-100 text-base sm:text-lg font-extrabold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed btn-brand"
-                >
-                  {isFinalizingSale ? 'Printing...' : 'Save & Print'}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void handleSplitPayment('save_and_print');
+                }}
+                disabled={!canFinalize || isFinalizingSale}
+                className="min-h-[56px] sm:min-h-[60px] xl:min-h-[64px] px-4 sm:px-5 xl:px-6 py-3 text-stone-100 text-base sm:text-lg font-extrabold rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed btn-brand"
+              >
+                {exchangeModeActive
+                  ? (isFinalizingSale ? 'Printing...' : 'Save & Print Return')
+                  : (isFinalizingSale ? 'Printing...' : 'Save & Print')}
+              </button>
             </div>
           </div>
         </div>
