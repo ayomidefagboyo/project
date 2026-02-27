@@ -12,6 +12,7 @@ interface DashboardCardProps {
     isPositive: boolean;
   };
   className?: string;
+  onClick?: () => void;
 }
 
 const DashboardCard: React.FC<DashboardCardProps> = ({
@@ -21,12 +22,31 @@ const DashboardCard: React.FC<DashboardCardProps> = ({
   subtitle,
   change,
   className,
+  onClick,
 }) => {
+  const interactive = typeof onClick === 'function';
+
   return (
-    <div className={cn(
-      "card p-8 flex flex-col hover:shadow-lg hover:shadow-gray-100/50 transition-all duration-300",
-      className
-    )}>
+    <div
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={(event) => {
+        if (!interactive) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onClick();
+        }
+      }}
+      className={cn(
+        "card p-5 sm:p-6 flex flex-col transition-all duration-300",
+        interactive
+          ? "cursor-pointer hover:shadow-lg hover:shadow-gray-100/50 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          : "hover:shadow-lg hover:shadow-gray-100/50",
+        className
+      )}
+      aria-label={interactive ? `${title} details` : undefined}
+    >
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">{title}</h3>
         <div className="w-10 h-10 bg-accent rounded-xl flex items-center justify-center">
@@ -34,7 +54,7 @@ const DashboardCard: React.FC<DashboardCardProps> = ({
         </div>
       </div>
       
-      <div className="text-3xl lg:text-4xl font-light text-foreground mb-3 tracking-tight">
+      <div className="text-2xl sm:text-3xl lg:text-4xl font-light text-foreground mb-3 tracking-tight">
         {value}
       </div>
       

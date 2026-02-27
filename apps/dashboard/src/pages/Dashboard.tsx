@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
-  DollarSign, 
   FileText, 
   CreditCard, 
   TrendingUp, 
@@ -18,21 +18,69 @@ import DashboardCard from '@/components/dashboard/DashboardCard';
 import RecentActivity from '@/components/dashboard/RecentActivity';
 import { Button } from '@/components/ui/Button';
 import { useOutlet } from '@/contexts/OutletContext';
-import { vendorInvoiceService } from '@/lib/vendorInvoiceService';
 import { eodService } from '@/lib/eodServiceNew';
 import { currencyService } from '@/lib/currencyService';
 import { apiClient } from '@/lib/apiClient';
-import { VendorInvoice, DashboardView, Outlet } from '@/types';
-import VendorInvoiceTable from '@/components/invoice/VendorInvoiceTable';
+import { AuditEntry, DashboardView } from '@/types';
 import { FeatureGate } from '@/components/subscription/FeatureGate';
 import { supabase } from '@/lib/supabase';
 import { stripeService } from '@/lib/stripeService';
 import { authService } from '@/lib/auth';
 import TrialExpired from '@/components/TrialExpired';
 import CompanyOnboarding from '@/components/onboarding/CompanyOnboarding';
-import { trackUserJourney, trackTrialEvent, trackFeatureUsage, trackDashboardInteraction, trackDeviceInfo } from '@/lib/posthog';
+import { trackUserJourney, trackTrialEvent, trackFeatureUsage, trackDeviceInfo } from '@/lib/posthog';
+
+interface DashboardInvoiceItem {
+  id: string;
+}
+
+interface DashboardInvoice {
+  id: string;
+  outlet_id: string;
+  invoice_number: string;
+  vendor_id?: string | null;
+  customer_id?: string | null;
+  issue_date?: string | null;
+  due_date?: string | null;
+  status?: string | null;
+  total?: number | null;
+  created_at?: string | null;
+  invoice_items?: DashboardInvoiceItem[];
+}
+
+interface DashboardInvoicesResponse {
+  items: DashboardInvoice[];
+  total: number;
+  page: number;
+  size: number;
+  pages: number;
+}
+
+interface DashboardAuditEntryResponse {
+  items: Array<{
+    id: string;
+    outlet_id: string;
+    user_id: string;
+    user_name: string;
+    action: string;
+    entity_type: string;
+    entity_id: string;
+    details: string;
+    timestamp: string;
+  }>;
+  total: number;
+  page: number;
+  size: number;
+  pages: number;
+}
+
+interface MetricChange {
+  value: number;
+  isPositive: boolean;
+}
 
 const Dashboard: React.FC = () => {
+  const navigate = useNavigate();
   const {
     currentUser,
     currentOutlet,
@@ -54,7 +102,8 @@ const Dashboard: React.FC = () => {
     }
   });
 
-  const [vendorInvoices, setVendorInvoices] = useState<VendorInvoice[]>([]);
+  const [dashboardInvoices, setDashboardInvoices] = useState<DashboardInvoice[]>([]);
+  const [recentActivities, setRecentActivities] = useState<AuditEntry[]>([]);
   const [eodStats, setEodStats] = useState<any>(null);
   const [invoiceStatsSummary, setInvoiceStatsSummary] = useState({
     total: 0,
@@ -62,6 +111,9 @@ const Dashboard: React.FC = () => {
     unpaidAmount: 0,
     paidCount: 0,
   });
+  const [salesChange, setSalesChange] = useState<MetricChange | undefined>(undefined);
+  const [expenseChange, setExpenseChange] = useState<MetricChange | undefined>(undefined);
+  const [profitChange, setProfitChange] = useState<MetricChange | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedDateRange, setSelectedDateRange] = useState('this_month');
@@ -332,6 +384,51 @@ const Dashboard: React.FC = () => {
 
   const currentDateRange = getDateRange(selectedDateRange);
 
+  const getPreviousDateRange = (from: string, to: string) => {
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+    if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+      return { from, to };
+    }
+
+    const daySpan = Math.max(
+      0,
+      Math.round((toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24))
+    );
+    const prevTo = new Date(fromDate);
+    prevTo.setDate(prevTo.getDate() - 1);
+    const prevFrom = new Date(prevTo);
+    prevFrom.setDate(prevFrom.getDate() - daySpan);
+
+    return {
+      from: prevFrom.toISOString().slice(0, 10),
+      to: prevTo.toISOString().slice(0, 10),
+    };
+  };
+
+  const normalizeMoney = (value: unknown): number => {
+    const amount = Number(value || 0);
+    return Number.isFinite(amount) ? amount : 0;
+  };
+
+  const buildPercentChange = (
+    current: number,
+    previous: number,
+    lowerIsBetter: boolean = false
+  ): MetricChange | undefined => {
+    if (!Number.isFinite(current) || !Number.isFinite(previous)) return undefined;
+    if (current === 0 && previous === 0) return { value: 0, isPositive: true };
+    if (previous === 0) return { value: 100, isPositive: !lowerIsBetter };
+
+    const raw = ((current - previous) / Math.abs(previous)) * 100;
+    const rounded = Math.round(Math.abs(raw) * 10) / 10;
+
+    return {
+      value: rounded,
+      isPositive: lowerIsBetter ? raw <= 0 : raw >= 0,
+    };
+  };
+
   const aggregateEodStats = (statsList: any[]) => {
     const reportsByStatus: Record<string, number> = {};
     const salesByPaymentMethod: Record<string, number> = {};
@@ -420,43 +517,25 @@ const Dashboard: React.FC = () => {
     // Don't close dropdown for custom to allow date input
   };
 
-  // Load vendor invoices and EOD data
-  const loadInvoiceStatsSummary = async (outletIds: string[]) => {
-    if (outletIds.length === 0) {
-      setInvoiceStatsSummary({ total: 0, unpaidCount: 0, unpaidAmount: 0, paidCount: 0 });
-      return;
-    }
+  const updateInvoiceSummaryFromList = (invoices: DashboardInvoice[]) => {
+    const summary = invoices.reduce(
+      (acc, invoice) => {
+        const totalAmount = normalizeMoney(invoice.total);
+        const status = String(invoice.status || '').toLowerCase();
 
-    try {
-      const responses = await Promise.all(
-        outletIds.map((outletId) =>
-          apiClient.get<any>(`/invoices/stats/summary?outlet_id=${outletId}`)
-        )
-      );
+        acc.total += 1;
+        if (status === 'paid') {
+          acc.paidCount += 1;
+        } else {
+          acc.unpaidCount += 1;
+          acc.unpaidAmount += totalAmount;
+        }
+        return acc;
+      },
+      { total: 0, unpaidCount: 0, unpaidAmount: 0, paidCount: 0 }
+    );
 
-      let total = 0;
-      let unpaidCount = 0;
-      let unpaidAmount = 0;
-      let paidCount = 0;
-
-      responses.forEach((response) => {
-        if (response.error || !response.data) return;
-        const vendorStats = response.data.vendor_invoices || {};
-        total += Number(vendorStats.total || 0);
-        paidCount += Number(vendorStats.paid || 0);
-        unpaidCount +=
-          Number(vendorStats.draft || 0) +
-          Number(vendorStats.pending || 0) +
-          Number(vendorStats.received || 0) +
-          Number(vendorStats.overdue || 0);
-        unpaidAmount += Number(vendorStats.unpaid_amount || 0);
-      });
-
-      setInvoiceStatsSummary({ total, unpaidCount, unpaidAmount, paidCount });
-    } catch (summaryError) {
-      console.warn('Failed to load invoice status summary:', summaryError);
-      setInvoiceStatsSummary({ total: 0, unpaidCount: 0, unpaidAmount: 0, paidCount: 0 });
-    }
+    setInvoiceStatsSummary(summary);
   };
 
   const loadDashboardData = async () => {
@@ -466,50 +545,133 @@ const Dashboard: React.FC = () => {
 
       const outletIds = dashboardView.selectedOutlets;
       if (outletIds.length === 0) {
-        setVendorInvoices([]);
+        setDashboardInvoices([]);
+        setRecentActivities([]);
         setEodStats(null);
+        setSalesChange(undefined);
+        setExpenseChange(undefined);
+        setProfitChange(undefined);
         setInvoiceStatsSummary({ total: 0, unpaidCount: 0, unpaidAmount: 0, paidCount: 0 });
         setLoading(false);
         return;
       }
 
-      // Load vendor invoices
-      const { data, error: invoiceError } = await vendorInvoiceService.getVendorInvoices(outletIds);
-
-      if (invoiceError) {
-        setError(invoiceError);
-      } else if (data) {
-        setVendorInvoices(data);
-      }
-
-      await loadInvoiceStatsSummary(outletIds);
-
-      // Load EOD statistics for the selected date range
+      // Load real vendor invoices from backend invoices endpoint.
       try {
-        const statsResponses = await Promise.all(
+        const invoiceResponses = await Promise.all(
           outletIds.map((outletId) =>
-            eodService.getEODStats(currentDateRange.from, currentDateRange.to, outletId)
+            apiClient.get<DashboardInvoicesResponse>('/invoices/', {
+              outlet_id: outletId,
+              invoice_type: 'vendor',
+              page: 1,
+              size: 200,
+              date_from: currentDateRange.from,
+              date_to: currentDateRange.to,
+            })
           )
         );
 
-        const successfulStats = statsResponses
+        const loadedInvoices = invoiceResponses
           .filter((response) => !response.error && response.data)
-          .map((response) => response.data as NonNullable<typeof response.data>);
+          .flatMap((response) => response.data?.items || []);
 
-        if (successfulStats.length === 0) {
-          const firstError = statsResponses.find((response) => response.error)?.error;
-          if (firstError) {
-            console.warn('Failed to load EOD stats:', firstError);
-          }
-          setEodStats(null);
-        } else if (successfulStats.length === 1) {
-          setEodStats(successfulStats[0]);
-        } else {
-          setEodStats(aggregateEodStats(successfulStats));
-        }
+        const sortedInvoices = [...loadedInvoices].sort((left, right) => {
+          const leftTs = new Date(String(left.created_at || left.issue_date || '')).getTime();
+          const rightTs = new Date(String(right.created_at || right.issue_date || '')).getTime();
+          return rightTs - leftTs;
+        });
+
+        setDashboardInvoices(sortedInvoices);
+        updateInvoiceSummaryFromList(sortedInvoices);
+      } catch (invoiceError) {
+        console.warn('Failed to load dashboard invoices:', invoiceError);
+        setDashboardInvoices([]);
+        setInvoiceStatsSummary({ total: 0, unpaidCount: 0, unpaidAmount: 0, paidCount: 0 });
+      }
+
+      // Load audit entries for live activity feed.
+      try {
+        const activityResponses = await Promise.all(
+          outletIds.map((outletId) =>
+            apiClient.get<DashboardAuditEntryResponse>('/audit/', {
+              outlet_id: outletId,
+              page: 1,
+              size: 30,
+              date_from: currentDateRange.from,
+              date_to: currentDateRange.to,
+            })
+          )
+        );
+
+        const mappedActivities: AuditEntry[] = activityResponses
+          .filter((response) => !response.error && response.data)
+          .flatMap((response) => response.data?.items || [])
+          .map((entry) => ({
+            id: String(entry.id || ''),
+            outletId: String(entry.outlet_id || ''),
+            userId: String(entry.user_id || ''),
+            userName: String(entry.user_name || 'Unknown'),
+            action: String(entry.action || ''),
+            entityType: (String(entry.entity_type || 'report') as AuditEntry['entityType']),
+            entityId: String(entry.entity_id || ''),
+            details: String(entry.details || ''),
+            timestamp: String(entry.timestamp || ''),
+          }))
+          .sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime())
+          .slice(0, 8);
+
+        setRecentActivities(mappedActivities);
+      } catch (activityError) {
+        console.warn('Failed to load dashboard activity feed:', activityError);
+        setRecentActivities([]);
+      }
+
+      // Load EOD statistics for current and previous period.
+      try {
+        const previousRange = getPreviousDateRange(currentDateRange.from, currentDateRange.to);
+
+        const [currentStatsResponses, previousStatsResponses] = await Promise.all([
+          Promise.all(
+            outletIds.map((outletId) =>
+              eodService.getEODStats(currentDateRange.from, currentDateRange.to, outletId)
+            )
+          ),
+          Promise.all(
+            outletIds.map((outletId) =>
+              eodService.getEODStats(previousRange.from, previousRange.to, outletId)
+            )
+          ),
+        ]);
+
+        const aggregateStatsResponse = (responses: Array<{ data: any | null; error: string | null }>) => {
+          const validStats = responses
+            .filter((response) => !response.error && response.data)
+            .map((response) => response.data as NonNullable<typeof response.data>);
+          if (!validStats.length) return null;
+          if (validStats.length === 1) return validStats[0];
+          return aggregateEodStats(validStats);
+        };
+
+        const currentStats = aggregateStatsResponse(currentStatsResponses);
+        const previousStats = aggregateStatsResponse(previousStatsResponses);
+
+        setEodStats(currentStats);
+        const currentSales = normalizeMoney(currentStats?.total_sales);
+        const previousSales = normalizeMoney(previousStats?.total_sales);
+        const currentExpenses = normalizeMoney(currentStats?.total_expenses);
+        const previousExpenses = normalizeMoney(previousStats?.total_expenses);
+        const currentProfit = normalizeMoney(currentStats?.net_profit);
+        const previousProfit = normalizeMoney(previousStats?.net_profit);
+
+        setSalesChange(buildPercentChange(currentSales, previousSales, false));
+        setExpenseChange(buildPercentChange(currentExpenses, previousExpenses, true));
+        setProfitChange(buildPercentChange(currentProfit, previousProfit, false));
       } catch (eodError) {
         console.warn('Error loading EOD stats:', eodError);
         setEodStats(null);
+        setSalesChange(undefined);
+        setExpenseChange(undefined);
+        setProfitChange(undefined);
       }
 
     } catch (err) {
@@ -617,21 +779,24 @@ const Dashboard: React.FC = () => {
   };
 
   const calculateMetrics = () => {
-    const totalExpenses = vendorInvoices.reduce((sum, invoice) => 
-      sum + (invoice.totalAmount || 0), 0
+    const totalExpenses = dashboardInvoices.reduce(
+      (sum, invoice) => sum + normalizeMoney(invoice.total),
+      0
     );
-    const pendingInvoices = vendorInvoices.filter(invoice => 
-      invoice.approvalStatus === 'pending'
-    ).length;
-    const approvedInvoices = vendorInvoices.filter(invoice => 
-      invoice.approvalStatus === 'approved'
-    ).length;
+    const pendingInvoices = dashboardInvoices.filter((invoice) => {
+      const status = String(invoice.status || '').toLowerCase();
+      return status !== 'paid';
+    }).length;
+    const approvedInvoices = dashboardInvoices.filter((invoice) => {
+      const status = String(invoice.status || '').toLowerCase();
+      return status === 'paid';
+    }).length;
     
     return {
       totalExpenses,
       pendingInvoices,
       approvedInvoices,
-      totalInvoices: vendorInvoices.length
+      totalInvoices: dashboardInvoices.length
     };
   };
 
@@ -644,8 +809,8 @@ const Dashboard: React.FC = () => {
         generatedAt: new Date().toISOString(),
         outlets: selectedOutletNames,
         dateRange: {
-          startDate: dashboardView.dateRange.startDate,
-          endDate: dashboardView.dateRange.endDate
+          startDate: currentDateRange.from,
+          endDate: currentDateRange.to
         },
         metrics: {
           totalSales: eodStats?.total_sales || 0,
@@ -655,13 +820,13 @@ const Dashboard: React.FC = () => {
           approvedInvoices: metrics.approvedInvoices,
           totalInvoices: metrics.totalInvoices
         },
-        invoices: vendorInvoices.map(invoice => ({
+        invoices: dashboardInvoices.map((invoice) => ({
           id: invoice.id,
-          vendor: invoice.vendorName,
-          amount: invoice.totalAmount,
-          status: invoice.approvalStatus,
-          date: invoice.createdAt,
-          outlet: userOutlets.find(o => o.id === invoice.outletId)?.name
+          vendor: invoice.vendor_id ? `Vendor ${String(invoice.vendor_id).slice(0, 8)}` : 'N/A',
+          amount: normalizeMoney(invoice.total),
+          status: invoice.status || 'Unknown',
+          date: invoice.created_at || invoice.issue_date || '',
+          outlet: userOutlets.find((outlet) => outlet.id === invoice.outlet_id)?.name
         }))
       };
 
@@ -728,6 +893,14 @@ const Dashboard: React.FC = () => {
   const selectedOutletNames = dashboardView.selectedOutlets
     .map(id => userOutlets?.find(outlet => outlet.id === id)?.name)
     .filter(Boolean);
+
+  const invoicesRequiringAttention = useMemo(() => {
+    const unpaid = dashboardInvoices.filter((invoice) => {
+      const status = String(invoice.status || '').toLowerCase();
+      return status !== 'paid';
+    });
+    return (unpaid.length > 0 ? unpaid : dashboardInvoices).slice(0, 6);
+  }, [dashboardInvoices]);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -1055,27 +1228,31 @@ const Dashboard: React.FC = () => {
             value={eodStats ? currencyService.formatCurrency(eodStats.total_sales) : currencyService.formatCurrency(0)}
             icon={<TrendingUp className="w-5 h-5" />}
             subtitle={currentDateRange.label}
-            change={{ value: 15.2, isPositive: true }}
+            change={salesChange}
+            onClick={() => navigate('/dashboard/daily-reports')}
           />
           <DashboardCard
             title="Total Expenses"
             value={eodStats ? currencyService.formatCurrency(eodStats.total_expenses) : currencyService.formatCurrency(metrics.totalExpenses)}
-            icon={<DollarSign className="w-5 h-5" />}
+            icon={<CreditCard className="w-5 h-5" />}
             subtitle={currentDateRange.label}
-            change={{ value: 12.5, isPositive: false }}
+            change={expenseChange}
+            onClick={() => navigate('/dashboard/expenses')}
           />
           <DashboardCard
             title="Unpaid Invoices"
             value={invoiceStatsSummary.unpaidCount}
             icon={<AlertTriangle className="w-5 h-5" />}
             subtitle={`${currencyService.formatCurrency(invoiceStatsSummary.unpaidAmount)} outstanding`}
+            onClick={() => navigate('/dashboard/invoices')}
           />
           <DashboardCard
             title="Net Profit"
             value={eodStats ? currencyService.formatCurrency(eodStats.net_profit) : currencyService.formatCurrency(0)}
             icon={<BarChart3 className="w-5 h-5" />}
             subtitle={currentDateRange.label}
-            change={{ value: 23.4, isPositive: true }}
+            change={profitChange}
+            onClick={() => navigate('/dashboard/daily-reports')}
           />
         </div>
 
@@ -1092,25 +1269,67 @@ const Dashboard: React.FC = () => {
                       Latest vendor invoices requiring attention
                     </p>
                   </div>
-                  <Button variant="outline" size="sm" className="flex items-center space-x-2">
-                    <Filter className="w-4 h-4" />
-                    <span>Filter</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex items-center space-x-2 w-full sm:w-auto justify-center"
+                    onClick={() => navigate('/dashboard/invoices')}
+                  >
+                    <span>View all</span>
                   </Button>
                 </div>
               </div>
               
               <div className="p-4 sm:p-6">
-                {vendorInvoices.length > 0 ? (
-                  <VendorInvoiceTable
-                    invoices={vendorInvoices.slice(0, 5)}
-                    onApprove={(invoice) => {
-                      console.log('Approve invoice:', invoice);
-                    }}
-                    onReject={(invoice) => {
-                      console.log('Reject invoice:', invoice);
-                    }}
-                    showActions={true}
-                  />
+                {invoicesRequiringAttention.length > 0 ? (
+                  <div className="space-y-3">
+                    {invoicesRequiringAttention.map((invoice) => {
+                      const status = String(invoice.status || 'unknown');
+                      const normalizedStatus = status.toLowerCase();
+                      const isPaid = normalizedStatus === 'paid';
+                      const totalAmount = normalizeMoney(invoice.total);
+                      const issueDate = invoice.issue_date || invoice.created_at;
+                      const outletName =
+                        userOutlets.find((outlet) => outlet.id === invoice.outlet_id)?.name || 'Outlet';
+                      const itemCount = Array.isArray(invoice.invoice_items) ? invoice.invoice_items.length : 0;
+
+                      return (
+                        <button
+                          key={invoice.id}
+                          className="w-full rounded-xl border border-gray-200 dark:border-gray-700 p-3 sm:p-4 text-left hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors"
+                          onClick={() => navigate('/dashboard/invoices')}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                                {invoice.invoice_number || invoice.id}
+                              </p>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                {outletName} • {itemCount} item{itemCount === 1 ? '' : 's'}
+                              </p>
+                            </div>
+                            <span
+                              className={`text-xs font-medium px-2.5 py-1 rounded-full ${
+                                isPaid
+                                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                                  : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                              }`}
+                            >
+                              {status}
+                            </span>
+                          </div>
+                          <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                            <p className="text-sm text-gray-700 dark:text-gray-300">
+                              {currencyService.formatCurrency(totalAmount)}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {issueDate ? new Date(issueDate).toLocaleDateString() : 'No issue date'}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 ) : (
                   <div className="text-center py-12">
                     <FileText className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
@@ -1137,7 +1356,10 @@ const Dashboard: React.FC = () => {
                 </div>
               </div>
               
-              <RecentActivity />
+              <RecentActivity
+                activities={recentActivities}
+                onViewAll={() => navigate('/dashboard/audit-trail')}
+              />
             </div>
 
             {/* Quick Actions */}
@@ -1190,9 +1412,15 @@ const Dashboard: React.FC = () => {
                     const outlet = userOutlets.find(o => o.id === outletId);
                     if (!outlet) return null;
 
-                    const outletInvoices = vendorInvoices.filter(inv => inv.outletId === outletId);
-                    const outletExpenses = outletInvoices.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
-                    const outletPending = outletInvoices.filter(inv => inv.approvalStatus === 'pending').length;
+                    const outletInvoices = dashboardInvoices.filter((invoice) => invoice.outlet_id === outletId);
+                    const outletExpenses = outletInvoices.reduce(
+                      (sum, invoice) => sum + normalizeMoney(invoice.total),
+                      0
+                    );
+                    const outletPending = outletInvoices.filter((invoice) => {
+                      const status = String(invoice.status || '').toLowerCase();
+                      return status !== 'paid';
+                    }).length;
 
                     return (
                       <div key={outlet.id} className="p-6 border border-gray-100 dark:border-gray-700 rounded-xl hover:shadow-sm transition-shadow">
