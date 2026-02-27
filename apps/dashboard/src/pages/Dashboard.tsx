@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   FileText, 
@@ -894,13 +894,12 @@ const Dashboard: React.FC = () => {
     .map(id => userOutlets?.find(outlet => outlet.id === id)?.name)
     .filter(Boolean);
 
-  const invoicesRequiringAttention = useMemo(() => {
-    const unpaid = dashboardInvoices.filter((invoice) => {
-      const status = String(invoice.status || '').toLowerCase();
-      return status !== 'paid';
-    });
-    return (unpaid.length > 0 ? unpaid : dashboardInvoices).slice(0, 6);
-  }, [dashboardInvoices]);
+  const unpaidInvoices = dashboardInvoices.filter((invoice) => {
+    const status = String(invoice.status || '').toLowerCase();
+    return status !== 'paid';
+  });
+  const invoicesRequiringAttention =
+    (unpaidInvoices.length > 0 ? unpaidInvoices : dashboardInvoices).slice(0, 6);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
