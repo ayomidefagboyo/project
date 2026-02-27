@@ -980,7 +980,7 @@ async def add_invoice_item(
 
         # Verify invoice exists
         inv_check = supabase.table(Tables.INVOICES)\
-            .select('id, status, outlet_id')\
+            .select('id, status, outlet_id, invoice_number')\
             .eq('id', invoice_id)\
             .single()\
             .execute()
@@ -1013,6 +1013,19 @@ async def add_invoice_item(
         # Recalculate invoice totals
         _recalculate_invoice_totals(supabase, invoice_id)
 
+        _log_audit(
+            supabase,
+            inv_check.data['outlet_id'],
+            current_user,
+            'update',
+            'invoice',
+            invoice_id,
+            (
+                f"Added invoice item to {inv_check.data.get('invoice_number') or invoice_id}: "
+                f"{item.description} x{item.quantity} @ {item.unit_price}"
+            )
+        )
+
         # Return updated invoice
         result = supabase.table(Tables.INVOICES)\
             .select('*, invoice_items(*)')\
@@ -1042,6 +1055,23 @@ async def remove_invoice_item(
     try:
         supabase = get_supabase_admin()
 
+        inv_check = supabase.table(Tables.INVOICES)\
+            .select('id, outlet_id, invoice_number')\
+            .eq('id', invoice_id)\
+            .single()\
+            .execute()
+        if not inv_check.data:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+
+        item_check = supabase.table(Tables.INVOICE_ITEMS)\
+            .select('id, description, quantity, unit_price')\
+            .eq('id', item_id)\
+            .eq('invoice_id', invoice_id)\
+            .single()\
+            .execute()
+        if not item_check.data:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice item not found")
+
         supabase.table(Tables.INVOICE_ITEMS)\
             .delete()\
             .eq('id', item_id)\
@@ -1051,8 +1081,23 @@ async def remove_invoice_item(
         # Recalculate totals
         _recalculate_invoice_totals(supabase, invoice_id)
 
+        _log_audit(
+            supabase,
+            inv_check.data['outlet_id'],
+            current_user,
+            'update',
+            'invoice',
+            invoice_id,
+            (
+                f"Removed invoice item from {inv_check.data.get('invoice_number') or invoice_id}: "
+                f"{item_check.data.get('description')} x{item_check.data.get('quantity')} @ {item_check.data.get('unit_price')}"
+            )
+        )
+
         return {"message": "Item removed successfully"}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error removing invoice item: {e}")
         raise HTTPException(

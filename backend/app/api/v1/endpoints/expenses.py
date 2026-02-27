@@ -311,7 +311,18 @@ async def approve_expense(
         if not result.data:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Expense not found")
 
-        return result.data[0]
+        approved = result.data[0]
+        _log_audit(
+            supabase,
+            approved.get('outlet_id'),
+            current_user,
+            'approve',
+            'expense',
+            expense_id,
+            f"Approved expense: {approved.get('description')} ({approved.get('amount')})"
+        )
+
+        return approved
 
     except HTTPException:
         raise
@@ -345,7 +356,18 @@ async def reject_expense(
         if not result.data:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Expense not found")
 
-        return result.data[0]
+        rejected = result.data[0]
+        _log_audit(
+            supabase,
+            rejected.get('outlet_id'),
+            current_user,
+            'reject',
+            'expense',
+            expense_id,
+            f"Rejected expense: {rejected.get('description')} ({rejected.get('amount')})"
+        )
+
+        return rejected
 
     except HTTPException:
         raise

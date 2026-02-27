@@ -1,55 +1,259 @@
-import React, { useState } from 'react';
-import { Search, Filter, CalendarDays, Download } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Search, Filter, CalendarDays, Download, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { auditEntries } from '@/lib/mockData';
+import { useOutlet } from '@/contexts/OutletContext';
+import { apiClient } from '@/lib/apiClient';
 import { formatDate } from '@/lib/utils';
 
-const AuditTrail: React.FC = () => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [entityFilter, setEntityFilter] = useState<string>('all');
-  
-  const uniqueEntityTypes = Array.from(
-    new Set(auditEntries.map(entry => entry.entityType))
-  );
-  
-  const filteredEntries = auditEntries
-    .filter(entry => {
-      // Filter by search term
-      const searchMatches = 
-        entry.details.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        entry.userName.toLowerCase().includes(searchTerm.toLowerCase());
-        
-      // Filter by entity type
-      const entityMatches = entityFilter === 'all' || entry.entityType === entityFilter;
-      
-      return searchMatches && entityMatches;
-    })
-    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+interface AuditTrailEntry {
+  id: string;
+  outlet_id: string;
+  user_id: string;
+  user_name: string;
+  action: string;
+  entity_type: string;
+  entity_id?: string | null;
+  details: string;
+  timestamp: string;
+}
 
-  const getActionColor = (action: string) => {
-    switch (action) {
-      case 'create': return 'text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900 dark:bg-opacity-20';
-      case 'update': return 'text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900 dark:bg-opacity-20';
-      case 'delete': return 'text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900 dark:bg-opacity-20';
-      default: return 'text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700';
+interface AuditTrailResponse {
+  items: AuditTrailEntry[];
+  total: number;
+  page: number;
+  size: number;
+  pages: number;
+}
+
+const DEFAULT_ENTITY_TYPES = [
+  'invoice',
+  'expense',
+  'eod_report',
+  'product',
+  'product_import',
+  'department',
+  'transaction',
+  'stocktake',
+  'inventory_adjustment',
+  'inventory_transfer',
+  'held_receipt',
+  'cash_drawer_session',
+  'receipt_settings',
+  'outlet',
+  'staff',
+  'staff_profile',
+  'vendor',
+  'report',
+  'inventory',
+  'sales',
+];
+
+const ACTION_OPTIONS = [
+  'create',
+  'import',
+  'validate',
+  'update',
+  'delete',
+  'approve',
+  'reject',
+  'adjust',
+  'return',
+  'void',
+  'receive',
+  'transfer',
+  'hold',
+  'open',
+  'close',
+  'reset',
+];
+
+const formatLabel = (value: string): string =>
+  value
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const getActionColor = (action: string) => {
+  const normalized = action.toLowerCase();
+
+  switch (normalized) {
+    case 'create':
+    case 'receive':
+      return 'text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900/20';
+    case 'update':
+    case 'approve':
+      return 'text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/20';
+    case 'delete':
+    case 'reject':
+    case 'void':
+      return 'text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/20';
+    default:
+      return 'text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700';
+  }
+};
+
+const getActionSymbol = (action: string): string => {
+  const normalized = action.toLowerCase();
+  if (normalized === 'create' || normalized === 'receive') return '✚';
+  if (normalized === 'update' || normalized === 'approve') return '✎';
+  if (normalized === 'delete' || normalized === 'reject' || normalized === 'void') return '✖';
+  if (normalized === 'transfer') return '⇄';
+  return '•';
+};
+
+const AuditTrail: React.FC = () => {
+  const { currentOutlet } = useOutlet();
+
+  const [entries, setEntries] = useState<AuditTrailEntry[]>([]);
+  const [totalEntries, setTotalEntries] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+  const [entityFilter, setEntityFilter] = useState<string>('all');
+  const [actionFilter, setActionFilter] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm.trim());
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm]);
+
+  const loadAuditTrail = async () => {
+    if (!currentOutlet?.id) {
+      setEntries([]);
+      setTotalEntries(0);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const params: Record<string, string | number> = {
+        outlet_id: currentOutlet.id,
+        page: 1,
+        size: 200,
+      };
+
+      if (entityFilter !== 'all') params.entity_type = entityFilter;
+      if (actionFilter !== 'all') params.action = actionFilter;
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
+      if (debouncedSearchTerm) params.search = debouncedSearchTerm;
+
+      const response = await apiClient.get<AuditTrailResponse>('/audit/', params);
+      if (response.error || !response.data) {
+        throw new Error(response.error || 'Failed to load audit trail');
+      }
+
+      const apiItems = Array.isArray(response.data.items) ? response.data.items : [];
+      const sortedEntries = [...apiItems].sort((left, right) => {
+        return new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime();
+      });
+
+      setEntries(sortedEntries);
+      setTotalEntries(Number(response.data.total || sortedEntries.length));
+    } catch (loadError) {
+      console.error('Failed to load audit trail:', loadError);
+      setError(loadError instanceof Error ? loadError.message : 'Failed to load audit trail');
+      setEntries([]);
+      setTotalEntries(0);
+    } finally {
+      setLoading(false);
     }
   };
-  
+
+  useEffect(() => {
+    void loadAuditTrail();
+  }, [currentOutlet?.id, entityFilter, actionFilter, dateFrom, dateTo, debouncedSearchTerm]);
+
+  const entityOptions = useMemo(() => {
+    const fromData = entries.map((entry) => String(entry.entity_type || '').toLowerCase()).filter(Boolean);
+    return Array.from(new Set([...DEFAULT_ENTITY_TYPES, ...fromData])).sort();
+  }, [entries]);
+
+  const handleExportCsv = () => {
+    if (entries.length === 0) return;
+
+    const escapeCsv = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const rows = [
+      ['Timestamp', 'User', 'Action', 'Entity Type', 'Entity ID', 'Details'],
+      ...entries.map((entry) => [
+        entry.timestamp,
+        entry.user_name || 'Unknown',
+        entry.action,
+        entry.entity_type,
+        entry.entity_id || '',
+        entry.details,
+      ]),
+    ];
+
+    const csv = rows.map((row) => row.map((value) => escapeCsv(value)).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `audit-trail-${currentOutlet?.name || 'outlet'}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  if (!currentOutlet) {
+    return (
+      <div className="space-y-6 p-4 sm:p-6">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-8 text-center">
+          <p className="text-gray-500 dark:text-gray-400">Select an outlet to view audit trail activity.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 p-4 sm:p-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Audit Trail</h1>
-          <p className="text-gray-500 dark:text-gray-400">Track all changes and activities</p>
+          <p className="text-gray-500 dark:text-gray-400">
+            Track all changes and activities for {currentOutlet.name}
+          </p>
         </div>
-        <Button variant="outline" className="flex items-center">
-          <Download size={16} className="mr-2" />
-          Export
-        </Button>
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          <Button
+            variant="outline"
+            className="flex items-center w-full sm:w-auto justify-center"
+            onClick={() => void loadAuditTrail()}
+            disabled={loading}
+          >
+            <RefreshCw size={16} className={`mr-2 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+          <Button
+            variant="outline"
+            className="flex items-center w-full sm:w-auto justify-center"
+            onClick={handleExportCsv}
+            disabled={entries.length === 0}
+          >
+            <Download size={16} className="mr-2" />
+            Export
+          </Button>
+        </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-4">
+      {error && (
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+          <p className="text-red-700 dark:text-red-300 text-sm">{error}</p>
+        </div>
+      )}
+
+      <div className="flex flex-col lg:flex-row gap-3">
         <div className="relative flex-grow">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
             <Search size={18} className="text-gray-400" />
@@ -59,69 +263,111 @@ const AuditTrail: React.FC = () => {
             placeholder="Search audit entries..."
             className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(event) => setSearchTerm(event.target.value)}
           />
         </div>
-        <div className="flex gap-2">
-          <div className="relative">
+
+        <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
+          <div className="relative w-full sm:w-auto">
             <select
-              className="appearance-none pl-3 pr-8 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="appearance-none w-full pl-3 pr-8 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               value={entityFilter}
-              onChange={(e) => setEntityFilter(e.target.value)}
+              onChange={(event) => setEntityFilter(event.target.value)}
             >
               <option value="all">All Types</option>
-              {uniqueEntityTypes.map(type => (
-                <option key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</option>
+              {entityOptions.map((type) => (
+                <option key={type} value={type}>{formatLabel(type)}</option>
               ))}
             </select>
             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700 dark:text-gray-300">
               <Filter size={16} />
             </div>
           </div>
-          <Button variant="outline" size="icon">
-            <CalendarDays size={18} />
-          </Button>
+
+          <div className="relative w-full sm:w-auto">
+            <select
+              className="appearance-none w-full pl-3 pr-8 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              value={actionFilter}
+              onChange={(event) => setActionFilter(event.target.value)}
+            >
+              <option value="all">All Actions</option>
+              {ACTION_OPTIONS.map((action) => (
+                <option key={action} value={action}>{formatLabel(action)}</option>
+              ))}
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700 dark:text-gray-300">
+              <Filter size={16} />
+            </div>
+          </div>
+
+          <div className="relative w-full sm:w-auto">
+            <CalendarDays size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(event) => setDateFrom(event.target.value)}
+              className="w-full sm:w-40 pl-9 pr-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+
+          <div className="relative w-full sm:w-auto">
+            <CalendarDays size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(event) => setDateTo(event.target.value)}
+              className="w-full sm:w-40 pl-9 pr-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
         </div>
       </div>
 
-      {/* Audit Trail Timeline */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6">
-        <div className="flow-root">
-          <ul role="list" className="-mb-8">
-            {filteredEntries.map((entry, entryIdx) => (
-              <li key={entry.id}>
-                <div className="relative pb-8">
-                  {entryIdx !== filteredEntries.length - 1 ? (
-                    <span className="absolute top-4 left-4 -ml-px h-full w-0.5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></span>
-                  ) : null}
-                  <div className="relative flex space-x-3">
-                    <div>
-                      <span className={`h-8 w-8 rounded-full flex items-center justify-center ring-8 ring-white dark:ring-gray-800 ${getActionColor(entry.action)}`}>
-                        {entry.action === 'create' && '✚'}
-                        {entry.action === 'update' && '✎'}
-                        {entry.action === 'delete' && '✖'}
-                      </span>
-                    </div>
-                    <div className="min-w-0 flex-1 pt-1.5 flex justify-between space-x-4">
+        <div className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+          Showing {entries.length} of {totalEntries} entries
+        </div>
+
+        {loading ? (
+          <div className="text-center py-16">
+            <p className="text-gray-500 dark:text-gray-400">Loading audit entries...</p>
+          </div>
+        ) : (
+          <div className="flow-root">
+            <ul role="list" className="-mb-8">
+              {entries.map((entry, entryIdx) => (
+                <li key={entry.id}>
+                  <div className="relative pb-8">
+                    {entryIdx !== entries.length - 1 ? (
+                      <span className="absolute top-4 left-4 -ml-px h-full w-0.5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></span>
+                    ) : null}
+                    <div className="relative flex space-x-3">
                       <div>
-                        <p className="text-sm text-gray-900 dark:text-white">{entry.details}</p>
-                        <div className="mt-1 flex items-center text-xs text-gray-500 dark:text-gray-400">
-                          <p>By {entry.userName}</p>
-                          <span className="mx-1">•</span>
-                          <p>Entity: {entry.entityType.charAt(0).toUpperCase() + entry.entityType.slice(1)}</p>
-                        </div>
+                        <span className={`h-8 w-8 rounded-full flex items-center justify-center ring-8 ring-white dark:ring-gray-800 ${getActionColor(entry.action)}`}>
+                          {getActionSymbol(entry.action)}
+                        </span>
                       </div>
-                      <div className="text-right text-sm whitespace-nowrap text-gray-500 dark:text-gray-400">
-                        {formatDate(entry.timestamp)}
+                      <div className="min-w-0 flex-1 pt-1.5 flex flex-col sm:flex-row sm:justify-between gap-2 sm:gap-4">
+                        <div>
+                          <p className="text-sm text-gray-900 dark:text-white">{entry.details}</p>
+                          <div className="mt-1 flex items-center text-xs text-gray-500 dark:text-gray-400">
+                            <p>By {entry.user_name || 'Unknown'}</p>
+                            <span className="mx-1">•</span>
+                            <p>Entity: {formatLabel(entry.entity_type || 'unknown')}</p>
+                          </div>
+                        </div>
+                        <div className="text-sm whitespace-nowrap text-gray-500 dark:text-gray-400 sm:text-right">
+                          {formatDate(entry.timestamp)}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-        {filteredEntries.length === 0 && (
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {!loading && entries.length === 0 && (
           <div className="text-center py-16">
             <p className="text-gray-500 dark:text-gray-400">No audit entries found</p>
           </div>

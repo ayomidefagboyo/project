@@ -433,6 +433,41 @@ def _rollback_stocktake_changes(
             )
 
 
+def _log_pos_audit_entry(
+    supabase,
+    outlet_id: str,
+    user_id: Optional[str],
+    user_name: Optional[str],
+    action: str,
+    entity_type: str,
+    entity_id: str,
+    details: str
+) -> None:
+    """Best-effort audit writer for POS actions."""
+    try:
+        resolved_user_name = str(user_name or "").strip() or "Unknown"
+        resolved_user_id = str(user_id or "").strip() or None
+        supabase.table(Tables.AUDIT_ENTRIES).insert({
+            "id": str(uuid.uuid4()),
+            "outlet_id": outlet_id,
+            "user_id": resolved_user_id,
+            "user_name": resolved_user_name,
+            "action": action,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "details": details,
+            "timestamp": datetime.utcnow().isoformat(),
+        }).execute()
+    except Exception as audit_error:
+        logger.warning(
+            "Failed to write POS audit entry for %s %s (%s): %s",
+            action,
+            entity_type,
+            entity_id,
+            audit_error
+        )
+
+
 def _safe_json_loads(value: Any) -> Dict[str, Any]:
     """Parse JSON notes safely and return an object."""
     if isinstance(value, dict):
@@ -1235,6 +1270,16 @@ async def create_department(
             if result_row.get('auto_pricing_enabled') is None:
                 result_row['auto_pricing_enabled'] = department.auto_pricing_enabled
             result_row['source'] = 'master'
+            _log_pos_audit_entry(
+                supabase=supabase,
+                outlet_id=department.outlet_id,
+                user_id=str(current_user.get('id') or ''),
+                user_name=current_user.get('name') or current_user.get('email'),
+                action='update',
+                entity_type='department',
+                entity_id=str(result_row.get('id') or ''),
+                details=f"Reactivated department {result_row.get('name')}"
+            )
             return DepartmentResponse(**result_row)
 
         payload = {
@@ -1272,6 +1317,16 @@ async def create_department(
         if created_row.get('auto_pricing_enabled') is None:
             created_row['auto_pricing_enabled'] = department.auto_pricing_enabled
         created_row['source'] = 'master'
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=department.outlet_id,
+            user_id=str(current_user.get('id') or ''),
+            user_name=current_user.get('name') or current_user.get('email'),
+            action='create',
+            entity_type='department',
+            entity_id=str(created_row.get('id') or ''),
+            details=f"Created department {created_row.get('name')}"
+        )
         return DepartmentResponse(**created_row)
     except HTTPException:
         raise
@@ -1377,6 +1432,16 @@ async def update_department(
                 else True
             )
         row['source'] = row.get('source') or 'master'
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=str(outlet_id or ''),
+            user_id=str(current_user.get('id') or ''),
+            user_name=current_user.get('name') or current_user.get('email'),
+            action='update',
+            entity_type='department',
+            entity_id=department_id,
+            details=f"Updated department {row.get('name')}"
+        )
         return DepartmentResponse(**row)
     except HTTPException:
         raise
@@ -1499,7 +1564,18 @@ async def create_product(
                 detail="Failed to create product"
             )
 
-        return POSProductResponse(**result.data[0])
+        created_product = result.data[0]
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=product.outlet_id,
+            user_id=str(current_user.get('id') or ''),
+            user_name=current_user.get('name') or current_user.get('email'),
+            action='create',
+            entity_type='product',
+            entity_id=str(created_product.get('id') or product_id),
+            details=f"Created product {created_product.get('name')} ({created_product.get('sku')})"
+        )
+        return POSProductResponse(**created_product)
 
     except Exception as e:
         logger.error(f"Error creating product: {e}")
@@ -1748,6 +1824,22 @@ async def bulk_import_products(
                                 message=str(row_error)
                             ))
 
+        audit_action = 'validate' if payload.dry_run else 'import'
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=payload.outlet_id,
+            user_id=str(current_user.get('id') or ''),
+            user_name=current_user.get('name') or current_user.get('email'),
+            action=audit_action,
+            entity_type='product_import',
+            entity_id=str(uuid.uuid4()),
+            details=(
+                f"Bulk product import ({dedupe_by}) total={len(rows)} "
+                f"created={created_count} updated={updated_count} skipped={skipped_count} "
+                f"errors={len(errors)} dry_run={payload.dry_run}"
+            )
+        )
+
         return ProductBulkImportResponse(
             total_received=len(rows),
             created_count=created_count,
@@ -1806,7 +1898,7 @@ async def update_product(
     """Update a product"""
     try:
         supabase = get_supabase_admin()
-        existing_product = supabase.table('pos_products').select('id,outlet_id').eq('id', product_id).execute()
+        existing_product = supabase.table('pos_products').select('id,outlet_id,name,sku').eq('id', product_id).execute()
         if not existing_product.data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -1854,7 +1946,22 @@ async def update_product(
                 detail="Product not found"
             )
 
-        return POSProductResponse(**result.data[0])
+        updated_product = result.data[0]
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=str(existing_product.data[0].get('outlet_id') or ''),
+            user_id=str(current_user.get('id') or ''),
+            user_name=current_user.get('name') or current_user.get('email'),
+            action='update',
+            entity_type='product',
+            entity_id=product_id,
+            details=(
+                f"Updated product {updated_product.get('name') or existing_product.data[0].get('name')} "
+                f"({updated_product.get('sku') or existing_product.data[0].get('sku')}) "
+                f"fields={','.join(sorted(update_data.keys()))}"
+            )
+        )
+        return POSProductResponse(**updated_product)
 
     except HTTPException:
         raise
@@ -1875,7 +1982,7 @@ async def delete_product(
     """Delete a product (soft delete by setting inactive)"""
     try:
         supabase = get_supabase_admin()
-        existing_product = supabase.table('pos_products').select('id,outlet_id').eq('id', product_id).execute()
+        existing_product = supabase.table('pos_products').select('id,outlet_id,name,sku').eq('id', product_id).execute()
         if not existing_product.data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -1898,6 +2005,20 @@ async def delete_product(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Product not found"
             )
+
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=str(existing_product.data[0].get('outlet_id') or ''),
+            user_id=str(current_user.get('id') or ''),
+            user_name=current_user.get('name') or current_user.get('email'),
+            action='delete',
+            entity_type='product',
+            entity_id=product_id,
+            details=(
+                f"Deactivated product {existing_product.data[0].get('name')} "
+                f"({existing_product.data[0].get('sku')})"
+            )
+        )
 
         return {"message": "Product deleted successfully"}
 
@@ -2342,6 +2463,20 @@ async def create_transaction(
         response_data = _decorate_transaction_record(tx_result.data[0])
         response_data['items'] = items_result.data
 
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=transaction.outlet_id,
+            user_id=cashier_id,
+            user_name=cashier_name,
+            action='create',
+            entity_type='transaction',
+            entity_id=transaction_id,
+            details=(
+                f"Completed sale {transaction_number}: total={float(total_amount):.2f}, "
+                f"items={len(transaction_items)}, payment={transaction.payment_method.value}"
+            )
+        )
+
         return POSTransactionResponse(**response_data)
 
     except HTTPException:
@@ -2615,6 +2750,20 @@ async def void_transaction(
                 detail="Transaction not found"
             )
 
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=str(transaction.get('outlet_id') or ''),
+            user_id=actor_id,
+            user_name=voider_name,
+            action='void',
+            entity_type='transaction',
+            entity_id=transaction_id,
+            details=(
+                f"Voided transaction {transaction.get('transaction_number') or transaction_id}; "
+                f"reason={void_reason}"
+            )
+        )
+
         return {"message": "Transaction voided successfully"}
 
     except HTTPException:
@@ -2703,7 +2852,21 @@ async def create_stock_adjustment(
                 detail="Failed to create stock movement"
             )
 
-        return StockMovementResponse(**result.data[0])
+        created_movement = result.data[0]
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=movement.outlet_id,
+            user_id=actor_id,
+            user_name=current_user.get('name') or current_user.get('email'),
+            action='adjust',
+            entity_type='inventory_adjustment',
+            entity_id=str(created_movement.get('id') or ''),
+            details=(
+                f"Stock adjustment on product {movement.product_id}: "
+                f"{movement.quantity_change} ({movement.movement_type.value})"
+            )
+        )
+        return StockMovementResponse(**created_movement)
 
     except HTTPException:
         raise
@@ -2966,6 +3129,27 @@ async def commit_stocktake(
                     session_error
                 )
 
+        audit_details = (
+            f"Committed stocktake session {session_id} "
+            f"(adjusted {len(changed_rows)}/{len(stocktake.items)}, "
+            f"unchanged {unchanged_items}, +{positive_variance_items}/-{negative_variance_items}, "
+            f"net variance {net_quantity_variance}, total variance value {float(total_variance_value):.2f})"
+        )
+        notes_text = str(stocktake.notes or "").strip()
+        if notes_text:
+            audit_details = f"{audit_details}. Notes: {notes_text}"
+
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=stocktake.outlet_id,
+            user_id=actor_id,
+            user_name=performed_by_name,
+            action="create",
+            entity_type="stocktake",
+            entity_id=session_id,
+            details=audit_details
+        )
+
         return StocktakeCommitResponse(
             session_id=session_id,
             outlet_id=stocktake.outlet_id,
@@ -3062,6 +3246,29 @@ async def create_inventory_transfer(
         transfer_id = str(uuid.uuid4())
         transfer_number = f"TRF-{datetime.utcnow().strftime('%Y%m%d')}-{transfer_id[:8].upper()}"
         performed_by = _resolve_actor_user_id(current_user)
+        performed_by_name: Optional[str] = None
+
+        staff_profile_id = actor_context.get('staff_profile_id')
+        if staff_profile_id:
+            profile_result = supabase.table(Tables.STAFF_PROFILES)\
+                .select('display_name,staff_code')\
+                .eq('id', staff_profile_id)\
+                .limit(1)\
+                .execute()
+            if profile_result.data:
+                profile = profile_result.data[0]
+                performed_by_name = str(
+                    profile.get('display_name')
+                    or profile.get('staff_code')
+                    or ''
+                ).strip() or None
+
+        if not performed_by_name:
+            performed_by_name = str(
+                current_user.get('name')
+                or current_user.get('email')
+                or ''
+            ).strip() or None
 
         outlet_result = supabase.table('outlets').select('id,name').in_(
             'id', [transfer.from_outlet_id, transfer.to_outlet_id]
@@ -3268,6 +3475,40 @@ async def create_inventory_transfer(
             'received_at': now_iso,
             'items': response_items
         }
+
+        source_audit_details = (
+            f"Created transfer {transfer_number} to {to_outlet_name}: "
+            f"{total_items} units across {len(response_items)} item(s)"
+        )
+        destination_audit_details = (
+            f"Received transfer {transfer_number} from {from_outlet_name}: "
+            f"{total_items} units across {len(response_items)} item(s)"
+        )
+        transfer_reason = str(transfer.transfer_reason or "").strip()
+        if transfer_reason:
+            source_audit_details = f"{source_audit_details}. Reason: {transfer_reason}"
+            destination_audit_details = f"{destination_audit_details}. Reason: {transfer_reason}"
+
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=transfer.from_outlet_id,
+            user_id=performed_by,
+            user_name=performed_by_name,
+            action="transfer",
+            entity_type="inventory_transfer",
+            entity_id=transfer_id,
+            details=source_audit_details
+        )
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=transfer.to_outlet_id,
+            user_id=performed_by,
+            user_name=performed_by_name,
+            action="receive",
+            entity_type="inventory_transfer",
+            entity_id=transfer_id,
+            details=destination_audit_details
+        )
 
         return InventoryTransferResponse(**transfer_response)
 
@@ -3613,7 +3854,18 @@ async def create_held_receipt(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Failed to create held receipt"
             )
-        
+
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=receipt.outlet_id,
+            user_id=str(receipt.cashier_id),
+            user_name=cashier_name,
+            action='hold',
+            entity_type='held_receipt',
+            entity_id=receipt_id,
+            details=f"Held receipt with {len(items_json)} item(s), total={float(receipt.total):.2f}"
+        )
+
         return HeldReceiptResponse(**result.data[0])
         
     except HTTPException:
@@ -3700,7 +3952,7 @@ async def delete_held_receipt(
         
         # Check if receipt exists
         check_result = supabase.table(Tables.POS_HELD_RECEIPTS)\
-            .select('id')\
+            .select('id,outlet_id,cashier_name,total')\
             .eq('id', receipt_id)\
             .execute()
         
@@ -3715,6 +3967,21 @@ async def delete_held_receipt(
             .delete()\
             .eq('id', receipt_id)\
             .execute()
+
+        receipt_row = check_result.data[0]
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=str(receipt_row.get('outlet_id') or ''),
+            user_id=str(current_user.get('id') or ''),
+            user_name=current_user.get('name') or current_user.get('email'),
+            action='delete',
+            entity_type='held_receipt',
+            entity_id=receipt_id,
+            details=(
+                f"Deleted held receipt by {receipt_row.get('cashier_name') or 'Cashier'} "
+                f"total={float(receipt_row.get('total') or 0):.2f}"
+            )
+        )
         
         return {"message": "Held receipt deleted successfully"}
         
@@ -4134,6 +4401,21 @@ async def return_transaction(
             except Exception as stock_error:
                 logger.warning(f"Failed to restore stock for product {item.get('product_id')}: {stock_error}")
 
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=str(original_transaction.get('outlet_id') or ''),
+            user_id=actor_id,
+            user_name=processor_name,
+            action='return',
+            entity_type='transaction',
+            entity_id=return_transaction_id,
+            details=(
+                f"Processed {'full' if is_full_return else 'partial'} return for "
+                f"{original_transaction.get('transaction_number') or transaction_id}; "
+                f"amount={float(total_to_record):.2f}, items={len(returned_item_lines)}, reason={return_reason}"
+            )
+        )
+
         return {
             "message": "Transaction returned successfully",
             "original_transaction_id": transaction_id,
@@ -4464,7 +4746,21 @@ async def open_cash_drawer_session(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Failed to create cash drawer session"
             )
-        
+
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=session.outlet_id,
+            user_id=actor_user_id,
+            user_name=current_user.get('name') or current_user.get('email'),
+            action='open',
+            entity_type='cash_drawer_session',
+            entity_id=session_id,
+            details=(
+                f"Opened cash drawer session {session_number} on terminal {session.terminal_id}; "
+                f"opening_balance={float(session.opening_balance):.2f}"
+            )
+        )
+
         return CashDrawerSessionResponse(**result.data[0])
         
     except HTTPException:
@@ -4572,7 +4868,22 @@ async def close_cash_drawer_session(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Failed to close session"
             )
-        
+
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=str(session.get('outlet_id') or ''),
+            user_id=str(current_user.get('id') or ''),
+            user_name=current_user.get('name') or current_user.get('email'),
+            action='close',
+            entity_type='cash_drawer_session',
+            entity_id=session_id,
+            details=(
+                f"Closed cash drawer session {session.get('session_number') or session_id}; "
+                f"expected={float(expected_balance):.2f}, actual={float(actual_balance):.2f}, "
+                f"variance={float(variance):.2f}"
+            )
+        )
+
         return CashDrawerSessionResponse(**result.data[0])
         
     except HTTPException:
@@ -5363,6 +5674,20 @@ async def create_staff_profile(
             staff_data=staff_data
         )
 
+        _log_pos_audit_entry(
+            supabase=get_supabase_admin(),
+            outlet_id=str(getattr(staff_profile, "outlet_id", "") or ""),
+            user_id=str(current_user.get("id") or ""),
+            user_name=current_user.get("name") or current_user.get("email"),
+            action='create',
+            entity_type='staff_profile',
+            entity_id=str(getattr(staff_profile, "id", "") or ""),
+            details=(
+                f"Created staff profile {getattr(staff_profile, 'display_name', '')} "
+                f"({getattr(staff_profile, 'staff_code', '')})"
+            )
+        )
+
         return staff_profile
 
     except HTTPException:
@@ -5469,6 +5794,20 @@ async def update_staff_profile(
                 detail="Failed to update staff profile"
             )
 
+        _log_pos_audit_entry(
+            supabase=get_supabase_admin(),
+            outlet_id=str(getattr(updated_profile, "outlet_id", "") or getattr(profile, "outlet_id", "") or ""),
+            user_id=str(current_user.get("id") or ""),
+            user_name=current_user.get("name") or current_user.get("email"),
+            action='update',
+            entity_type='staff_profile',
+            entity_id=profile_id,
+            details=(
+                f"Updated staff profile {getattr(updated_profile, 'display_name', '')} "
+                f"({getattr(updated_profile, 'staff_code', '')})"
+            )
+        )
+
         return updated_profile
 
     except HTTPException:
@@ -5512,6 +5851,20 @@ async def delete_staff_profile(
                 detail="Failed to delete staff profile"
             )
 
+        _log_pos_audit_entry(
+            supabase=get_supabase_admin(),
+            outlet_id=str(getattr(profile, "outlet_id", "") or ""),
+            user_id=str(current_user.get("id") or ""),
+            user_name=current_user.get("name") or current_user.get("email"),
+            action='delete',
+            entity_type='staff_profile',
+            entity_id=profile_id,
+            details=(
+                f"Deactivated staff profile {getattr(profile, 'display_name', '')} "
+                f"({getattr(profile, 'staff_code', '')})"
+            )
+        )
+
         return {"message": "Staff profile deleted successfully"}
 
     except HTTPException:
@@ -5554,6 +5907,20 @@ async def reset_failed_attempts(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Failed to reset failed attempts"
             )
+
+        _log_pos_audit_entry(
+            supabase=get_supabase_admin(),
+            outlet_id=str(getattr(profile, "outlet_id", "") or ""),
+            user_id=str(current_user.get("id") or ""),
+            user_name=current_user.get("name") or current_user.get("email"),
+            action='reset',
+            entity_type='staff_profile',
+            entity_id=profile_id,
+            details=(
+                f"Reset failed PIN attempts for staff profile "
+                f"{getattr(profile, 'display_name', '')} ({getattr(profile, 'staff_code', '')})"
+            )
+        )
 
         return {"message": "Failed login attempts reset successfully"}
 
@@ -5740,8 +6107,19 @@ async def update_receipt_settings(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Failed to save receipt settings"
             )
-        
+
         saved = _normalize_receipt_settings_row(result.data[0], outlet_id)
+        changed_keys = sorted([key for key in update_data.keys() if key not in {'id', 'created_at', 'updated_at', 'outlet_id'}])
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=outlet_id,
+            user_id=str(current_user.get('id') or ''),
+            user_name=current_user.get('name') or current_user.get('email'),
+            action='update',
+            entity_type='receipt_settings',
+            entity_id=str(saved.get('id') or ''),
+            details=f"Updated receipt settings fields={','.join(changed_keys) if changed_keys else 'none'}"
+        )
         return ReceiptSettingsResponse(**saved)
         
     except HTTPException:
@@ -5782,7 +6160,19 @@ async def get_outlet_info(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Outlet not found"
             )
-        
+
+        changed_fields = sorted([field for field in allowed_fields if field in outlet_data])
+        _log_pos_audit_entry(
+            supabase=supabase,
+            outlet_id=outlet_id,
+            user_id=str(current_user.get('id') or ''),
+            user_name=current_user.get('name') or current_user.get('email'),
+            action='update',
+            entity_type='outlet',
+            entity_id=outlet_id,
+            details=f"Updated outlet business info fields={','.join(changed_fields) if changed_fields else 'none'}"
+        )
+
         return result.data[0]
         
     except HTTPException:
