@@ -55,6 +55,8 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 PAYMENT_METHOD_VALUES = {method.value for method in PaymentMethod}
 POS_TRANSACTIONS_MISSING_COLUMNS: Set[str] = set()
+POS_AUDIT_VALID_USER_IDS: Set[str] = set()
+POS_AUDIT_INVALID_USER_IDS: Set[str] = set()
 PURCHASE_ORDER_NOTE_MARKER = "[Purchase order: yes]"
 PURCHASE_ORDER_SOURCE_PREFIX = "[PO source:"
 PURCHASE_ORDER_DEPARTMENT_PREFIX = "[PO department:"
@@ -478,7 +480,7 @@ def _log_pos_audit_entry(
     """Best-effort audit writer for POS actions."""
     try:
         resolved_user_name = str(user_name or "").strip() or "Unknown"
-        resolved_user_id = str(user_id or "").strip() or None
+        resolved_user_id = _resolve_pos_audit_user_id(supabase, user_id)
         supabase.table(Tables.AUDIT_ENTRIES).insert({
             "id": str(uuid.uuid4()),
             "outlet_id": outlet_id,
@@ -498,6 +500,40 @@ def _log_pos_audit_entry(
             entity_id,
             audit_error
         )
+
+
+def _resolve_pos_audit_user_id(supabase, user_id: Optional[str]) -> Optional[str]:
+    """Only persist audit_entries.user_id when the referenced public.users row exists."""
+    candidate = str(user_id or "").strip()
+    if not candidate:
+        return None
+
+    if candidate in POS_AUDIT_VALID_USER_IDS:
+        return candidate
+    if candidate in POS_AUDIT_INVALID_USER_IDS:
+        return None
+
+    try:
+        lookup = supabase.table(Tables.USERS).select("id").eq("id", candidate).limit(1).execute()
+        if lookup.data:
+            POS_AUDIT_VALID_USER_IDS.add(candidate)
+            POS_AUDIT_INVALID_USER_IDS.discard(candidate)
+            return candidate
+
+        POS_AUDIT_INVALID_USER_IDS.add(candidate)
+        logger.warning(
+            "POS audit user %s is missing from %s; writing audit entry without user_id",
+            candidate,
+            Tables.USERS,
+        )
+        return None
+    except Exception as lookup_error:
+        logger.warning(
+            "Failed to validate POS audit user %s; writing audit entry without user_id: %s",
+            candidate,
+            lookup_error,
+        )
+        return None
 
 
 def _schedule_auto_anomaly_detection(
