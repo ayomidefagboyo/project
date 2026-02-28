@@ -348,57 +348,54 @@ const PurchasingPage: React.FC = () => {
     <div className="h-full overflow-y-auto bg-stone-50">
       <div className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 sm:py-6">
         <div className="rounded-3xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-            <button
-              type="button"
-              onClick={() => void loadPurchasingData()}
-              disabled={isLoading}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-              Refresh
-            </button>
-            <button
-              type="button"
-              onClick={handleCreateDraftPurchaseOrders}
-              disabled={isCreating || selectedLineCount === 0}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardList className="h-4 w-4" />}
-              Create Draft POs
-            </button>
-          </div>
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">Recommended Items</p>
+                <div className="mt-1 flex items-end gap-2">
+                  <p className="text-xl font-semibold text-slate-900">{summary?.recommended_items || 0}</p>
+                  <p className="text-xs text-stone-500">{summary?.total_recommended_units || 0} units</p>
+                </div>
+                <p className="mt-0.5 text-xs text-stone-500">need action now</p>
+              </div>
+              <div className="rounded-2xl border border-stone-200 bg-white px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">Selection</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">
+                  {selectedLineCount} lines • {selectedUnits} units
+                </p>
+                <p className="mt-0.5 text-xs text-stone-500">{formatCurrency(selectedCost)} draft PO value</p>
+              </div>
+            </div>
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-stone-500">Recommended Units</p>
-              <p className="mt-2 text-2xl font-semibold text-slate-900">{summary?.total_recommended_units || 0}</p>
-              <p className="mt-1 text-xs text-stone-500">{summary?.recommended_items || 0} items need action</p>
-            </div>
-            <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-stone-500">Estimated Cost</p>
-              <p className="mt-2 text-2xl font-semibold text-slate-900">{formatCurrency(summary?.total_estimated_cost || 0)}</p>
-              <p className="mt-1 text-xs text-stone-500">{summary?.vendors_in_scope || 0} vendors in scope</p>
-            </div>
-            <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-stone-500">Stockout Risk</p>
-              <p className="mt-2 text-2xl font-semibold text-red-600">{summary?.stockout_risk_count || 0}</p>
-              <p className="mt-1 text-xs text-stone-500">{summary?.low_stock_count || 0} already below reorder</p>
-            </div>
-            <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-stone-500">Open Purchase Orders</p>
-              <p className="mt-2 text-2xl font-semibold text-slate-900">{summary?.open_purchase_orders || 0}</p>
-              <p className="mt-1 text-xs text-stone-500">{formatCurrency(summary?.open_purchase_order_value || 0)} still on order</p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => void loadPurchasingData()}
+                disabled={isLoading}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateDraftPurchaseOrders}
+                disabled={isCreating || selectedLineCount === 0}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardList className="h-4 w-4" />}
+                Create Draft POs
+              </button>
             </div>
           </div>
 
-          <div className="mt-5 grid gap-3 lg:grid-cols-4">
+          <div className="mt-3 grid gap-2 md:grid-cols-3">
             <label className="block">
-              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-stone-500">Mode</span>
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">Mode</span>
               <select
                 value={mode}
                 onChange={(event) => setMode(event.target.value as PurchasingMode)}
-                className="w-full rounded-2xl border border-stone-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-500"
+                className="w-full rounded-2xl border border-stone-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-500"
               >
                 <option value="all">All Signals</option>
                 <option value="low_stock">Low Stock</option>
@@ -407,11 +404,11 @@ const PurchasingPage: React.FC = () => {
             </label>
 
             <label className="block">
-              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-stone-500">Department</span>
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">Department</span>
               <select
                 value={selectedDepartment}
                 onChange={(event) => setSelectedDepartment(event.target.value)}
-                className="w-full rounded-2xl border border-stone-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-500"
+                className="w-full rounded-2xl border border-stone-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-500"
               >
                 <option value="">All Departments</option>
                 {departmentOptions.map((department) => (
@@ -423,11 +420,11 @@ const PurchasingPage: React.FC = () => {
             </label>
 
             <label className="block">
-              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-stone-500">Vendor</span>
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">Vendor</span>
               <select
                 value={selectedVendorId}
                 onChange={(event) => setSelectedVendorId(event.target.value)}
-                className="w-full rounded-2xl border border-stone-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-500"
+                className="w-full rounded-2xl border border-stone-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-500"
               >
                 <option value="">All Vendors</option>
                 {vendorOptions.map((vendor) => (
@@ -437,19 +434,11 @@ const PurchasingPage: React.FC = () => {
                 ))}
               </select>
             </label>
-
-            <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-stone-500">Selection</p>
-              <p className="mt-2 text-sm font-semibold text-slate-900">
-                {selectedLineCount} lines • {selectedUnits} units
-              </p>
-              <p className="mt-1 text-xs text-stone-500">{formatCurrency(selectedCost)} draft PO value</p>
-            </div>
           </div>
         </div>
 
-        <div className="mt-6 grid gap-6 xl:grid-cols-[1.5fr_1fr]">
-          <section className="rounded-3xl border border-stone-200 bg-white shadow-sm">
+        <div className="mt-6 grid gap-6 xl:grid-cols-[1.5fr_1fr] xl:items-start">
+          <section className="overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-sm">
             <div className="flex flex-col gap-3 border-b border-stone-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">Recommendation Queue</h3>
@@ -465,17 +454,17 @@ const PurchasingPage: React.FC = () => {
             </div>
 
             {isLoading ? (
-              <div className="flex items-center justify-center gap-3 px-6 py-16 text-sm text-stone-500">
+              <div className="flex h-[32rem] items-center justify-center gap-3 px-6 text-sm text-stone-500">
                 <Loader2 className="h-5 w-5 animate-spin" />
                 Loading purchasing recommendations...
               </div>
             ) : recommendationItems.length === 0 ? (
-              <div className="px-6 py-16 text-center text-sm text-stone-500">
+              <div className="flex h-[32rem] items-center justify-center px-6 text-center text-sm text-stone-500">
                 No replenishment lines match the current filters.
               </div>
             ) : (
               <>
-                <div className="hidden overflow-x-auto lg:block">
+                <div className="hidden max-h-[32rem] overflow-auto lg:block">
                   <table className="min-w-full divide-y divide-stone-200 text-sm">
                     <thead className="bg-stone-50 text-xs uppercase tracking-[0.12em] text-stone-500">
                       <tr>
@@ -553,7 +542,7 @@ const PurchasingPage: React.FC = () => {
                   </table>
                 </div>
 
-                <div className="space-y-3 p-4 lg:hidden">
+                <div className="max-h-[32rem] space-y-3 overflow-y-auto p-4 lg:hidden">
                   {recommendationItems.map((item) => {
                     const selected = Boolean(selectedByProductId[item.product_id]);
                     const draftQty = Math.max(1, Math.floor(draftQtyByProductId[item.product_id] || item.recommended_qty || 1));
