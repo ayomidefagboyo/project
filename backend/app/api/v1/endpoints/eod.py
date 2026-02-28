@@ -19,6 +19,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _is_audit_user_fk_error(exc: Exception) -> bool:
+    """Detect audit_entries.user_id foreign-key failures."""
+    message = str(exc or "")
+    lowered = message.lower()
+    return (
+        "audit_entries_user_id_fkey" in lowered
+        or ("key (user_id)=" in lowered and "is not present in table \"users\"" in lowered)
+    )
+
+
 def _log_audit_entry(
     supabase,
     outlet_id: str,
@@ -29,17 +39,29 @@ def _log_audit_entry(
     details: str
 ):
     try:
-        supabase.table(Tables.AUDIT_ENTRIES).insert({
+        payload = {
             "id": str(uuid.uuid4()),
             "outlet_id": outlet_id,
-            "user_id": user.get("id"),
+            "user_id": str(user.get("id") or "").strip() or None,
             "user_name": user.get("name") or user.get("email") or "Unknown",
             "action": action,
             "entity_type": entity_type,
             "entity_id": entity_id,
             "details": details,
             "timestamp": datetime.utcnow().isoformat(),
-        }).execute()
+        }
+        try:
+            supabase.table(Tables.AUDIT_ENTRIES).insert(payload).execute()
+        except Exception as audit_error:
+            if payload.get("user_id") and _is_audit_user_fk_error(audit_error):
+                logger.warning(
+                    "EOD audit user %s is missing from users; retrying audit entry without user_id",
+                    payload["user_id"],
+                )
+                payload["user_id"] = None
+                supabase.table(Tables.AUDIT_ENTRIES).insert(payload).execute()
+                return
+            raise
     except Exception as audit_error:
         logger.warning(f"Failed to write EOD audit entry: {audit_error}")
 

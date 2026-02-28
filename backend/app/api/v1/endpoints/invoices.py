@@ -25,6 +25,16 @@ logger = logging.getLogger(__name__)
 MATERIAL_PRICE_CHANGE_THRESHOLD = 5000.0
 
 
+def _is_audit_user_fk_error(exc: Exception) -> bool:
+    """Detect audit_entries.user_id foreign-key failures."""
+    message = str(exc or "")
+    lowered = message.lower()
+    return (
+        "audit_entries_user_id_fkey" in lowered
+        or ("key (user_id)=" in lowered and "is not present in table \"users\"" in lowered)
+    )
+
+
 def _schedule_invoice_anomaly_detection(outlet_id: Optional[str], invoice_id: Optional[str], source_event: str) -> None:
     """Run invoice anomaly detection asynchronously without blocking invoice writes."""
     resolved_outlet_id = str(outlet_id or "").strip()
@@ -1653,25 +1663,28 @@ def _log_audit(supabase, outlet_id: str, user: Dict, action: str, entity_type: s
             str(user.get('user_name') or user.get('name') or user.get('email') or 'Unknown').strip()
             or 'Unknown'
         )
-        if not user_id:
-            logger.warning(
-                "Skipping invoice audit entry with missing user_id (action=%s, entity=%s, entity_id=%s)",
-                action,
-                entity_type,
-                entity_id
-            )
-            return
-
-        supabase.table(Tables.AUDIT_ENTRIES).insert({
+        payload = {
             'id': str(uuid.uuid4()),
             'outlet_id': outlet_id,
-            'user_id': user_id,
+            'user_id': user_id or None,
             'user_name': user_name,
             'action': action,
             'entity_type': entity_type,
             'entity_id': entity_id,
             'details': details,
             'timestamp': datetime.utcnow().isoformat()
-        }).execute()
+        }
+        try:
+            supabase.table(Tables.AUDIT_ENTRIES).insert(payload).execute()
+        except Exception as audit_error:
+            if payload.get('user_id') and _is_audit_user_fk_error(audit_error):
+                logger.warning(
+                    "Invoice audit user %s is missing from users; retrying audit entry without user_id",
+                    payload['user_id']
+                )
+                payload['user_id'] = None
+                supabase.table(Tables.AUDIT_ENTRIES).insert(payload).execute()
+                return
+            raise
     except Exception as e:
         logger.warning(f"Failed to log audit entry: {e}")
