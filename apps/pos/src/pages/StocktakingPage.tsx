@@ -450,42 +450,19 @@ const StocktakingPage: React.FC = () => {
       <div className="max-w-[1600px] mx-auto p-4 lg:p-6 space-y-4">
         <div className="rounded-2xl border border-stone-200 bg-white p-5 lg:p-6">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <select
-                value={selectedDepartment}
-                onChange={(event) => setSelectedDepartment(event.target.value)}
-                className="h-12 min-w-[220px] rounded-xl border border-stone-300 bg-white px-3 text-base font-semibold text-slate-700 focus:ring-2 focus:ring-slate-400 focus:border-transparent"
-              >
-                <option value={ALL_DEPARTMENTS}>All Departments</option>
-                {departments.map((department) => (
-                  <option key={department} value={department}>
-                    {department}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => setOnlyChanged((prev) => !prev)}
-                className={`h-12 px-4 rounded-xl border text-base font-semibold transition-colors ${
-                  onlyChanged ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-stone-300 hover:bg-stone-100'
-                }`}
-              >
-                {onlyChanged ? 'Showing Changes' : 'Show Changes Only'}
-              </button>
-              <button
-                type="button"
-                onClick={() => void loadProducts()}
-                className="h-12 px-4 rounded-xl border border-stone-300 bg-white text-slate-700 hover:bg-stone-100 text-base font-semibold inline-flex items-center gap-2"
-              >
-                <RefreshCw className="w-5 h-5" />
-                Refresh
-              </button>
+            <div>
+              <div className="text-sm font-semibold text-slate-900">Stocktake Workspace</div>
+              <div className="text-sm text-stone-500 mt-1">
+                Count inventory, hold unfinished counts, and review recent sessions.
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={handleHoldStocktake}
-                className="h-12 px-4 rounded-xl border border-stone-300 bg-white text-slate-700 hover:bg-stone-100 text-base font-semibold inline-flex items-center gap-2"
+                className="h-11 px-4 rounded-xl border border-stone-300 bg-white text-slate-700 hover:bg-stone-100 text-sm font-semibold inline-flex items-center gap-2"
               >
-                <Archive className="w-5 h-5" />
+                <Archive className="w-4 h-4" />
                 Hold Stocktake
               </button>
             </div>
@@ -498,17 +475,17 @@ const StocktakingPage: React.FC = () => {
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-5">
-            <div className="rounded-xl border border-stone-200 bg-stone-50 p-4">
-              <div className="text-sm text-stone-500">Products in Scope</div>
-              <div className="text-3xl font-semibold text-slate-900 mt-1">{scopedProducts.length}</div>
+            <div className="rounded-xl border border-stone-200 bg-stone-50 px-4 py-3">
+              <div className="text-xs font-medium uppercase tracking-[0.08em] text-stone-500">Products in Scope</div>
+              <div className="text-2xl font-semibold text-slate-900 mt-1 leading-none">{scopedProducts.length}</div>
             </div>
-            <div className="rounded-xl border border-stone-200 bg-stone-50 p-4">
-              <div className="text-sm text-stone-500">Items with Variance</div>
-              <div className="text-3xl font-semibold text-slate-900 mt-1">{changedRows.length}</div>
+            <div className="rounded-xl border border-stone-200 bg-stone-50 px-4 py-3">
+              <div className="text-xs font-medium uppercase tracking-[0.08em] text-stone-500">Items with Variance</div>
+              <div className="text-2xl font-semibold text-slate-900 mt-1 leading-none">{changedRows.length}</div>
             </div>
-            <div className="rounded-xl border border-stone-200 bg-stone-50 p-4">
-              <div className="text-sm text-stone-500">Net Variance</div>
-              <div className={`text-3xl font-semibold mt-1 ${netVariance > 0 ? 'text-emerald-700' : netVariance < 0 ? 'text-rose-700' : 'text-slate-900'}`}>
+            <div className="rounded-xl border border-stone-200 bg-stone-50 px-4 py-3">
+              <div className="text-xs font-medium uppercase tracking-[0.08em] text-stone-500">Net Variance</div>
+              <div className={`text-2xl font-semibold mt-1 leading-none ${netVariance > 0 ? 'text-emerald-700' : netVariance < 0 ? 'text-rose-700' : 'text-slate-900'}`}>
                 {netVariance > 0 ? `+${netVariance}` : netVariance}
               </div>
             </div>
@@ -629,15 +606,49 @@ const StocktakingPage: React.FC = () => {
         </div>
 
         <div className="rounded-2xl border border-stone-200 bg-white p-4 lg:p-5">
-          <div className="relative max-w-xl">
-            <Search className="w-5 h-5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search product name, SKU, or barcode"
-              className="w-full h-12 rounded-xl border border-stone-300 pl-11 pr-4 text-base focus:ring-2 focus:ring-slate-400 focus:border-transparent"
-            />
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="relative w-full xl:max-w-xl">
+              <Search className="w-5 h-5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search product name, SKU, or barcode"
+                className="w-full h-12 rounded-xl border border-stone-300 pl-11 pr-4 text-base focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+              />
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap xl:justify-end">
+              <select
+                value={selectedDepartment}
+                onChange={(event) => setSelectedDepartment(event.target.value)}
+                className="h-12 min-w-[220px] rounded-xl border border-stone-300 bg-white px-3 text-base font-semibold text-slate-700 focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+              >
+                <option value={ALL_DEPARTMENTS}>All Departments</option>
+                {departments.map((department) => (
+                  <option key={department} value={department}>
+                    {department}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => setOnlyChanged((prev) => !prev)}
+                className={`h-12 px-4 rounded-xl border text-base font-semibold transition-colors ${
+                  onlyChanged ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-stone-300 hover:bg-stone-100'
+                }`}
+              >
+                {onlyChanged ? 'Showing Changes' : 'Show Changes Only'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void loadProducts()}
+                className="h-12 px-4 rounded-xl border border-stone-300 bg-white text-slate-700 hover:bg-stone-100 text-base font-semibold inline-flex items-center justify-center gap-2"
+              >
+                <RefreshCw className="w-5 h-5" />
+                Refresh
+              </button>
+            </div>
           </div>
 
           <div className="mt-4 border border-stone-200 rounded-xl overflow-hidden">
