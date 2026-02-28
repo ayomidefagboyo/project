@@ -1737,7 +1737,7 @@ const ReceiveItemsPage: React.FC = () => {
                           <th className="px-3 py-2 text-center w-16">Action</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-stone-100">
+                      <tbody className="divide-y divide-stone-100 [&>tr>td]:align-top">
                         {items.map((line, index) => {
                           const previousSellingPrice = line.product_id
                             ? toOptionalMoney(line.previous_selling_price)
