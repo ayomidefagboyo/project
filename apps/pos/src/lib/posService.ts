@@ -1812,8 +1812,16 @@ class POSService {
 
     this.offlineSyncPromise = (async () => {
       try {
-        const staffSession = getParsedStaffSession<{ session_token?: string; expires_at?: string }>();
+        const staffSession = getParsedStaffSession<{
+          session_token?: string;
+          expires_at?: string;
+          outlet_id?: string;
+          staff_profile?: { id?: string };
+        }>();
         const staffSessionToken = typeof staffSession?.session_token === 'string' ? staffSession.session_token.trim() : '';
+        const activeStaffProfileId =
+          typeof staffSession?.staff_profile?.id === 'string' ? staffSession.staff_profile.id.trim() : '';
+        const activeOutletId = typeof staffSession?.outlet_id === 'string' ? staffSession.outlet_id.trim() : '';
         if (!staffSessionToken) {
           logger.warn('Skipping offline transaction sync: no active POS staff session.');
           return 0;
@@ -1842,6 +1850,25 @@ class POSService {
 
         for (const transaction of offlineTransactions) {
           try {
+            const queuedCashierId =
+              typeof transaction?.cashier_id === 'string' ? transaction.cashier_id.trim() : '';
+            const queuedOutletId =
+              typeof transaction?.outlet_id === 'string' ? transaction.outlet_id.trim() : '';
+
+            if (activeOutletId && queuedOutletId && queuedOutletId !== activeOutletId) {
+              logger.warn(
+                `Skipping offline transaction sync for ${transaction?.offline_id || 'queued sale'}: queued outlet does not match the active staff session.`
+              );
+              continue;
+            }
+
+            if (activeStaffProfileId && queuedCashierId && queuedCashierId !== activeStaffProfileId) {
+              logger.warn(
+                `Skipping offline transaction sync for ${transaction?.offline_id || 'queued sale'}: queued cashier does not match the active staff session.`
+              );
+              continue;
+            }
+
             await this.createTransaction(transaction);
             syncedCount++;
 
@@ -1851,11 +1878,17 @@ class POSService {
               await offlineDatabase.removeTransaction(transaction.offline_id);
             }
           } catch (error) {
-            logger.error('Failed to sync offline transaction:', error);
             const statusCode = typeof (error as { status?: unknown })?.status === 'number'
               ? Number((error as { status?: unknown }).status)
               : 0;
-            if (statusCode === 401 || statusCode === 403) {
+            const errorMessage =
+              error instanceof Error
+                ? error.message
+                : typeof (error as { message?: unknown })?.message === 'string'
+                  ? String((error as { message?: unknown }).message)
+                  : 'Unknown offline sync error';
+
+            if (statusCode === 401) {
               logger.warn('Stopping offline transaction sync: POS staff session is no longer authorized.');
               clearStaffSession();
               if (typeof window !== 'undefined') {
@@ -1863,6 +1896,16 @@ class POSService {
               }
               break;
             }
+
+            if (statusCode === 403) {
+              logger.warn(`Skipping offline transaction sync: ${errorMessage}`);
+              if (transaction.offline_id) {
+                failedTransactions.push(transaction.offline_id);
+              }
+              continue;
+            }
+
+            logger.error('Failed to sync offline transaction:', error);
             if (transaction.offline_id) {
               failedTransactions.push(transaction.offline_id);
             }
