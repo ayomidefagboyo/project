@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Archive, CheckCircle2, History, Play, RefreshCw, Search, Trash2 } from 'lucide-react';
+import { AlertTriangle, Archive, CheckCircle2, History, Play, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { useOutlet } from '@/contexts/OutletContext';
 import { posService, type POSProduct, type POSDepartment, type StocktakeHistoryItem } from '@/lib/posService';
 import { getParsedStaffSession } from '@/lib/staffSessionStorage';
@@ -91,6 +91,7 @@ const StocktakingPage: React.FC = () => {
   const [activeHeldDraftId, setActiveHeldDraftId] = useState<string | null>(null);
   const [stocktakeHistory, setStocktakeHistory] = useState<StocktakeHistoryItem[]>([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [showStocktakeHistoryModal, setShowStocktakeHistoryModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const loadRequestRef = useRef(0);
@@ -374,6 +375,11 @@ const StocktakingPage: React.FC = () => {
     }
   };
 
+  const openStocktakeHistoryModal = () => {
+    setShowStocktakeHistoryModal(true);
+    void loadStocktakeHistory();
+  };
+
   const handleApplyStocktake = async () => {
     if (!currentOutlet?.id) return;
 
@@ -449,32 +455,13 @@ const StocktakingPage: React.FC = () => {
     <div className="h-full min-h-0 overflow-y-auto bg-stone-50">
       <div className="max-w-[1600px] mx-auto p-4 lg:p-6 space-y-4">
         <div className="rounded-2xl border border-stone-200 bg-white p-5 lg:p-6">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <div>
-              <div className="text-sm font-semibold text-slate-900">Stocktake Workspace</div>
-              <div className="text-sm text-stone-500 mt-1">
-                Count inventory, hold unfinished counts, and review recent sessions.
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleHoldStocktake}
-                className="h-11 px-4 rounded-xl border border-stone-300 bg-white text-slate-700 hover:bg-stone-100 text-sm font-semibold inline-flex items-center gap-2"
-              >
-                <Archive className="w-4 h-4" />
-                Hold Stocktake
-              </button>
-            </div>
-          </div>
-
           {activeHeldDraftId && (
-            <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
               Continuing a held stocktake. Save it again to update the held copy, or apply it to clear completed rows.
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-5">
+          <div className={`grid grid-cols-1 md:grid-cols-3 gap-3 ${activeHeldDraftId ? 'mt-4' : ''}`}>
             <div className="rounded-xl border border-stone-200 bg-stone-50 px-4 py-3">
               <div className="text-xs font-medium uppercase tracking-[0.08em] text-stone-500">Products in Scope</div>
               <div className="text-2xl font-semibold text-slate-900 mt-1 leading-none">{scopedProducts.length}</div>
@@ -488,119 +475,6 @@ const StocktakingPage: React.FC = () => {
               <div className={`text-2xl font-semibold mt-1 leading-none ${netVariance > 0 ? 'text-emerald-700' : netVariance < 0 ? 'text-rose-700' : 'text-slate-900'}`}>
                 {netVariance > 0 ? `+${netVariance}` : netVariance}
               </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <div className="rounded-2xl border border-stone-200 bg-white p-4 lg:p-5">
-            <div className="flex items-center gap-2">
-              <Archive className="w-5 h-5 text-slate-700" />
-              <h3 className="text-lg font-semibold text-slate-900">Held Stocktakes</h3>
-            </div>
-            <div className="mt-4 space-y-3">
-              {heldDrafts.length === 0 ? (
-                <p className="text-sm text-stone-500">No held stocktakes yet.</p>
-              ) : (
-                heldDrafts.map((draft) => {
-                  const draftEditIds = Object.keys(draft.edits);
-                  const draftVarianceCount = draftEditIds.filter((productId) => {
-                    const product = productsById.get(productId);
-                    if (!product) return true;
-                    return (draft.edits[productId]?.counted_quantity ?? product.quantity_on_hand) !== product.quantity_on_hand;
-                  }).length;
-
-                  return (
-                    <div key={draft.id} className="rounded-xl border border-stone-200 bg-stone-50 p-4">
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="min-w-0">
-                          <div className="font-semibold text-slate-900">
-                            {draft.selected_department === ALL_DEPARTMENTS ? 'All Departments' : draft.selected_department}
-                          </div>
-                          <div className="text-sm text-stone-500 mt-1">
-                            {draftEditIds.length} saved row{draftEditIds.length === 1 ? '' : 's'} • {draftVarianceCount} variance item{draftVarianceCount === 1 ? '' : 's'}
-                          </div>
-                          <div className="text-xs text-stone-500 mt-1">
-                            Updated {formatDateTime(draft.updated_at)}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleLoadHeldDraft(draft)}
-                            className="h-10 px-3 rounded-lg border border-stone-300 bg-white text-slate-700 hover:bg-stone-100 text-sm font-semibold inline-flex items-center gap-2"
-                          >
-                            <Play className="w-4 h-4" />
-                            Load
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteHeldDraft(draft.id)}
-                            className="h-10 w-10 rounded-lg border border-stone-300 bg-white text-rose-600 hover:bg-rose-50 inline-flex items-center justify-center"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-stone-200 bg-white p-4 lg:p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <History className="w-5 h-5 text-slate-700" />
-                <h3 className="text-lg font-semibold text-slate-900">Stocktake History</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => void loadStocktakeHistory()}
-                className="h-10 px-3 rounded-lg border border-stone-300 bg-white text-slate-700 hover:bg-stone-100 text-sm font-semibold inline-flex items-center gap-2"
-              >
-                <RefreshCw className="w-4 h-4" />
-                Refresh
-              </button>
-            </div>
-            <div className="mt-4 space-y-3">
-              {isHistoryLoading ? (
-                <p className="text-sm text-stone-500">Loading stocktake history...</p>
-              ) : stocktakeHistory.length === 0 ? (
-                <p className="text-sm text-stone-500">No stocktake history yet.</p>
-              ) : (
-                stocktakeHistory.map((entry) => (
-                  <div key={entry.session_id} className="rounded-xl border border-stone-200 bg-stone-50 p-4">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <div className="font-semibold text-slate-900">
-                          {entry.performed_by_name || entry.performed_by || 'Staff'}
-                        </div>
-                        <div className="text-xs text-stone-500 mt-1">{formatDateTime(entry.completed_at || entry.started_at)}</div>
-                      </div>
-                      <div className={`text-sm font-semibold ${entry.net_quantity_variance > 0 ? 'text-emerald-700' : entry.net_quantity_variance < 0 ? 'text-rose-700' : 'text-slate-700'}`}>
-                        {entry.net_quantity_variance > 0 ? `+${entry.net_quantity_variance}` : entry.net_quantity_variance}
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mt-3 text-sm text-stone-600">
-                      <div>{entry.adjusted_items} adjusted</div>
-                      <div>{entry.unchanged_items} unchanged</div>
-                      <div>+{entry.positive_variance_items} / -{entry.negative_variance_items}</div>
-                      <div>Value {Number(entry.total_variance_value || 0).toLocaleString()}</div>
-                    </div>
-                    {entry.top_reasons && entry.top_reasons.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-3">
-                        {entry.top_reasons.map((reason) => (
-                          <span key={`${entry.session_id}-${reason}`} className="px-2.5 py-1 rounded-full bg-white border border-stone-200 text-xs font-medium text-stone-600">
-                            {reason}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
             </div>
           </div>
         </div>
@@ -751,17 +625,171 @@ const StocktakingPage: React.FC = () => {
               )}
             </div>
 
-            <button
-              type="button"
-              onClick={handleApplyStocktake}
-              disabled={isSaving || changedRows.length === 0}
-              className="h-12 px-6 rounded-xl btn-brand text-white text-base lg:text-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSaving ? 'Applying Stocktake...' : 'Apply Stocktake'}
-            </button>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <button
+                type="button"
+                onClick={openStocktakeHistoryModal}
+                className="h-12 px-4 rounded-xl border border-stone-300 bg-white text-slate-700 hover:bg-stone-100 text-sm font-semibold inline-flex items-center justify-center gap-2"
+              >
+                <History className="w-4 h-4" />
+                Stocktake History
+              </button>
+              <button
+                type="button"
+                onClick={handleHoldStocktake}
+                className="h-12 px-4 rounded-xl border border-stone-300 bg-white text-slate-700 hover:bg-stone-100 text-sm font-semibold inline-flex items-center justify-center gap-2"
+              >
+                <Archive className="w-4 h-4" />
+                Hold Stocktake
+              </button>
+              <button
+                type="button"
+                onClick={handleApplyStocktake}
+                disabled={isSaving || changedRows.length === 0}
+                className="h-12 px-6 rounded-xl btn-brand text-white text-base lg:text-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSaving ? 'Applying Stocktake...' : 'Apply Stocktake'}
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
+      {showStocktakeHistoryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4">
+          <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-stone-200 px-5 py-4">
+              <div className="flex items-center gap-2">
+                <History className="w-5 h-5 text-slate-700" />
+                <h3 className="text-lg font-semibold text-slate-900">Stocktake History</h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void loadStocktakeHistory()}
+                  className="h-10 px-3 rounded-lg border border-stone-300 bg-white text-slate-700 hover:bg-stone-100 text-sm font-semibold inline-flex items-center gap-2"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowStocktakeHistoryModal(false)}
+                  className="h-10 w-10 rounded-lg border border-stone-300 bg-white text-slate-700 hover:bg-stone-100 inline-flex items-center justify-center"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="max-h-[calc(90vh-72px)] overflow-y-auto px-5 py-4 space-y-6">
+              <section>
+                <div className="flex items-center gap-2">
+                  <Archive className="w-5 h-5 text-slate-700" />
+                  <h4 className="text-base font-semibold text-slate-900">Held Stocktakes</h4>
+                </div>
+                <div className="mt-3 space-y-3">
+                  {heldDrafts.length === 0 ? (
+                    <p className="text-sm text-stone-500">No held stocktakes yet.</p>
+                  ) : (
+                    heldDrafts.map((draft) => {
+                      const draftEditIds = Object.keys(draft.edits);
+                      const draftVarianceCount = draftEditIds.filter((productId) => {
+                        const product = productsById.get(productId);
+                        if (!product) return true;
+                        return (draft.edits[productId]?.counted_quantity ?? product.quantity_on_hand) !== product.quantity_on_hand;
+                      }).length;
+
+                      return (
+                        <div key={draft.id} className="rounded-xl border border-stone-200 bg-stone-50 p-4">
+                          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                            <div className="min-w-0">
+                              <div className="font-semibold text-slate-900">
+                                {draft.selected_department === ALL_DEPARTMENTS ? 'All Departments' : draft.selected_department}
+                              </div>
+                              <div className="text-sm text-stone-500 mt-1">
+                                {draftEditIds.length} saved row{draftEditIds.length === 1 ? '' : 's'} • {draftVarianceCount} variance item{draftVarianceCount === 1 ? '' : 's'}
+                              </div>
+                              <div className="text-xs text-stone-500 mt-1">
+                                Updated {formatDateTime(draft.updated_at)}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleLoadHeldDraft(draft);
+                                  setShowStocktakeHistoryModal(false);
+                                }}
+                                className="h-10 px-3 rounded-lg border border-stone-300 bg-white text-slate-700 hover:bg-stone-100 text-sm font-semibold inline-flex items-center gap-2"
+                              >
+                                <Play className="w-4 h-4" />
+                                Load
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteHeldDraft(draft.id)}
+                                className="h-10 w-10 rounded-lg border border-stone-300 bg-white text-rose-600 hover:bg-rose-50 inline-flex items-center justify-center"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </section>
+
+              <section>
+                <div className="flex items-center gap-2">
+                  <History className="w-5 h-5 text-slate-700" />
+                  <h4 className="text-base font-semibold text-slate-900">Recent Sessions</h4>
+                </div>
+                <div className="mt-3 space-y-3">
+                  {isHistoryLoading ? (
+                    <p className="text-sm text-stone-500">Loading stocktake history...</p>
+                  ) : stocktakeHistory.length === 0 ? (
+                    <p className="text-sm text-stone-500">No stocktake history yet.</p>
+                  ) : (
+                    stocktakeHistory.map((entry) => (
+                      <div key={entry.session_id} className="rounded-xl border border-stone-200 bg-stone-50 p-4">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <div className="font-semibold text-slate-900">
+                              {entry.performed_by_name || entry.performed_by || 'Staff'}
+                            </div>
+                            <div className="text-xs text-stone-500 mt-1">{formatDateTime(entry.completed_at || entry.started_at)}</div>
+                          </div>
+                          <div className={`text-sm font-semibold ${entry.net_quantity_variance > 0 ? 'text-emerald-700' : entry.net_quantity_variance < 0 ? 'text-rose-700' : 'text-slate-700'}`}>
+                            {entry.net_quantity_variance > 0 ? `+${entry.net_quantity_variance}` : entry.net_quantity_variance}
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mt-3 text-sm text-stone-600">
+                          <div>{entry.adjusted_items} adjusted</div>
+                          <div>{entry.unchanged_items} unchanged</div>
+                          <div>+{entry.positive_variance_items} / -{entry.negative_variance_items}</div>
+                          <div>Value {Number(entry.total_variance_value || 0).toLocaleString()}</div>
+                        </div>
+                        {entry.top_reasons && entry.top_reasons.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mt-3">
+                            {entry.top_reasons.map((reason) => (
+                              <span key={`${entry.session_id}-${reason}`} className="px-2.5 py-1 rounded-full bg-white border border-stone-200 text-xs font-medium text-stone-600">
+                                {reason}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
