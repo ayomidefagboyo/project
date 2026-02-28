@@ -49,12 +49,14 @@ interface BulkProductData {
 }
 
 const ProductManagement: React.FC = () => {
+  const PAGE_SIZE = 100;
   const { currentOutlet } = useOutlet();
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedSupplier, setSelectedSupplier] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
   const [showBulkAdd, setShowBulkAdd] = useState(false);
   const [bulkProducts, setBulkProducts] = useState<BulkProductData[]>([]);
   const [isSaving, setIsSaving] = useState(false);
@@ -71,7 +73,7 @@ const ProductManagement: React.FC = () => {
     'Other'
   ];
 
-  // Load products function (stable with useCallback)
+  // Load the full outlet catalog, then filter and paginate in the UI.
   const loadProducts = useCallback(async () => {
     if (!currentOutlet?.id) {
       console.error('No outlet selected');
@@ -82,26 +84,19 @@ const ProductManagement: React.FC = () => {
     console.log('📦 Loading products for outlet:', currentOutlet.name, '(ID:', currentOutlet.id + ')');
     setIsLoading(true);
     try {
-      const response = await posService.getProducts(currentOutlet.id, {
-        size: 100,
-        search: searchQuery || undefined,
-        category: selectedCategory || undefined
+      const allProducts = await posService.getAllProducts(currentOutlet.id, {
+        activeOnly: false,
       });
-      
-      if (response?.offline) {
-        console.log('✅ Loaded', response.items.length, 'products from offline cache (shared with POS)');
-      } else {
-        console.log('✅ Loaded', response?.items?.length || 0, 'products from backend API');
-      }
-      
-      setProducts(response?.items || []);
+
+      console.log('✅ Loaded', allProducts.length, 'products for dashboard catalog');
+      setProducts(allProducts || []);
     } catch (error: any) {
       console.error('❌ Error loading products:', error.message);
       // Don't alert on offline fallback - let the service handle it gracefully
     } finally {
       setIsLoading(false);
     }
-  }, [currentOutlet?.id, currentOutlet?.name, searchQuery, selectedCategory]);
+  }, [currentOutlet?.id, currentOutlet?.name]);
 
   // Load products on mount and when outlet changes
   useEffect(() => {
@@ -109,6 +104,10 @@ const ProductManagement: React.FC = () => {
       loadProducts();
     }
   }, [currentOutlet?.id, loadProducts]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedCategory, selectedSupplier]);
 
   // Comprehensive real-time sync for products and inventory
   const { isConnected, syncStats } = useRealtimeSync({
@@ -149,6 +148,12 @@ const ProductManagement: React.FC = () => {
 
   // Get unique suppliers
   const suppliers = Array.from(new Set(products.map(p => p.vendor_id).filter(Boolean)));
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));
+  const clampedCurrentPage = Math.min(currentPage, totalPages);
+  const paginatedProducts = filteredProducts.slice(
+    (clampedCurrentPage - 1) * PAGE_SIZE,
+    clampedCurrentPage * PAGE_SIZE
+  );
 
   // Add new product row
   const addNewProduct = () => {
@@ -283,7 +288,8 @@ const ProductManagement: React.FC = () => {
 
   // Calculate totals
   const totals = {
-    totalProducts: filteredProducts.length,
+    totalProducts: products.length,
+    visibleProducts: filteredProducts.length,
     totalStockValue: filteredProducts.reduce((sum, p) => sum + ((p.quantity_on_hand || 0) * (p.cost_price || 0)), 0),
     totalSellingValue: filteredProducts.reduce((sum, p) => sum + ((p.quantity_on_hand || 0) * (p.unit_price || 0)), 0),
     lowStockItems: filteredProducts.filter(p => (p.quantity_on_hand || 0) <= (p.reorder_level || 0)).length,
@@ -299,7 +305,9 @@ const ProductManagement: React.FC = () => {
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Product Management</h1>
-            <p className="text-gray-600 mt-1">{currentOutlet?.name} • {totals.totalProducts} products</p>
+            <p className="text-gray-600 mt-1">
+              {currentOutlet?.name} • {totals.totalProducts} total • {totals.visibleProducts} in current view
+            </p>
           </div>
 
           <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 w-full lg:w-auto">
@@ -447,7 +455,7 @@ const ProductManagement: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                filteredProducts.map((product, index) => {
+                paginatedProducts.map((product) => {
                   const stockValue = (product.quantity_on_hand || 0) * (product.cost_price || 0);
                   const isLowStock = (product.quantity_on_hand || 0) <= (product.reorder_level || 0);
                   const isOutOfStock = (product.quantity_on_hand || 0) === 0;
@@ -631,6 +639,35 @@ const ProductManagement: React.FC = () => {
             </tbody>
           </table>
         </div>
+
+        {!isLoading && filteredProducts.length > 0 && (
+          <div className="flex flex-col gap-3 border-t border-gray-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-gray-600">
+              Showing {(clampedCurrentPage - 1) * PAGE_SIZE + 1}-{Math.min(clampedCurrentPage * PAGE_SIZE, filteredProducts.length)} of {filteredProducts.length}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                disabled={clampedCurrentPage <= 1}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <span className="text-sm text-gray-600">
+                Page {clampedCurrentPage} of {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                disabled={clampedCurrentPage >= totalPages}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -9,6 +9,7 @@ import SettingsPage from './pages/SettingsPage';
 import StocktakingPage from './pages/StocktakingPage';
 import TransferToOutletPage from './pages/TransferToOutletPage';
 import PharmacyPatientsPage from './pages/PharmacyPatientsPage';
+import PurchasingPage from './pages/PurchasingPage';
 import AppLayout from './components/layout/AppLayout';
 import { OutletProvider, useOutlet } from './contexts/OutletContext';
 import { Upload, Download, Plus, Wifi, WifiOff, ChevronDown, FileText, RotateCcw } from 'lucide-react';
@@ -931,6 +932,8 @@ function AppContent() {
       ? productManagementHeader
       : location.pathname === '/receive'
         ? receiveItemsHeader
+      : location.pathname === '/purchasing'
+        ? null
       : location.pathname === '/stocktaking'
         ? stocktakingHeader
         : location.pathname === '/transfer-outlet'
@@ -947,6 +950,7 @@ function AppContent() {
         <Route path="/" element={<POSDashboard ref={posDashboardRef} />} />
         <Route path="/transactions" element={<TransactionsPage />} />
         <Route path="/products" element={<ProductManagement ref={productManagementRef} />} />
+        <Route path="/purchasing" element={canAccessReceive ? <PurchasingPage /> : <Navigate to="/" replace />} />
         <Route path="/receive" element={canAccessReceive ? <ReceiveItemsPage /> : <Navigate to="/" replace />} />
         <Route path="/stocktaking" element={canAccessStocktaking ? <StocktakingPage /> : <Navigate to="/" replace />} />
         <Route path="/transfer-outlet" element={canAccessTransfer ? <TransferToOutletPage /> : <Navigate to="/" replace />} />

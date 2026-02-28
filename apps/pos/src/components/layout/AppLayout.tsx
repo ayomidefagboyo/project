@@ -15,6 +15,7 @@ import {
   Calendar,
   LogOut,
   Truck,
+  ShoppingCart,
   ClipboardCheck,
   ArrowLeftRight,
   HeartPulse,
@@ -58,6 +59,12 @@ const navItems: NavItem[] = [
     label: 'Items',
     sublabel: 'Products & Inventory',
     icon: Package,
+  },
+  {
+    path: '/purchasing',
+    label: 'Purchasing',
+    sublabel: 'Replenish Stock',
+    icon: ShoppingCart,
   },
   {
     path: '/receive',
@@ -126,8 +133,8 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, headerContent, staffRol
     if (item.managerOrPharmacist && !(isManager || isPharmacist)) return false;
     if (item.managerOnly && !isManager) return false;
     if (item.pharmacistOnly && !isPharmacist) return false;
-    if (item.path === '/receive' && !canAccessReceive) return false;
-    if (isCashier && (item.path === '/receive' || item.path === '/eod')) return false;
+    if ((item.path === '/receive' || item.path === '/purchasing') && !canAccessReceive) return false;
+    if (isCashier && (item.path === '/receive' || item.path === '/purchasing' || item.path === '/eod')) return false;
     return true;
   });
 

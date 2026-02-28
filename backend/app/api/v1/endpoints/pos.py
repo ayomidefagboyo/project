@@ -7,11 +7,13 @@ from fastapi import APIRouter, HTTPException, Depends, status, Query, Header, Bo
 from typing import List, Optional, Dict, Any, Tuple, Set
 from datetime import datetime, date, timedelta
 import asyncio
+import math
 import uuid
 import logging
 import json
 import re
 from decimal import Decimal
+from pydantic import BaseModel, Field
 
 from app.core.database import get_supabase_admin, Tables
 from app.core.security import CurrentUser
@@ -53,6 +55,27 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 PAYMENT_METHOD_VALUES = {method.value for method in PaymentMethod}
 POS_TRANSACTIONS_MISSING_COLUMNS: Set[str] = set()
+PURCHASE_ORDER_NOTE_MARKER = "[Purchase order: yes]"
+PURCHASE_ORDER_SOURCE_PREFIX = "[PO source:"
+PURCHASE_ORDER_DEPARTMENT_PREFIX = "[PO department:"
+PURCHASE_ORDER_REQUESTED_FOR_PREFIX = "[PO requested for:"
+
+
+class PurchaseOrderDraftLine(BaseModel):
+    product_id: str = Field(..., min_length=1)
+    quantity: int = Field(..., ge=1)
+    vendor_id: Optional[str] = None
+    unit_cost: Optional[float] = Field(None, ge=0)
+    notes: Optional[str] = None
+
+
+class PurchaseOrderDraftRequest(BaseModel):
+    outlet_id: str = Field(..., min_length=1)
+    source: str = Field("replenishment", min_length=1, max_length=100)
+    department: Optional[str] = None
+    requested_for_date: Optional[str] = None
+    notes: Optional[str] = None
+    lines: List[PurchaseOrderDraftLine] = Field(default_factory=list)
 
 
 def _is_missing_cashier_name_error(exc: Exception) -> bool:
@@ -3861,8 +3884,34 @@ async def get_sales_stats(
             transfer_sales += allocations.get('transfer', Decimal(0))
             pos_sales += allocations.get('pos', Decimal(0))
 
-        # Top products (simplified)
-        top_products = []
+        product_totals: Dict[str, Dict[str, Decimal]] = {}
+        for tx in transactions:
+            for item in tx.get('pos_transaction_items', []) or []:
+                product_name = (
+                    str(item.get('product_name') or '').strip()
+                    or str((item.get('pos_products') or {}).get('name') or '').strip()
+                    or 'Unknown Product'
+                )
+                if product_name not in product_totals:
+                    product_totals[product_name] = {
+                        'quantity': Decimal('0'),
+                        'revenue': Decimal('0'),
+                    }
+                product_totals[product_name]['quantity'] += Decimal(str(item.get('quantity') or 0))
+                product_totals[product_name]['revenue'] += Decimal(str(item.get('line_total') or 0))
+
+        top_products = [
+            {
+                'name': name,
+                'quantity': float(data['quantity']),
+                'revenue': float(data['revenue']),
+            }
+            for name, data in sorted(
+                product_totals.items(),
+                key=lambda entry: entry[1]['revenue'],
+                reverse=True
+            )[:10]
+        ]
 
         return SalesStatsResponse(
             total_sales=total_sales,
@@ -3879,6 +3928,825 @@ async def get_sales_stats(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch sales stats: {str(e)}"
+        )
+
+
+# ===============================================
+# PURCHASING / REPLENISHMENT
+# ===============================================
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None or value == '':
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    return int(round(_safe_float(value, default)))
+
+
+def _upsert_pos_note_marker(notes: Optional[str], marker_prefix: str, marker_line: Optional[str]) -> str:
+    lines = [line.strip() for line in str(notes or '').splitlines() if line.strip()]
+    filtered = [line for line in lines if not line.startswith(marker_prefix)]
+    if marker_line:
+        filtered.append(marker_line.strip())
+    return '\n'.join(filtered)
+
+
+def _has_purchase_order_marker(notes: Optional[str]) -> bool:
+    return PURCHASE_ORDER_NOTE_MARKER in str(notes or '')
+
+
+def _extract_invoice_item_marker(notes: Optional[str]) -> Optional[str]:
+    match = re.search(r"\[Invoice item:\s*([^\]]+)\]", str(notes or ''), flags=re.IGNORECASE)
+    if not match:
+        return None
+    return str(match.group(1) or '').strip() or None
+
+
+def _normalize_purchase_mode(value: Optional[str]) -> str:
+    normalized = str(value or 'all').strip().lower()
+    if normalized in {'lowstock', 'low-stock'}:
+        normalized = 'low_stock'
+    if normalized in {'fastmovers', 'fast-moving'}:
+        normalized = 'fast_movers'
+    if normalized not in {'all', 'low_stock', 'fast_movers'}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="mode must be one of: all, low_stock, fast_movers"
+        )
+    return normalized
+
+
+def _insert_invoice_items_pos_compat(supabase, rows: List[Dict[str, Any]]):
+    if not rows:
+        return None
+
+    payload_rows = [dict(row) for row in rows]
+    removed_columns: List[str] = []
+    for _ in range(20):
+        try:
+            return supabase.table(Tables.INVOICE_ITEMS).insert(payload_rows).execute()
+        except Exception as exc:
+            missing_column = _extract_missing_column_name(exc)
+            if missing_column:
+                removed_any = False
+                next_rows: List[Dict[str, Any]] = []
+                for row in payload_rows:
+                    if missing_column in row:
+                        row = dict(row)
+                        row.pop(missing_column, None)
+                        removed_any = True
+                    next_rows.append(row)
+                if removed_any:
+                    payload_rows = next_rows
+                    removed_columns.append(missing_column)
+                    logger.warning(
+                        "invoice_items.%s missing in schema cache during purchase-order insert; retrying without it",
+                        missing_column
+                    )
+                    continue
+            raise
+
+    raise Exception(
+        f"Failed to insert invoice_items after compatibility retries; removed columns={removed_columns}"
+    )
+
+
+def _build_purchase_order_notes(
+    base_notes: Optional[str],
+    source: Optional[str],
+    department: Optional[str],
+    requested_for_date: Optional[str]
+) -> str:
+    notes = _upsert_pos_note_marker(base_notes, '[Purchase order:', PURCHASE_ORDER_NOTE_MARKER)
+    notes = _upsert_pos_note_marker(
+        notes,
+        PURCHASE_ORDER_SOURCE_PREFIX,
+        f"[PO source: {str(source or 'manual').strip() or 'manual'}]"
+    )
+    notes = _upsert_pos_note_marker(
+        notes,
+        PURCHASE_ORDER_DEPARTMENT_PREFIX,
+        f"[PO department: {str(department).strip()}]" if str(department or '').strip() else None
+    )
+    notes = _upsert_pos_note_marker(
+        notes,
+        PURCHASE_ORDER_REQUESTED_FOR_PREFIX,
+        f"[PO requested for: {requested_for_date}]" if requested_for_date else None
+    )
+    return notes
+
+
+def _build_purchasing_snapshot(
+    supabase,
+    outlet_id: str,
+    mode: str,
+    department: Optional[str],
+    vendor_id: Optional[str],
+    date_from: Optional[date],
+    date_to: Optional[date],
+) -> Dict[str, Any]:
+    start_date = date_from or (date.today() - timedelta(days=29))
+    end_date = date_to or date.today()
+    if start_date > end_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="date_from cannot be later than date_to"
+        )
+
+    mode_value = _normalize_purchase_mode(mode)
+    normalized_department = str(department or '').strip().lower()
+    normalized_vendor_id = str(vendor_id or '').strip()
+    window_days = max(1, (end_date - start_date).days + 1)
+
+    product_result = (
+        supabase.table(Tables.POS_PRODUCTS)
+        .select(
+            'id,name,sku,barcode,category,vendor_id,cost_price,unit_price,quantity_on_hand,'
+            'reorder_level,reorder_quantity,last_received,is_active'
+        )
+        .eq('outlet_id', outlet_id)
+        .eq('is_active', True)
+        .execute()
+    )
+    product_rows = product_result.data or []
+    product_ids = [str(row.get('id') or '').strip() for row in product_rows if str(row.get('id') or '').strip()]
+    products_by_id = {
+        str(row.get('id') or '').strip(): row
+        for row in product_rows
+        if str(row.get('id') or '').strip()
+    }
+
+    vendor_ids = sorted(
+        {
+            str(row.get('vendor_id') or '').strip()
+            for row in product_rows
+            if str(row.get('vendor_id') or '').strip()
+        }
+    )
+    vendor_name_by_id: Dict[str, str] = {}
+    if vendor_ids:
+        vendor_rows = (
+            supabase.table(Tables.VENDORS)
+            .select('id,name')
+            .in_('id', vendor_ids)
+            .execute()
+        ).data or []
+        vendor_name_by_id = {
+            str(row.get('id') or '').strip(): str(row.get('name') or '').strip() or 'Vendor'
+            for row in vendor_rows
+            if str(row.get('id') or '').strip()
+        }
+
+    transactions = (
+        supabase.table('pos_transactions')
+        .select('id,transaction_date')
+        .eq('outlet_id', outlet_id)
+        .eq('status', 'completed')
+        .neq('is_voided', True)
+        .gte('transaction_date', f"{start_date.isoformat()}T00:00:00")
+        .lte('transaction_date', f"{end_date.isoformat()}T23:59:59")
+        .execute()
+    ).data or []
+    transaction_ids = [str(row.get('id') or '').strip() for row in transactions if str(row.get('id') or '').strip()]
+    transaction_date_by_id = {
+        str(row.get('id') or '').strip(): str(row.get('transaction_date') or '').strip()
+        for row in transactions
+        if str(row.get('id') or '').strip()
+    }
+
+    sales_by_product: Dict[str, Dict[str, Any]] = {}
+    if transaction_ids:
+        for start in range(0, len(transaction_ids), 200):
+            chunk = transaction_ids[start:start + 200]
+            item_rows = (
+                supabase.table(Tables.POS_TRANSACTION_ITEMS)
+                .select('transaction_id,product_id,quantity,line_total,product_name')
+                .in_('transaction_id', chunk)
+                .execute()
+            ).data or []
+
+            for item in item_rows:
+                product_id_value = str(item.get('product_id') or '').strip()
+                if not product_id_value or product_id_value not in products_by_id:
+                    continue
+                sales_entry = sales_by_product.setdefault(
+                    product_id_value,
+                    {
+                        'qty': 0.0,
+                        'revenue': 0.0,
+                        'transactions': 0,
+                        'last_sold_at': None,
+                    }
+                )
+                sales_entry['qty'] += _safe_float(item.get('quantity'), 0)
+                sales_entry['revenue'] += _safe_float(item.get('line_total'), 0)
+                sales_entry['transactions'] += 1
+                tx_id = str(item.get('transaction_id') or '').strip()
+                tx_date = transaction_date_by_id.get(tx_id)
+                if tx_date and (sales_entry['last_sold_at'] is None or tx_date > str(sales_entry['last_sold_at'])):
+                    sales_entry['last_sold_at'] = tx_date
+
+    invoice_rows = (
+        supabase.table(Tables.INVOICES)
+        .select('id,invoice_number,vendor_id,status,notes,issue_date,due_date,created_at,total')
+        .eq('outlet_id', outlet_id)
+        .not_.is_('vendor_id', 'null')
+        .execute()
+    ).data or []
+
+    purchase_orders = [
+        row for row in invoice_rows
+        if _has_purchase_order_marker(row.get('notes'))
+        and (not normalized_vendor_id or str(row.get('vendor_id') or '').strip() == normalized_vendor_id)
+    ]
+    purchase_order_ids = [str(row.get('id') or '').strip() for row in purchase_orders if str(row.get('id') or '').strip()]
+
+    po_items_by_invoice: Dict[str, List[Dict[str, Any]]] = {}
+    received_qty_by_item_id: Dict[str, float] = {}
+    if purchase_order_ids:
+        for start in range(0, len(purchase_order_ids), 200):
+            chunk = purchase_order_ids[start:start + 200]
+            po_item_rows = (
+                supabase.table(Tables.INVOICE_ITEMS)
+                .select('id,invoice_id,product_id,description,quantity,unit_price,total')
+                .in_('invoice_id', chunk)
+                .execute()
+            ).data or []
+            for row in po_item_rows:
+                invoice_key = str(row.get('invoice_id') or '').strip()
+                if not invoice_key:
+                    continue
+                po_items_by_invoice.setdefault(invoice_key, []).append(row)
+
+            movement_rows = (
+                supabase.table('pos_stock_movements')
+                .select('reference_id,product_id,quantity_change,notes,movement_type')
+                .in_('reference_id', chunk)
+                .eq('reference_type', 'vendor_invoice')
+                .execute()
+            ).data or []
+            for movement in movement_rows:
+                if str(movement.get('movement_type') or '').strip().lower() != 'receive':
+                    continue
+                invoice_key = str(movement.get('reference_id') or '').strip()
+                if not invoice_key:
+                    continue
+                quantity_change = abs(_safe_float(movement.get('quantity_change'), 0))
+                if quantity_change <= 0:
+                    continue
+                line_id = _extract_invoice_item_marker(movement.get('notes'))
+                if line_id:
+                    received_qty_by_item_id[line_id] = received_qty_by_item_id.get(line_id, 0.0) + quantity_change
+                    continue
+
+                product_key = str(movement.get('product_id') or '').strip()
+                if not product_key:
+                    continue
+                matching_lines = [
+                    row for row in po_items_by_invoice.get(invoice_key, [])
+                    if str(row.get('product_id') or '').strip() == product_key
+                ]
+                if len(matching_lines) == 1:
+                    line_id = str(matching_lines[0].get('id') or '').strip()
+                    if line_id:
+                        received_qty_by_item_id[line_id] = received_qty_by_item_id.get(line_id, 0.0) + quantity_change
+
+    on_order_by_product: Dict[str, float] = {}
+    open_purchase_orders: List[Dict[str, Any]] = []
+
+    for invoice in purchase_orders:
+        invoice_key = str(invoice.get('id') or '').strip()
+        if not invoice_key:
+            continue
+        line_rows = po_items_by_invoice.get(invoice_key, [])
+        status_value = str(invoice.get('status') or '').strip().lower()
+        any_received = False
+        remaining_units = 0.0
+        remaining_value = 0.0
+        remaining_lines = 0
+
+        for line in line_rows:
+            line_id = str(line.get('id') or '').strip()
+            product_key = str(line.get('product_id') or '').strip()
+            ordered_qty = max(0.0, _safe_float(line.get('quantity'), 0))
+            received_qty = max(0.0, received_qty_by_item_id.get(line_id, 0.0))
+            if received_qty > 0:
+                any_received = True
+            if status_value in {'received', 'paid'} and received_qty <= 0:
+                received_qty = ordered_qty
+            remaining_qty = max(0.0, ordered_qty - min(received_qty, ordered_qty))
+            if remaining_qty > 0:
+                remaining_lines += 1
+            remaining_units += remaining_qty
+            unit_cost = max(0.0, _safe_float(line.get('unit_price'), 0))
+            remaining_value += remaining_qty * unit_cost
+            if product_key and remaining_qty > 0:
+                on_order_by_product[product_key] = on_order_by_product.get(product_key, 0.0) + remaining_qty
+
+        if remaining_units <= 0:
+            continue
+
+        vendor_key = str(invoice.get('vendor_id') or '').strip()
+        open_purchase_orders.append({
+            'id': invoice_key,
+            'invoice_number': str(invoice.get('invoice_number') or '').strip() or invoice_key,
+            'vendor_id': vendor_key or None,
+            'vendor_name': vendor_name_by_id.get(vendor_key, 'Unassigned Vendor'),
+            'status': 'partial' if any_received else (status_value or 'draft'),
+            'created_at': invoice.get('created_at'),
+            'issue_date': invoice.get('issue_date'),
+            'due_date': invoice.get('due_date'),
+            'total': round(_safe_float(invoice.get('total'), 0), 2),
+            'remaining_units': round(remaining_units, 2),
+            'remaining_value': round(remaining_value, 2),
+            'remaining_lines': remaining_lines,
+        })
+
+    items: List[Dict[str, Any]] = []
+    for product_id_value in product_ids:
+        product = products_by_id.get(product_id_value)
+        if not product:
+            continue
+
+        category_value = str(product.get('category') or '').strip()
+        vendor_key = str(product.get('vendor_id') or '').strip()
+        if normalized_department and category_value.lower() != normalized_department:
+            continue
+        if normalized_vendor_id and vendor_key != normalized_vendor_id:
+            continue
+
+        quantity_on_hand = max(0, _safe_int(product.get('quantity_on_hand'), 0))
+        reorder_level = max(0, _safe_int(product.get('reorder_level'), 0))
+        reorder_quantity = max(0, _safe_int(product.get('reorder_quantity'), 0))
+        cost_price = max(0.0, _safe_float(product.get('cost_price'), 0))
+        unit_price = max(0.0, _safe_float(product.get('unit_price'), 0))
+        on_order_qty = max(0.0, on_order_by_product.get(product_id_value, 0.0))
+        sales_entry = sales_by_product.get(product_id_value, {})
+        qty_sold = max(0.0, _safe_float(sales_entry.get('qty'), 0))
+        revenue = max(0.0, _safe_float(sales_entry.get('revenue'), 0))
+        avg_daily_sales = qty_sold / window_days if qty_sold > 0 else 0.0
+        dynamic_reorder_point = max(reorder_level, math.ceil(avg_daily_sales * 7)) if avg_daily_sales > 0 else reorder_level
+        target_stock = max(reorder_quantity, dynamic_reorder_point, math.ceil(avg_daily_sales * 14) if avg_daily_sales > 0 else 0)
+        if target_stock <= 0 and reorder_level > 0:
+            target_stock = reorder_level
+        suggested_qty = max(0, int(math.ceil(target_stock - quantity_on_hand - on_order_qty)))
+        if suggested_qty <= 0 and quantity_on_hand <= reorder_level and reorder_quantity > 0:
+            suggested_qty = max(0, reorder_quantity - int(math.floor(on_order_qty)))
+
+        days_of_cover = None
+        if avg_daily_sales > 0:
+            days_of_cover = round(quantity_on_hand / avg_daily_sales, 1)
+
+        is_low_stock = quantity_on_hand <= reorder_level if reorder_level > 0 else quantity_on_hand <= 0
+        is_fast_mover = avg_daily_sales >= 1 or (qty_sold >= 5 and (days_of_cover is None or days_of_cover <= 14))
+        stockout_risk = (
+            quantity_on_hand <= 0
+            or (days_of_cover is not None and days_of_cover <= 3)
+            or quantity_on_hand <= dynamic_reorder_point
+        )
+
+        include_item = False
+        if mode_value == 'low_stock':
+            include_item = is_low_stock or stockout_risk
+        elif mode_value == 'fast_movers':
+            include_item = is_fast_mover and (suggested_qty > 0 or stockout_risk)
+        else:
+            include_item = suggested_qty > 0 or is_low_stock or is_fast_mover or stockout_risk
+
+        if not include_item:
+            continue
+
+        reason_codes: List[str] = []
+        if quantity_on_hand <= 0:
+            reason_codes.append('out_of_stock')
+        if is_low_stock:
+            reason_codes.append('low_stock')
+        if is_fast_mover:
+            reason_codes.append('fast_mover')
+        if stockout_risk:
+            reason_codes.append('stockout_risk')
+        if on_order_qty > 0:
+            reason_codes.append('on_order')
+        if suggested_qty > 0:
+            reason_codes.append('replenish')
+
+        items.append({
+            'product_id': product_id_value,
+            'name': str(product.get('name') or '').strip() or 'Product',
+            'sku': str(product.get('sku') or '').strip() or 'N/A',
+            'barcode': str(product.get('barcode') or '').strip() or None,
+            'department': category_value or 'Uncategorized',
+            'vendor_id': vendor_key or None,
+            'vendor_name': vendor_name_by_id.get(vendor_key, 'Unassigned Vendor'),
+            'quantity_on_hand': quantity_on_hand,
+            'reorder_level': reorder_level,
+            'reorder_quantity': reorder_quantity,
+            'on_order_qty': round(on_order_qty, 2),
+            'qty_sold_period': round(qty_sold, 2),
+            'avg_daily_sales': round(avg_daily_sales, 2),
+            'days_of_cover': days_of_cover,
+            'recommended_qty': suggested_qty,
+            'cost_price': round(cost_price, 2),
+            'unit_price': round(unit_price, 2),
+            'estimated_cost': round(suggested_qty * (cost_price or 0), 2),
+            'estimated_revenue': round(suggested_qty * (unit_price or 0), 2),
+            'stockout_risk': stockout_risk,
+            'is_low_stock': is_low_stock,
+            'is_fast_mover': is_fast_mover,
+            'reason_codes': reason_codes,
+            'last_received': product.get('last_received'),
+            'last_sold_at': sales_entry.get('last_sold_at'),
+            'period_transactions': int(sales_entry.get('transactions') or 0),
+            'period_revenue': round(revenue, 2),
+        })
+
+    items.sort(
+        key=lambda row: (
+            0 if row['stockout_risk'] else 1,
+            0 if row['is_low_stock'] else 1,
+            -float(row['recommended_qty']),
+            -float(row['qty_sold_period']),
+            str(row['name']).lower(),
+        )
+    )
+
+    department_summary: Dict[str, Dict[str, Any]] = {}
+    vendor_summary: Dict[str, Dict[str, Any]] = {}
+    for item in items:
+        department_key = str(item['department'])
+        department_entry = department_summary.setdefault(
+            department_key,
+            {
+                'department': department_key,
+                'items': 0,
+                'recommended_units': 0,
+                'estimated_cost': 0.0,
+                'low_stock_count': 0,
+                'fast_mover_count': 0,
+                'stockout_risk_count': 0,
+            }
+        )
+        department_entry['items'] += 1
+        department_entry['recommended_units'] += int(item['recommended_qty'])
+        department_entry['estimated_cost'] += float(item['estimated_cost'])
+        if item['is_low_stock']:
+            department_entry['low_stock_count'] += 1
+        if item['is_fast_mover']:
+            department_entry['fast_mover_count'] += 1
+        if item['stockout_risk']:
+            department_entry['stockout_risk_count'] += 1
+
+        vendor_key = str(item.get('vendor_id') or '')
+        vendor_name = str(item.get('vendor_name') or 'Unassigned Vendor')
+        vendor_entry = vendor_summary.setdefault(
+            vendor_name,
+            {
+                'vendor_id': vendor_key or None,
+                'vendor_name': vendor_name,
+                'items': 0,
+                'recommended_units': 0,
+                'estimated_cost': 0.0,
+                'low_stock_count': 0,
+                'stockout_risk_count': 0,
+            }
+        )
+        vendor_entry['items'] += 1
+        vendor_entry['recommended_units'] += int(item['recommended_qty'])
+        vendor_entry['estimated_cost'] += float(item['estimated_cost'])
+        if item['is_low_stock']:
+            vendor_entry['low_stock_count'] += 1
+        if item['stockout_risk']:
+            vendor_entry['stockout_risk_count'] += 1
+
+    total_recommended_units = sum(int(item['recommended_qty']) for item in items)
+    total_estimated_cost = round(sum(float(item['estimated_cost']) for item in items), 2)
+    summary = {
+        'window_days': window_days,
+        'catalog_items': len(product_rows),
+        'recommended_items': len([item for item in items if int(item['recommended_qty']) > 0]),
+        'displayed_items': len(items),
+        'low_stock_count': len([item for item in items if item['is_low_stock']]),
+        'fast_mover_count': len([item for item in items if item['is_fast_mover']]),
+        'stockout_risk_count': len([item for item in items if item['stockout_risk']]),
+        'total_recommended_units': total_recommended_units,
+        'total_estimated_cost': total_estimated_cost,
+        'vendors_in_scope': len([entry for entry in vendor_summary.values() if entry['items'] > 0]),
+        'open_purchase_orders': len(open_purchase_orders),
+        'open_purchase_order_value': round(sum(float(row['remaining_value']) for row in open_purchase_orders), 2),
+    }
+
+    return {
+        'outlet_id': outlet_id,
+        'mode': mode_value,
+        'date_from': start_date.isoformat(),
+        'date_to': end_date.isoformat(),
+        'summary': summary,
+        'items': items,
+        'department_summary': sorted(
+            department_summary.values(),
+            key=lambda row: (-float(row['estimated_cost']), str(row['department']).lower())
+        ),
+        'vendor_summary': sorted(
+            vendor_summary.values(),
+            key=lambda row: (-float(row['estimated_cost']), str(row['vendor_name']).lower())
+        ),
+        'draft_purchase_orders': sorted(
+            open_purchase_orders,
+            key=lambda row: str(row.get('created_at') or ''),
+            reverse=True
+        )[:20],
+    }
+
+
+@router.get("/purchasing/recommendations")
+async def get_purchasing_recommendations(
+    outlet_id: str,
+    mode: str = Query('all', description="all | low_stock | fast_movers"),
+    department: Optional[str] = Query(None),
+    vendor_id: Optional[str] = Query(None),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
+    current_user=Depends(CurrentUser())
+):
+    """Build replenishment recommendations from stock levels, sales velocity, and open draft purchase orders."""
+    try:
+        supabase = get_supabase_admin()
+        _require_inventory_editor_role(supabase, current_user, outlet_id, x_pos_staff_session)
+        return _build_purchasing_snapshot(
+            supabase=supabase,
+            outlet_id=outlet_id,
+            mode=mode,
+            department=department,
+            vendor_id=vendor_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error building purchasing recommendations: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to build purchasing recommendations: {str(e)}"
+        )
+
+
+@router.get("/purchasing/analytics")
+async def get_purchasing_analytics(
+    outlet_id: str,
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
+    current_user=Depends(CurrentUser())
+):
+    """Return purchasing summaries without the full recommendation line list."""
+    try:
+        supabase = get_supabase_admin()
+        _require_inventory_editor_role(supabase, current_user, outlet_id, x_pos_staff_session)
+        snapshot = _build_purchasing_snapshot(
+            supabase=supabase,
+            outlet_id=outlet_id,
+            mode='all',
+            department=None,
+            vendor_id=None,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        return {
+            'outlet_id': snapshot['outlet_id'],
+            'date_from': snapshot['date_from'],
+            'date_to': snapshot['date_to'],
+            'summary': snapshot['summary'],
+            'department_summary': snapshot['department_summary'],
+            'vendor_summary': snapshot['vendor_summary'],
+            'draft_purchase_orders': snapshot['draft_purchase_orders'],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error loading purchasing analytics: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load purchasing analytics: {str(e)}"
+        )
+
+
+@router.post("/purchasing/draft-purchase-orders")
+async def create_draft_purchase_orders(
+    payload: PurchaseOrderDraftRequest,
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
+    current_user=Depends(CurrentUser())
+):
+    """Create vendor-grouped draft purchase orders using the existing invoice tables."""
+    try:
+        if not payload.lines:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="At least one line is required to create a purchase order"
+            )
+
+        supabase = get_supabase_admin()
+        staff_context = _require_inventory_editor_role(
+            supabase,
+            current_user,
+            payload.outlet_id,
+            x_pos_staff_session
+        )
+
+        requested_for_value: Optional[str] = None
+        if payload.requested_for_date:
+            try:
+                requested_for_value = date.fromisoformat(payload.requested_for_date).isoformat()
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="requested_for_date must be in YYYY-MM-DD format"
+                )
+
+        requested_product_ids = list({
+            str(line.product_id or '').strip()
+            for line in payload.lines
+            if str(line.product_id or '').strip()
+        })
+        product_rows = (
+            supabase.table(Tables.POS_PRODUCTS)
+            .select('id,name,sku,barcode,category,vendor_id,cost_price,unit_price')
+            .in_('id', requested_product_ids)
+            .eq('outlet_id', payload.outlet_id)
+            .execute()
+        ).data or []
+        products_by_id = {
+            str(row.get('id') or '').strip(): row
+            for row in product_rows
+            if str(row.get('id') or '').strip()
+        }
+
+        missing_products = [product_id for product_id in requested_product_ids if product_id not in products_by_id]
+        if missing_products:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Some products could not be found for this outlet: {', '.join(missing_products)}"
+            )
+
+        vendor_ids = sorted({
+            str(line.vendor_id or products_by_id[str(line.product_id).strip()].get('vendor_id') or '').strip()
+            for line in payload.lines
+            if str(line.product_id or '').strip()
+        })
+        if any(not vendor_id_value for vendor_id_value in vendor_ids):
+            missing_vendor_products = [
+                str(products_by_id[str(line.product_id).strip()].get('name') or 'Product')
+                for line in payload.lines
+                if not str(line.vendor_id or products_by_id[str(line.product_id).strip()].get('vendor_id') or '').strip()
+            ]
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Each selected product must have a preferred vendor before a purchase order can be created. "
+                    f"Missing vendor on: {', '.join(missing_vendor_products)}"
+                )
+            )
+
+        vendor_rows = (
+            supabase.table(Tables.VENDORS)
+            .select('id,name')
+            .in_('id', vendor_ids)
+            .execute()
+        ).data or []
+        vendor_name_by_id = {
+            str(row.get('id') or '').strip(): str(row.get('name') or '').strip() or 'Vendor'
+            for row in vendor_rows
+            if str(row.get('id') or '').strip()
+        }
+
+        grouped_lines: Dict[str, List[Dict[str, Any]]] = {}
+        for line in payload.lines:
+            product_id_value = str(line.product_id or '').strip()
+            product = products_by_id[product_id_value]
+            resolved_vendor_id = str(line.vendor_id or product.get('vendor_id') or '').strip()
+            unit_cost = max(
+                0.0,
+                _safe_float(
+                    line.unit_cost,
+                    _safe_float(product.get('cost_price'), _safe_float(product.get('unit_price'), 0))
+                )
+            )
+            grouped_lines.setdefault(resolved_vendor_id, []).append({
+                'product': product,
+                'quantity': int(line.quantity),
+                'unit_cost': unit_cost,
+            })
+
+        now_iso = datetime.utcnow().isoformat()
+        today_iso = date.today().isoformat()
+        created_orders: List[Dict[str, Any]] = []
+
+        for vendor_key, lines in grouped_lines.items():
+            subtotal = sum(int(line['quantity']) * float(line['unit_cost']) for line in lines)
+            invoice_id = str(uuid.uuid4())
+            invoice_number = f"PO-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{str(uuid.uuid4())[:6].upper()}"
+            notes = _build_purchase_order_notes(
+                payload.notes,
+                payload.source,
+                payload.department,
+                requested_for_value
+            )
+
+            invoice_row = {
+                'id': invoice_id,
+                'outlet_id': payload.outlet_id,
+                'invoice_number': invoice_number,
+                'vendor_id': vendor_key,
+                'customer_id': None,
+                'issue_date': today_iso,
+                'due_date': requested_for_value or today_iso,
+                'status': 'draft',
+                'notes': notes,
+                'tax_rate': 0,
+                'subtotal': float(round(subtotal, 2)),
+                'tax_amount': 0.0,
+                'total': float(round(subtotal, 2)),
+                'payment_method': None,
+                'created_by': str(current_user.get('id') or ''),
+                'created_at': now_iso,
+                'updated_at': now_iso,
+            }
+            invoice_result = supabase.table(Tables.INVOICES).insert(invoice_row).execute()
+            if not invoice_result.data:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Failed to create draft purchase order for vendor {vendor_name_by_id.get(vendor_key, vendor_key)}"
+                )
+
+            item_rows: List[Dict[str, Any]] = []
+            total_units = 0
+            for line in lines:
+                product = line['product']
+                quantity = int(line['quantity'])
+                total_units += quantity
+                item_rows.append({
+                    'id': str(uuid.uuid4()),
+                    'invoice_id': invoice_id,
+                    'product_id': str(product.get('id') or '').strip() or None,
+                    'description': str(product.get('name') or '').strip() or 'Product',
+                    'quantity': quantity,
+                    'unit_price': float(line['unit_cost']),
+                    'total': float(round(quantity * float(line['unit_cost']), 2)),
+                    'sku': str(product.get('sku') or '').strip() or None,
+                    'barcode': str(product.get('barcode') or '').strip() or None,
+                    'category': str(product.get('category') or '').strip() or None,
+                    'created_at': now_iso,
+                })
+
+            _insert_invoice_items_pos_compat(supabase, item_rows)
+
+            _log_pos_audit_entry(
+                supabase=supabase,
+                outlet_id=payload.outlet_id,
+                user_id=str(current_user.get('id') or '').strip() or None,
+                user_name=current_user.get('staff_profile_name') or current_user.get('name') or current_user.get('email'),
+                action='create',
+                entity_type='invoice',
+                entity_id=invoice_id,
+                details=(
+                    f"Created draft purchase order {invoice_number} for "
+                    f"{vendor_name_by_id.get(vendor_key, vendor_key)} "
+                    f"({len(item_rows)} lines, {total_units} units)"
+                )
+            )
+
+            created_orders.append({
+                'id': invoice_id,
+                'invoice_number': invoice_number,
+                'vendor_id': vendor_key,
+                'vendor_name': vendor_name_by_id.get(vendor_key, vendor_key),
+                'line_count': len(item_rows),
+                'total_units': total_units,
+                'total': float(round(subtotal, 2)),
+                'status': 'draft',
+            })
+
+        return {
+            'message': f"Created {len(created_orders)} draft purchase order(s)",
+            'outlet_id': payload.outlet_id,
+            'source': payload.source,
+            'requested_for_date': requested_for_value,
+            'created_orders': created_orders,
+            'created_by_role': staff_context.get('role'),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating draft purchase orders: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create draft purchase orders: {str(e)}"
         )
 
 

@@ -586,6 +586,145 @@ export interface EnhancedCreateTransactionRequest extends CreateTransactionReque
   }[];
 }
 
+export type PurchasingMode = 'all' | 'low_stock' | 'fast_movers';
+
+export interface PurchasingSummary {
+  window_days: number;
+  catalog_items: number;
+  recommended_items: number;
+  displayed_items: number;
+  low_stock_count: number;
+  fast_mover_count: number;
+  stockout_risk_count: number;
+  total_recommended_units: number;
+  total_estimated_cost: number;
+  vendors_in_scope: number;
+  open_purchase_orders: number;
+  open_purchase_order_value: number;
+}
+
+export interface PurchasingRecommendation {
+  product_id: string;
+  name: string;
+  sku: string;
+  barcode?: string | null;
+  department: string;
+  vendor_id?: string | null;
+  vendor_name: string;
+  quantity_on_hand: number;
+  reorder_level: number;
+  reorder_quantity: number;
+  on_order_qty: number;
+  qty_sold_period: number;
+  avg_daily_sales: number;
+  days_of_cover?: number | null;
+  recommended_qty: number;
+  cost_price: number;
+  unit_price: number;
+  estimated_cost: number;
+  estimated_revenue: number;
+  stockout_risk: boolean;
+  is_low_stock: boolean;
+  is_fast_mover: boolean;
+  reason_codes: string[];
+  last_received?: string | null;
+  last_sold_at?: string | null;
+  period_transactions: number;
+  period_revenue: number;
+}
+
+export interface PurchasingDepartmentSummary {
+  department: string;
+  items: number;
+  recommended_units: number;
+  estimated_cost: number;
+  low_stock_count: number;
+  fast_mover_count: number;
+  stockout_risk_count: number;
+}
+
+export interface PurchasingVendorSummary {
+  vendor_id?: string | null;
+  vendor_name: string;
+  items: number;
+  recommended_units: number;
+  estimated_cost: number;
+  low_stock_count: number;
+  stockout_risk_count: number;
+}
+
+export interface DraftPurchaseOrderSummary {
+  id: string;
+  invoice_number: string;
+  vendor_id?: string | null;
+  vendor_name: string;
+  status: string;
+  created_at?: string | null;
+  issue_date?: string | null;
+  due_date?: string | null;
+  total: number;
+  remaining_units: number;
+  remaining_value: number;
+  remaining_lines: number;
+}
+
+export interface PurchasingRecommendationsResponse {
+  outlet_id: string;
+  mode: PurchasingMode;
+  date_from: string;
+  date_to: string;
+  summary: PurchasingSummary;
+  items: PurchasingRecommendation[];
+  department_summary: PurchasingDepartmentSummary[];
+  vendor_summary: PurchasingVendorSummary[];
+  draft_purchase_orders: DraftPurchaseOrderSummary[];
+}
+
+export interface PurchasingAnalyticsResponse {
+  outlet_id: string;
+  date_from: string;
+  date_to: string;
+  summary: PurchasingSummary;
+  department_summary: PurchasingDepartmentSummary[];
+  vendor_summary: PurchasingVendorSummary[];
+  draft_purchase_orders: DraftPurchaseOrderSummary[];
+}
+
+export interface DraftPurchaseOrderLineRequest {
+  product_id: string;
+  quantity: number;
+  vendor_id?: string;
+  unit_cost?: number;
+  notes?: string;
+}
+
+export interface CreateDraftPurchaseOrdersRequest {
+  outlet_id: string;
+  source?: string;
+  department?: string;
+  requested_for_date?: string;
+  notes?: string;
+  lines: DraftPurchaseOrderLineRequest[];
+}
+
+export interface CreateDraftPurchaseOrdersResponse {
+  message: string;
+  outlet_id: string;
+  source: string;
+  requested_for_date?: string | null;
+  created_orders: Array<{
+    id: string;
+    invoice_number: string;
+    vendor_id?: string | null;
+    vendor_name: string;
+    line_count: number;
+    total_units: number;
+    total: number;
+    status: string;
+  }>;
+  created_by_role?: string | null;
+}
+
 // ===============================================
 // POS SERVICE CLASS
 // ===============================================
@@ -1544,6 +1683,67 @@ class POSService {
       return response.data;
     } catch (error) {
       logger.error('Error fetching sales stats:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  async getPurchasingRecommendations(
+    outletId: string,
+    options: {
+      mode?: PurchasingMode;
+      department?: string;
+      vendorId?: string;
+      dateFrom?: string;
+      dateTo?: string;
+    } = {}
+  ): Promise<PurchasingRecommendationsResponse> {
+    try {
+      const params = new URLSearchParams({ outlet_id: outletId });
+      if (options.mode) params.append('mode', options.mode);
+      if (options.department) params.append('department', options.department);
+      if (options.vendorId) params.append('vendor_id', options.vendorId);
+      if (options.dateFrom) params.append('date_from', options.dateFrom);
+      if (options.dateTo) params.append('date_to', options.dateTo);
+
+      const response = await apiClient.get<PurchasingRecommendationsResponse>(`${this.baseUrl}/purchasing/recommendations?${params}`);
+      if (!response.data) throw new Error(response.error || 'Failed to fetch purchasing recommendations');
+      return response.data;
+    } catch (error) {
+      logger.error('Error fetching purchasing recommendations:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  async getPurchasingAnalytics(
+    outletId: string,
+    options: {
+      dateFrom?: string;
+      dateTo?: string;
+    } = {}
+  ): Promise<PurchasingAnalyticsResponse> {
+    try {
+      const params = new URLSearchParams({ outlet_id: outletId });
+      if (options.dateFrom) params.append('date_from', options.dateFrom);
+      if (options.dateTo) params.append('date_to', options.dateTo);
+
+      const response = await apiClient.get<PurchasingAnalyticsResponse>(`${this.baseUrl}/purchasing/analytics?${params}`);
+      if (!response.data) throw new Error(response.error || 'Failed to fetch purchasing analytics');
+      return response.data;
+    } catch (error) {
+      logger.error('Error fetching purchasing analytics:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  async createDraftPurchaseOrders(
+    payload: CreateDraftPurchaseOrdersRequest
+  ): Promise<CreateDraftPurchaseOrdersResponse> {
+    try {
+      const response = await apiClient.post<CreateDraftPurchaseOrdersResponse>(`${this.baseUrl}/purchasing/draft-purchase-orders`, payload);
+      if (!response.data) throw new Error(response.error || 'Failed to create purchase orders');
+      return response.data;
+    } catch (error) {
+      logger.error('Error creating draft purchase orders:', error);
       throw this.handleError(error);
     }
   }

@@ -5,7 +5,7 @@ When a vendor invoice is marked as "received", items auto-add to inventory/produ
 """
 
 from fastapi import APIRouter, HTTPException, Depends, status, Query, Header
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, date
 import asyncio
 from decimal import Decimal
@@ -295,6 +295,53 @@ def _has_received_marker(notes: Optional[str]) -> bool:
     return '[Received on ' in text
 
 
+def _extract_invoice_item_marker(notes: Optional[str]) -> Optional[str]:
+    match = re.search(r"\[Invoice item:\s*([^\]]+)\]", str(notes or ''), flags=re.IGNORECASE)
+    if not match:
+        return None
+    return str(match.group(1) or '').strip() or None
+
+
+def _extract_note_marker_value(notes: Optional[str], marker_prefix: str) -> Optional[str]:
+    marker_start = f"[{marker_prefix}"
+    for raw_line in str(notes or '').splitlines():
+        line = raw_line.strip()
+        if not line.startswith(marker_start):
+            continue
+        body = line[len(marker_start):]
+        if body.endswith(']'):
+            body = body[:-1]
+        return body.strip() or None
+    return None
+
+
+def _attach_invoice_payment_metadata(invoice: Dict[str, Any]) -> Dict[str, Any]:
+    notes = invoice.get('notes')
+    payment_status = str(_extract_note_marker_value(notes, 'Payment status:') or '').strip().lower()
+    payment_date = _extract_note_marker_value(notes, 'Payment date:')
+
+    if payment_status not in {'paid', 'unpaid'}:
+        raw_status = str(invoice.get('status') or '').strip().lower()
+        if raw_status == 'paid':
+            payment_status = 'paid'
+        elif raw_status in {'received', 'overdue'}:
+            payment_status = 'unpaid'
+        else:
+            payment_status = ''
+
+    if payment_status:
+        invoice['payment_status'] = payment_status
+    else:
+        invoice.pop('payment_status', None)
+
+    if payment_date:
+        invoice['payment_date'] = payment_date
+    else:
+        invoice.pop('payment_date', None)
+
+    return invoice
+
+
 def _append_received_marker(notes: Optional[str], now_iso: str, staff_name: str) -> str:
     marker = f"[Received on {now_iso[:10]} by {staff_name}]"
     base = str(notes or '').strip()
@@ -312,6 +359,69 @@ def _upsert_note_marker(notes: Optional[str], marker_prefix: str, marker_line: O
     if marker_line:
         filtered.append(marker_line.strip())
     return '\n'.join(filtered)
+
+
+def _to_float_value(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None or value == '':
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _get_invoice_received_quantities(
+    supabase,
+    invoice_id: str,
+    items: List[Dict[str, Any]]
+) -> Tuple[Dict[str, float], bool]:
+    """Map already-received units to invoice item ids using stock movement notes."""
+    item_rows = [item for item in items if isinstance(item, dict)]
+    invoice_item_ids = {
+        str(item.get('id') or '').strip()
+        for item in item_rows
+        if str(item.get('id') or '').strip()
+    }
+    items_by_product_id: Dict[str, List[Dict[str, Any]]] = {}
+    for item in item_rows:
+        product_id = str(item.get('product_id') or '').strip()
+        if not product_id:
+            continue
+        items_by_product_id.setdefault(product_id, []).append(item)
+
+    result = (
+        supabase.table('pos_stock_movements')
+        .select('product_id,quantity_change,notes,movement_type')
+        .eq('reference_type', 'vendor_invoice')
+        .eq('reference_id', invoice_id)
+        .execute()
+    )
+    movements = result.data or []
+
+    received_qty_by_item_id: Dict[str, float] = {}
+    has_receive_activity = False
+
+    for movement in movements:
+        if str(movement.get('movement_type') or '').strip().lower() != 'receive':
+            continue
+        has_receive_activity = True
+        quantity_change = abs(_to_float_value(movement.get('quantity_change'), 0))
+        if quantity_change <= 0:
+            continue
+
+        line_id = _extract_invoice_item_marker(movement.get('notes'))
+        if line_id and line_id in invoice_item_ids:
+            received_qty_by_item_id[line_id] = received_qty_by_item_id.get(line_id, 0.0) + quantity_change
+            continue
+
+        product_id = str(movement.get('product_id') or '').strip()
+        matching_lines = items_by_product_id.get(product_id, [])
+        if len(matching_lines) == 1:
+            fallback_line_id = str(matching_lines[0].get('id') or '').strip()
+            if fallback_line_id:
+                received_qty_by_item_id[fallback_line_id] = received_qty_by_item_id.get(fallback_line_id, 0.0) + quantity_change
+
+    return received_qty_by_item_id, has_receive_activity
 
 
 # ===============================================
@@ -409,7 +519,7 @@ async def get_invoices(
             query = query.lte('issue_date', date_to)
 
         result = query.execute()
-        all_data = result.data or []
+        all_data = [_attach_invoice_payment_metadata(dict(row)) for row in (result.data or [])]
         total = len(all_data)
 
         # Paginate
@@ -575,7 +685,28 @@ async def get_invoice(
                 detail="Invoice not found"
             )
 
-        return result.data
+        invoice = dict(result.data)
+        invoice = _attach_invoice_payment_metadata(invoice)
+
+        invoice_type = str(invoice.get('invoice_type') or '').strip().lower()
+        customer_id = invoice.get('customer_id')
+        is_vendor_invoice = (invoice_type == 'vendor') or (not invoice_type and not customer_id)
+        line_items = invoice.get('invoice_items') or []
+        if is_vendor_invoice and line_items:
+            received_qty_by_item_id, _ = _get_invoice_received_quantities(supabase, invoice_id, line_items)
+            raw_status = str(invoice.get('status') or '').strip().lower()
+            for item in line_items:
+                ordered_qty = max(0.0, _to_float_value(item.get('quantity'), 0))
+                item_id = str(item.get('id') or '').strip()
+                received_qty = max(0.0, received_qty_by_item_id.get(item_id, 0.0))
+                if raw_status in {'received', 'paid'} and received_qty <= 0:
+                    received_qty = ordered_qty
+                remaining_qty = max(0.0, ordered_qty - min(received_qty, ordered_qty))
+                item['received_quantity'] = round(received_qty, 2)
+                item['remaining_quantity'] = round(remaining_qty, 2)
+                item['is_fully_received'] = remaining_qty <= 1e-9
+
+        return invoice
 
     except HTTPException:
         raise
@@ -754,17 +885,26 @@ async def receive_invoice_goods(
                 detail="Only vendor invoices can be received into inventory"
             )
 
-        if invoice['status'] == 'received' or _has_received_marker(invoice.get('notes')):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invoice has already been received"
-            )
-
         items = invoice.get('invoice_items', [])
         if not items:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invoice has no items to receive"
+            )
+
+        invoice_status_raw = str(invoice.get('status') or '').strip().lower()
+        received_qty_by_item_id, has_receive_activity = _get_invoice_received_quantities(
+            supabase,
+            invoice_id,
+            items,
+        )
+        if (
+            (invoice_status_raw in {'received', 'paid'} or _has_received_marker(invoice.get('notes')))
+            and not has_receive_activity
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invoice has already been received"
             )
 
         products_created = []
@@ -799,14 +939,6 @@ async def receive_invoice_goods(
                 if item_id:
                     override_by_item_id[item_id] = row
 
-        def _to_float(value: Any, default: float = 0.0) -> float:
-            try:
-                if value is None or value == '':
-                    return default
-                return float(value)
-            except (TypeError, ValueError):
-                return default
-
         def _to_bool(value: Any, default: bool = True) -> bool:
             if value is None:
                 return default
@@ -822,21 +954,41 @@ async def receive_invoice_goods(
                     return False
             return default
 
+        remaining_before_by_item_id: Dict[str, float] = {}
         for item in items:
-            qty = _to_float(item.get('quantity'), 0)
-            cost_price = _to_float(item.get('unit_price'), 0)
+            item_id = str(item.get('id') or '').strip()
+            if not item_id:
+                continue
+            ordered_qty = max(0.0, _to_float_value(item.get('quantity'), 0))
+            already_received_qty = max(0.0, received_qty_by_item_id.get(item_id, 0.0))
+            remaining_before_by_item_id[item_id] = max(0.0, ordered_qty - min(already_received_qty, ordered_qty))
+
+        if not any(remaining > 0 for remaining in remaining_before_by_item_id.values()):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invoice has already been fully received"
+            )
+
+        received_now_by_item_id: Dict[str, int] = {}
+
+        for item in items:
+            item_id = str(item.get('id') or '').strip()
+            ordered_qty = max(0.0, _to_float_value(item.get('quantity'), 0))
+            remaining_qty = remaining_before_by_item_id.get(item_id, ordered_qty)
+            qty = remaining_qty
+            cost_price = _to_float_value(item.get('unit_price'), 0)
             description = str(item.get('description') or 'Unknown Item').strip() or 'Unknown Item'
             category_value = str(item.get('category') or 'Uncategorized').strip() or 'Uncategorized'
             markup_percentage = 30.0
             auto_pricing_enabled = True
             explicit_selling_price: Optional[float] = None
 
-            override = override_by_item_id.get(str(item.get('id') or ''))
+            override = override_by_item_id.get(item_id)
             if override:
-                qty = _to_float(override.get('quantity'), qty)
+                qty = _to_float_value(override.get('quantity'), qty)
                 override_cost = override.get('cost_price', override.get('unit_price'))
                 if override_cost is not None:
-                    cost_price = _to_float(override_cost, cost_price)
+                    cost_price = _to_float_value(override_cost, cost_price)
 
                 if override.get('category') is not None:
                     override_category = str(override.get('category') or '').strip()
@@ -844,13 +996,22 @@ async def receive_invoice_goods(
                         category_value = override_category
 
                 if override.get('markup_percentage') is not None:
-                    markup_percentage = max(0.0, _to_float(override.get('markup_percentage'), markup_percentage))
+                    markup_percentage = max(0.0, _to_float_value(override.get('markup_percentage'), markup_percentage))
 
                 if override.get('auto_pricing_enabled') is not None:
                     auto_pricing_enabled = _to_bool(override.get('auto_pricing_enabled'), auto_pricing_enabled)
 
                 if override.get('selling_price') is not None:
-                    explicit_selling_price = max(0.0, _to_float(override.get('selling_price'), 0))
+                    explicit_selling_price = max(0.0, _to_float_value(override.get('selling_price'), 0))
+
+            if qty > remaining_qty + 1e-9:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Cannot receive {qty} units for '{description}'. "
+                        f"Only {remaining_qty:.2f} unit(s) remain on this invoice line."
+                    )
+                )
 
             if qty <= 0:
                 continue
@@ -889,9 +1050,9 @@ async def receive_invoice_goods(
                     product = prod_result.data
                     item_barcode = str(item.get('barcode') or '').strip()
                     item_sku = str(item.get('sku') or '').strip()
-                    current_qty = _to_float(
+                    current_qty = _to_float_value(
                         product.get('quantity_on_hand'),
-                        _to_float(product.get('quantity'), 0)
+                        _to_float_value(product.get('quantity'), 0)
                     )
                     current_qty_units = int(round(current_qty))
                     new_qty = current_qty_units + qty_units
@@ -944,10 +1105,14 @@ async def receive_invoice_goods(
                         'reference_id': invoice_id,
                         'unit_cost': cost_price if cost_price > 0 else None,
                         'total_value': (cost_price * qty_units) if cost_price > 0 else None,
-                        'notes': f"Received from invoice {invoice['invoice_number']}",
+                        'notes': (
+                            f"Received from invoice {invoice['invoice_number']}"
+                            f" [Invoice item: {item_id}]"
+                        ),
                         'performed_by': current_user['id'],
                         'movement_date': now
                     })
+                    received_now_by_item_id[item_id] = received_now_by_item_id.get(item_id, 0) + qty_units
 
             elif receive_req.add_to_inventory:
                 # ---- CREATE NEW PRODUCT from invoice item ----
@@ -989,14 +1154,14 @@ async def receive_invoice_goods(
                 products_created.append({
                     'product_id': new_product_id,
                     'name': created_product.get('name') or description,
-                    'quantity': _to_float(
+                    'quantity': _to_float_value(
                         created_product.get('quantity_on_hand'),
-                        _to_float(created_product.get('quantity'), qty_units)
+                        _to_float_value(created_product.get('quantity'), qty_units)
                     ),
-                    'cost_price': _to_float(created_product.get('cost_price'), cost_price),
-                    'selling_price': _to_float(
+                    'cost_price': _to_float_value(created_product.get('cost_price'), cost_price),
+                    'selling_price': _to_float_value(
                         created_product.get('unit_price'),
-                        _to_float(created_product.get('selling_price'), final_selling_price)
+                        _to_float_value(created_product.get('selling_price'), final_selling_price)
                     )
                 })
 
@@ -1013,20 +1178,53 @@ async def receive_invoice_goods(
                     'reference_id': invoice_id,
                     'unit_cost': cost_price if cost_price > 0 else None,
                     'total_value': (cost_price * qty_units) if cost_price > 0 else None,
-                    'notes': f"New product created from invoice {invoice['invoice_number']}",
+                    'notes': (
+                        f"New product created from invoice {invoice['invoice_number']}"
+                        f" [Invoice item: {item_id}]"
+                    ),
                     'performed_by': current_user['id'],
                     'movement_date': now
                 })
+                received_now_by_item_id[item_id] = received_now_by_item_id.get(item_id, 0) + qty_units
 
         # Insert all stock movements
-        if stock_movements:
-            _insert_stock_movements_compat(supabase, stock_movements)
+        if not stock_movements:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No remaining quantities selected to receive"
+            )
 
-        received_notes = _append_received_marker(
-            invoice.get('notes'),
-            now,
-            str(actor.get('user_name') or current_user.get('name') or 'Staff')
-        )
+        _insert_stock_movements_compat(supabase, stock_movements)
+
+        received_totals_after = dict(received_qty_by_item_id)
+        for item_id, qty_units in received_now_by_item_id.items():
+            received_totals_after[item_id] = received_totals_after.get(item_id, 0.0) + float(qty_units)
+
+        remaining_after_by_item_id: Dict[str, float] = {}
+        for item in items:
+            item_id = str(item.get('id') or '').strip()
+            if not item_id:
+                continue
+            ordered_qty = max(0.0, _to_float_value(item.get('quantity'), 0))
+            received_total = max(0.0, received_totals_after.get(item_id, 0.0))
+            remaining_after_by_item_id[item_id] = max(0.0, ordered_qty - min(received_total, ordered_qty))
+
+        remaining_line_count = len([qty for qty in remaining_after_by_item_id.values() if qty > 0])
+        remaining_units = round(sum(remaining_after_by_item_id.values()), 2)
+        is_fully_received = remaining_line_count == 0
+
+        actor_name = str(actor.get('user_name') or current_user.get('name') or 'Staff')
+        received_notes = _upsert_note_marker(invoice.get('notes'), '[Partial receipt on', None)
+        received_notes = _upsert_note_marker(received_notes, '[Received on ', None)
+        if is_fully_received:
+            received_notes = _append_received_marker(received_notes, now, actor_name)
+        else:
+            received_notes = _upsert_note_marker(
+                received_notes,
+                '[Partial receipt on',
+                f"[Partial receipt on {now[:10]} by {actor_name}]"
+            )
+
         received_notes = _upsert_note_marker(
             received_notes,
             '[Payment status:',
@@ -1037,13 +1235,15 @@ async def receive_invoice_goods(
             '[Payment date:',
             f"[Payment date: {payment_date_iso}]" if payment_date_iso else None
         )
-        invoice_status_target = 'paid' if payment_status == 'paid' else 'received'
+        invoice_status_target = 'pending'
+        if is_fully_received:
+            invoice_status_target = 'paid' if payment_status == 'paid' else 'received'
         invoice_update_payload: Dict[str, Any] = {
             'status': invoice_status_target,
             'notes': received_notes,
             'updated_at': now
         }
-        if payment_status == 'unpaid' and payment_date_iso:
+        if payment_date_iso:
             invoice_update_payload['due_date'] = payment_date_iso
 
         try:
@@ -1079,17 +1279,24 @@ async def receive_invoice_goods(
 
         # Log audit
         _log_audit(supabase, invoice['outlet_id'], actor, 'receive', 'invoice', invoice_id,
-                   f"Received invoice {invoice['invoice_number']}: "
+                   f"{'Completed' if is_fully_received else 'Partially received'} invoice {invoice['invoice_number']}: "
                    f"{len(products_created)} new products, {len(products_updated)} updated; "
-                   f"payment_status={payment_status}")
+                   f"remaining_lines={remaining_line_count}; payment_status={payment_status}")
         _schedule_invoice_anomaly_detection(invoice.get('outlet_id'), invoice_id, "receive_invoice")
 
         return {
-            "message": "Invoice goods received successfully",
+            "message": (
+                "Invoice fully received"
+                if is_fully_received
+                else f"Invoice partially received ({remaining_line_count} line(s) still open)"
+            ),
             "invoice_id": invoice_id,
             "invoice_number": invoice['invoice_number'],
             "payment_status": payment_status,
             "payment_date": payment_date_iso,
+            "receipt_status": "complete" if is_fully_received else "partial",
+            "remaining_line_count": remaining_line_count,
+            "remaining_units": remaining_units,
             "products_created": products_created,
             "products_updated": products_updated,
             "stock_movements_count": len(stock_movements)

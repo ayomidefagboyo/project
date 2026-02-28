@@ -20,6 +20,9 @@ export interface InvoiceItem {
   sku?: string;
   barcode?: string;
   category?: string;
+  received_quantity?: number;
+  remaining_quantity?: number;
+  is_fully_received?: boolean;
 }
 
 export interface Invoice {
@@ -64,6 +67,9 @@ export interface ReceiveGoodsResponse {
   invoice_number: string;
   payment_status?: 'paid' | 'unpaid';
   payment_date?: string;
+  receipt_status?: 'partial' | 'complete';
+  remaining_line_count?: number;
+  remaining_units?: number;
   products_created: Array<{
     product_id: string;
     name: string;
