@@ -54,6 +54,8 @@ interface ReceiveLine extends InvoiceItem {
   selling_price?: number;
   auto_pricing_enabled?: boolean;
   markup_percentage?: number;
+  previous_selling_price?: number;
+  previous_cost_price?: number;
 }
 
 interface HeldReceiveDraft {
@@ -119,6 +121,12 @@ const computeSellingFromMargin = (costPrice: number, markupPercentage: number): 
   if (safeCost <= 0) return 0;
   const safeMarkup = Math.max(0, Number(markupPercentage || 0));
   return roundMoney(safeCost * (1 + safeMarkup / 100));
+};
+
+const toOptionalMoney = (value: unknown): number | null => {
+  const next = Number(value);
+  if (!Number.isFinite(next)) return null;
+  return roundMoney(next);
 };
 
 const normalizeDepartmentName = (value?: string | null): string =>
@@ -836,6 +844,8 @@ const ReceiveItemsPage: React.FC = () => {
     const normalizedQty = Math.max(1, quantity);
     const costPrice = Math.max(0, unitPrice ?? product.cost_price ?? 0);
     const pricing = resolveDepartmentPricing(product.category);
+    const previousSellingPrice = Math.max(0, Number(product.unit_price || 0));
+    const previousCostPrice = Math.max(0, Number(product.cost_price || 0));
     const sellingPrice = pricing.autoPricingEnabled
       ? computeSellingFromMargin(costPrice, pricing.markup)
       : Math.max(0, product.unit_price || costPrice);
@@ -849,6 +859,10 @@ const ReceiveItemsPage: React.FC = () => {
           ...next[existingIndex],
           quantity: updatedQty,
           line_total: lineTotal,
+          previous_selling_price:
+            next[existingIndex].previous_selling_price ?? previousSellingPrice,
+          previous_cost_price:
+            next[existingIndex].previous_cost_price ?? previousCostPrice,
         };
         return next;
       }
@@ -863,6 +877,8 @@ const ReceiveItemsPage: React.FC = () => {
           selling_price: sellingPrice,
           auto_pricing_enabled: pricing.autoPricingEnabled,
           markup_percentage: pricing.markup,
+          previous_selling_price: previousSellingPrice,
+          previous_cost_price: previousCostPrice,
           product_id: product.id,
           sku: product.sku || undefined,
           barcode: product.barcode || undefined,
@@ -947,6 +963,8 @@ const ReceiveItemsPage: React.FC = () => {
                   : fallbackSelling,
                 auto_pricing_enabled: pricing.autoPricingEnabled,
                 markup_percentage: pricing.markup,
+                previous_selling_price: Math.max(0, Number(product.unit_price || 0)),
+                previous_cost_price: Math.max(0, Number(product.cost_price || 0)),
                 sku: product.sku || undefined,
                 barcode: product.barcode || undefined,
                 category,
@@ -1309,8 +1327,10 @@ const ReceiveItemsPage: React.FC = () => {
     }
 
     const validItems: InvoiceItem[] = validLines.map((line) => {
-      const { lineId, ...invoiceItem } = line;
+      const { lineId, previous_selling_price, previous_cost_price, ...invoiceItem } = line;
       void lineId;
+      void previous_selling_price;
+      void previous_cost_price;
       return invoiceItem as InvoiceItem;
     });
 
@@ -1718,7 +1738,17 @@ const ReceiveItemsPage: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-stone-100">
-                        {items.map((line, index) => (
+                        {items.map((line, index) => {
+                          const previousSellingPrice = line.product_id
+                            ? toOptionalMoney(line.previous_selling_price)
+                            : null;
+                          const currentSellingPrice = roundMoney(Number(line.selling_price ?? 0));
+                          const sellingPriceDelta =
+                            previousSellingPrice !== null
+                              ? roundMoney(currentSellingPrice - previousSellingPrice)
+                              : 0;
+
+                          return (
                           <tr key={line.lineId} className="hover:bg-stone-50/80">
                             <td className="px-3 py-2 text-stone-400">{index + 1}</td>
 
@@ -1890,20 +1920,42 @@ const ReceiveItemsPage: React.FC = () => {
                             </td>
 
                             <td className="px-3 py-2">
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={line.selling_price ?? 0}
-                                onChange={(event) =>
-                                  updateLine(
-                                    line.lineId,
-                                    'selling_price',
-                                    Math.max(0, parseNumber(event.target.value, 0))
-                                  )
-                                }
-                                className="w-full px-2.5 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-right focus:outline-none focus:ring-2 focus:ring-slate-300"
-                              />
+                              <div>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={line.selling_price ?? 0}
+                                  onChange={(event) =>
+                                    updateLine(
+                                      line.lineId,
+                                      'selling_price',
+                                      Math.max(0, parseNumber(event.target.value, 0))
+                                    )
+                                  }
+                                  className="w-full px-2.5 py-2.5 rounded-lg border border-stone-300 bg-white text-sm text-right focus:outline-none focus:ring-2 focus:ring-slate-300"
+                                />
+                                {previousSellingPrice !== null && (
+                                  <p
+                                    className={`mt-1 text-[11px] text-right ${
+                                      Math.abs(sellingPriceDelta) < 0.01
+                                        ? 'text-stone-500'
+                                        : sellingPriceDelta > 0
+                                          ? 'text-emerald-700'
+                                          : 'text-rose-700'
+                                    }`}
+                                  >
+                                    Prev: {formatCurrency(previousSellingPrice)}
+                                    {Math.abs(sellingPriceDelta) >= 0.01 && (
+                                      <>
+                                        {' '}
+                                        ({sellingPriceDelta > 0 ? '+' : '-'}
+                                        {formatCurrency(Math.abs(sellingPriceDelta))})
+                                      </>
+                                    )}
+                                  </p>
+                                )}
+                              </div>
                             </td>
 
                             <td className="px-3 py-2">
@@ -1933,7 +1985,8 @@ const ReceiveItemsPage: React.FC = () => {
                               </button>
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -2015,6 +2068,53 @@ const ReceiveItemsPage: React.FC = () => {
                   <p className="text-xs text-stone-500">Stock Movements</p>
                 </div>
               </div>
+
+              {receiveResult.price_change_summary &&
+                receiveResult.price_change_summary.changed_products > 0 && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 mb-5">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">Price Change Report</p>
+                        <p className="text-xs text-stone-600 mt-1">
+                          {receiveResult.price_change_summary.changed_products} existing item
+                          {receiveResult.price_change_summary.changed_products === 1 ? '' : 's'} changed
+                          price during this receive batch.
+                        </p>
+                        {receiveResult.price_change_summary.is_material && (
+                          <p className="text-xs font-semibold text-amber-800 mt-2">
+                            Material price movement detected. Review before final reconciliation.
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0 sm:min-w-[18rem]">
+                        <div className="rounded-lg border border-white/80 bg-white/80 px-3 py-2">
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-stone-500">
+                            Selling Impact
+                          </p>
+                          <p className="text-sm font-semibold text-emerald-700 mt-1">
+                            +{formatCurrency(receiveResult.price_change_summary.total_selling_increase_value)}
+                          </p>
+                          <p className="text-sm font-semibold text-rose-700">
+                            -{formatCurrency(receiveResult.price_change_summary.total_selling_decrease_value)}
+                          </p>
+                        </div>
+
+                        <div className="rounded-lg border border-white/80 bg-white/80 px-3 py-2">
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-stone-500">
+                            Cost Impact
+                          </p>
+                          <p className="text-sm font-semibold text-emerald-700 mt-1">
+                            +{formatCurrency(receiveResult.price_change_summary.total_cost_increase_value)}
+                          </p>
+                          <p className="text-sm font-semibold text-rose-700">
+                            -{formatCurrency(receiveResult.price_change_summary.total_cost_decrease_value)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
               <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 mb-5">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">

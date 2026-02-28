@@ -82,8 +82,27 @@ export interface ReceiveGoodsResponse {
     name: string;
     quantity_added: number;
     new_total: number;
+    previous_cost_price?: number;
+    new_cost_price?: number;
+    previous_selling_price?: number;
+    new_selling_price?: number;
+    cost_value_delta?: number;
+    selling_value_delta?: number;
+    price_changed?: boolean;
   }>;
   stock_movements_count: number;
+  price_change_summary?: {
+    changed_products: number;
+    selling_increase_count: number;
+    selling_decrease_count: number;
+    total_selling_increase_value: number;
+    total_selling_decrease_value: number;
+    cost_increase_count: number;
+    cost_decrease_count: number;
+    total_cost_increase_value: number;
+    total_cost_decrease_value: number;
+    is_material: boolean;
+  };
 }
 
 class InvoiceService {

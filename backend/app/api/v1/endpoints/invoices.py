@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+MATERIAL_PRICE_CHANGE_THRESHOLD = 5000.0
 
 
 def _schedule_invoice_anomaly_detection(outlet_id: Optional[str], invoice_id: Optional[str], source_event: str) -> None:
@@ -910,6 +911,18 @@ async def receive_invoice_goods(
         products_created = []
         products_updated = []
         stock_movements = []
+        price_change_summary = {
+            'changed_products': 0,
+            'selling_increase_count': 0,
+            'selling_decrease_count': 0,
+            'total_selling_increase_value': 0.0,
+            'total_selling_decrease_value': 0.0,
+            'cost_increase_count': 0,
+            'cost_decrease_count': 0,
+            'total_cost_increase_value': 0.0,
+            'total_cost_decrease_value': 0.0,
+            'is_material': False,
+        }
         now = datetime.utcnow().isoformat()
         payment_status_raw = str(receive_req.payment_status or '').strip().lower()
         if payment_status_raw and payment_status_raw not in ('paid', 'unpaid'):
@@ -1050,12 +1063,26 @@ async def receive_invoice_goods(
                     product = prod_result.data
                     item_barcode = str(item.get('barcode') or '').strip()
                     item_sku = str(item.get('sku') or '').strip()
+                    previous_cost_price = max(0.0, _to_float_value(product.get('cost_price'), 0))
+                    previous_selling_price = max(
+                        0.0,
+                        _to_float_value(
+                            product.get('unit_price'),
+                            _to_float_value(product.get('selling_price'), 0)
+                        )
+                    )
                     current_qty = _to_float_value(
                         product.get('quantity_on_hand'),
                         _to_float_value(product.get('quantity'), 0)
                     )
                     current_qty_units = int(round(current_qty))
                     new_qty = current_qty_units + qty_units
+                    next_cost_price = previous_cost_price
+                    if receive_req.update_cost_prices and cost_price > 0:
+                        next_cost_price = cost_price
+                    next_selling_price = previous_selling_price
+                    if explicit_selling_price is not None:
+                        next_selling_price = final_selling_price
 
                     update_fields: Dict[str, Any] = {
                         'quantity_on_hand': new_qty,
@@ -1084,12 +1111,37 @@ async def receive_invoice_goods(
 
                     update_result = _update_pos_product_compat(supabase, product_id, update_fields)
                     updated_product = (update_result.data or [product])[0]
+                    cost_value_delta = round((next_cost_price - previous_cost_price) * qty_units, 2)
+                    selling_value_delta = round((next_selling_price - previous_selling_price) * qty_units, 2)
+                    price_changed = abs(cost_value_delta) > 0.009 or abs(selling_value_delta) > 0.009
+
+                    if price_changed:
+                        price_change_summary['changed_products'] += 1
+                    if cost_value_delta > 0.009:
+                        price_change_summary['cost_increase_count'] += 1
+                        price_change_summary['total_cost_increase_value'] += cost_value_delta
+                    elif cost_value_delta < -0.009:
+                        price_change_summary['cost_decrease_count'] += 1
+                        price_change_summary['total_cost_decrease_value'] += abs(cost_value_delta)
+                    if selling_value_delta > 0.009:
+                        price_change_summary['selling_increase_count'] += 1
+                        price_change_summary['total_selling_increase_value'] += selling_value_delta
+                    elif selling_value_delta < -0.009:
+                        price_change_summary['selling_decrease_count'] += 1
+                        price_change_summary['total_selling_decrease_value'] += abs(selling_value_delta)
 
                     products_updated.append({
                         'product_id': product_id,
                         'name': updated_product.get('name') or description,
                         'quantity_added': qty_units,
-                        'new_total': new_qty
+                        'new_total': new_qty,
+                        'previous_cost_price': round(previous_cost_price, 2),
+                        'new_cost_price': round(next_cost_price, 2),
+                        'previous_selling_price': round(previous_selling_price, 2),
+                        'new_selling_price': round(next_selling_price, 2),
+                        'cost_value_delta': cost_value_delta,
+                        'selling_value_delta': selling_value_delta,
+                        'price_changed': price_changed,
                     })
 
                     # Stock movement
@@ -1278,10 +1330,43 @@ async def receive_invoice_goods(
                 raise
 
         # Log audit
-        _log_audit(supabase, invoice['outlet_id'], actor, 'receive', 'invoice', invoice_id,
-                   f"{'Completed' if is_fully_received else 'Partially received'} invoice {invoice['invoice_number']}: "
-                   f"{len(products_created)} new products, {len(products_updated)} updated; "
-                   f"remaining_lines={remaining_line_count}; payment_status={payment_status}")
+        total_price_shift = (
+            price_change_summary['total_selling_increase_value']
+            + price_change_summary['total_selling_decrease_value']
+            + price_change_summary['total_cost_increase_value']
+            + price_change_summary['total_cost_decrease_value']
+        )
+        price_change_summary['total_selling_increase_value'] = round(price_change_summary['total_selling_increase_value'], 2)
+        price_change_summary['total_selling_decrease_value'] = round(price_change_summary['total_selling_decrease_value'], 2)
+        price_change_summary['total_cost_increase_value'] = round(price_change_summary['total_cost_increase_value'], 2)
+        price_change_summary['total_cost_decrease_value'] = round(price_change_summary['total_cost_decrease_value'], 2)
+        price_change_summary['is_material'] = total_price_shift >= MATERIAL_PRICE_CHANGE_THRESHOLD
+
+        audit_details = (
+            f"{'Completed' if is_fully_received else 'Partially received'} invoice {invoice['invoice_number']}: "
+            f"{len(products_created)} new products, {len(products_updated)} updated; "
+            f"remaining_lines={remaining_line_count}; payment_status={payment_status}"
+        )
+        if price_change_summary['changed_products'] > 0:
+            audit_details += (
+                f"; price_changes={price_change_summary['changed_products']} item(s)"
+                f"; selling +{price_change_summary['total_selling_increase_value']:,.2f}"
+                f" / -{price_change_summary['total_selling_decrease_value']:,.2f}"
+                f"; cost +{price_change_summary['total_cost_increase_value']:,.2f}"
+                f" / -{price_change_summary['total_cost_decrease_value']:,.2f}"
+            )
+            if price_change_summary['is_material']:
+                audit_details += "; material_price_shift=yes"
+
+        _log_audit(
+            supabase,
+            invoice['outlet_id'],
+            actor,
+            'receive',
+            'invoice',
+            invoice_id,
+            audit_details
+        )
         _schedule_invoice_anomaly_detection(invoice.get('outlet_id'), invoice_id, "receive_invoice")
 
         return {
@@ -1299,7 +1384,8 @@ async def receive_invoice_goods(
             "remaining_units": remaining_units,
             "products_created": products_created,
             "products_updated": products_updated,
-            "stock_movements_count": len(stock_movements)
+            "stock_movements_count": len(stock_movements),
+            "price_change_summary": price_change_summary,
         }
 
     except HTTPException:
