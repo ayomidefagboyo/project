@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  ChevronDown,
   CheckCircle2,
   ClipboardList,
   Loader2,
@@ -346,47 +347,55 @@ const PurchasingPage: React.FC = () => {
 
   return (
     <div className="h-full overflow-y-auto bg-stone-50">
-      <div className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 sm:py-6">
+      <div className="mx-auto w-full max-w-7xl px-4 py-4 pb-28 sm:px-6 sm:py-6 sm:pb-32">
         <div className="rounded-3xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-              <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">Recommended Items</p>
-                <div className="mt-1 flex items-end gap-2">
-                  <p className="text-xl font-semibold text-slate-900">{summary?.recommended_items || 0}</p>
-                  <p className="text-xs text-stone-500">{summary?.total_recommended_units || 0} units</p>
-                </div>
-                <p className="mt-0.5 text-xs text-stone-500">need action now</p>
-              </div>
-              <div className="rounded-2xl border border-stone-200 bg-white px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">Selection</p>
-                <p className="mt-1 text-sm font-semibold text-slate-900">
-                  {selectedLineCount} lines • {selectedUnits} units
-                </p>
-                <p className="mt-0.5 text-xs text-stone-500">{formatCurrency(selectedCost)} draft PO value</p>
-              </div>
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,220px)_minmax(0,220px)_minmax(0,1fr)]">
+            <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">Recommended Items</p>
+              <p className="mt-1 text-xl font-semibold text-slate-900">{summary?.recommended_items || 0}</p>
+              <p className="mt-0.5 text-xs text-stone-500">{summary?.total_recommended_units || 0} units</p>
+              <p className="mt-0.5 text-xs text-stone-500">need action now</p>
             </div>
 
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <button
-                type="button"
-                onClick={() => void loadPurchasingData()}
-                disabled={isLoading}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-                Refresh
-              </button>
-              <button
-                type="button"
-                onClick={handleCreateDraftPurchaseOrders}
-                disabled={isCreating || selectedLineCount === 0}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardList className="h-4 w-4" />}
-                Create Draft POs
-              </button>
+            <div className="rounded-2xl border border-stone-200 bg-white px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">Selection</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">
+                {selectedLineCount} lines • {selectedUnits} units
+              </p>
+              <p className="mt-0.5 text-xs text-stone-500">{formatCurrency(selectedCost)} draft PO value</p>
             </div>
+
+            <details className="rounded-2xl border border-stone-200 bg-white px-4 py-3">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">Action Focus</p>
+                  <p className="mt-1 truncate text-sm font-semibold text-slate-900">
+                    {topDepartment?.department || 'No current demand'}
+                  </p>
+                  <p className="mt-0.5 truncate text-xs text-stone-500">
+                    {topVendor?.vendor_name || 'No vendor exposure'}
+                  </p>
+                </div>
+                <ChevronDown className="h-4 w-4 flex-shrink-0 text-stone-400" />
+              </summary>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <div className="rounded-2xl border border-stone-200 bg-stone-50 px-3 py-2.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">Top Department</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-900">{topDepartment?.department || 'None'}</p>
+                  <p className="mt-0.5 text-xs text-stone-500">
+                    {topDepartment ? `${topDepartment.recommended_units} units • ${formatCurrency(topDepartment.estimated_cost)}` : 'No current demand'}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-stone-200 bg-stone-50 px-3 py-2.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">Top Vendor</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-900">{topVendor?.vendor_name || 'None'}</p>
+                  <p className="mt-0.5 text-xs text-stone-500">
+                    {topVendor ? `${topVendor.recommended_units} units • ${formatCurrency(topVendor.estimated_cost)}` : 'No vendor exposure'}
+                  </p>
+                </div>
+              </div>
+            </details>
           </div>
 
           <div className="mt-3 grid gap-2 md:grid-cols-3">
@@ -437,7 +446,7 @@ const PurchasingPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-6 xl:grid-cols-[1.5fr_1fr] xl:items-start">
+        <div className="mt-6 space-y-6">
           <section className="overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-sm">
             <div className="flex flex-col gap-3 border-b border-stone-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -454,17 +463,17 @@ const PurchasingPage: React.FC = () => {
             </div>
 
             {isLoading ? (
-              <div className="flex h-[32rem] items-center justify-center gap-3 px-6 text-sm text-stone-500">
+              <div className="flex h-[34rem] items-center justify-center gap-3 px-6 text-sm text-stone-500">
                 <Loader2 className="h-5 w-5 animate-spin" />
                 Loading purchasing recommendations...
               </div>
             ) : recommendationItems.length === 0 ? (
-              <div className="flex h-[32rem] items-center justify-center px-6 text-center text-sm text-stone-500">
+              <div className="flex h-[34rem] items-center justify-center px-6 text-center text-sm text-stone-500">
                 No replenishment lines match the current filters.
               </div>
             ) : (
               <>
-                <div className="hidden max-h-[32rem] overflow-auto lg:block">
+                <div className="hidden max-h-[34rem] overflow-auto lg:block">
                   <table className="min-w-full divide-y divide-stone-200 text-sm">
                     <thead className="bg-stone-50 text-xs uppercase tracking-[0.12em] text-stone-500">
                       <tr>
@@ -542,7 +551,7 @@ const PurchasingPage: React.FC = () => {
                   </table>
                 </div>
 
-                <div className="max-h-[32rem] space-y-3 overflow-y-auto p-4 lg:hidden">
+                <div className="max-h-[34rem] space-y-3 overflow-y-auto p-4 lg:hidden">
                   {recommendationItems.map((item) => {
                     const selected = Boolean(selectedByProductId[item.product_id]);
                     const draftQty = Math.max(1, Math.floor(draftQtyByProductId[item.product_id] || item.recommended_qty || 1));
@@ -579,9 +588,7 @@ const PurchasingPage: React.FC = () => {
                                 onChange={(event) => updateDraftQuantity(item.product_id, Number(event.target.value))}
                                 className="w-24 rounded-xl border border-stone-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-500"
                               />
-                              <span className="text-xs text-stone-500">
-                                Suggested {item.recommended_qty}
-                              </span>
+                              <span className="text-xs text-stone-500">Suggested {item.recommended_qty}</span>
                             </div>
                           </div>
                         </div>
@@ -593,74 +600,99 @@ const PurchasingPage: React.FC = () => {
             )}
           </section>
 
-          <div className="space-y-6">
-            <section className="rounded-3xl border border-stone-200 bg-white p-5 shadow-sm">
-              <h3 className="text-lg font-semibold text-slate-900">Action Focus</h3>
-              <div className="mt-4 space-y-3">
-                <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-stone-500">Top Department</p>
-                  <p className="mt-2 text-base font-semibold text-slate-900">{topDepartment?.department || 'None'}</p>
-                  <p className="mt-1 text-sm text-stone-500">
-                    {topDepartment ? `${topDepartment.recommended_units} units • ${formatCurrency(topDepartment.estimated_cost)}` : 'No current demand'}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-stone-500">Top Vendor Exposure</p>
-                  <p className="mt-2 text-base font-semibold text-slate-900">{topVendor?.vendor_name || 'None'}</p>
-                  <p className="mt-1 text-sm text-stone-500">
-                    {topVendor ? `${topVendor.recommended_units} units • ${formatCurrency(topVendor.estimated_cost)}` : 'No vendor exposure'}
-                  </p>
-                </div>
+          <section className="rounded-3xl border border-stone-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-stone-200 px-5 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Open Purchase Orders</h3>
+                <p className="text-sm text-stone-500">Receive remaining quantities and keep open balances visible.</p>
               </div>
-            </section>
+            </div>
 
-            <section className="rounded-3xl border border-stone-200 bg-white shadow-sm">
-              <div className="flex items-center justify-between border-b border-stone-200 px-5 py-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-900">Open Purchase Orders</h3>
-                  <p className="text-sm text-stone-500">Receive remaining quantities and keep open balances visible.</p>
+            <div className="divide-y divide-stone-200">
+              {draftPurchaseOrders.length === 0 ? (
+                <div className="px-5 py-10 text-center text-sm text-stone-500">
+                  No open purchase orders for the current scope.
                 </div>
-              </div>
-
-              <div className="divide-y divide-stone-200">
-                {draftPurchaseOrders.length === 0 ? (
-                  <div className="px-5 py-10 text-center text-sm text-stone-500">
-                    No open purchase orders for the current scope.
-                  </div>
-                ) : (
-                  draftPurchaseOrders.map((order) => (
-                    <div key={order.id} className="px-5 py-4">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <div className="font-medium text-slate-900">{order.invoice_number}</div>
-                          <div className="mt-1 text-sm text-stone-500">
-                            {order.vendor_name} • {order.remaining_lines} open line{order.remaining_lines === 1 ? '' : 's'}
-                          </div>
-                          <div className="mt-2 text-xs text-stone-500">
-                            Created {formatDateTime(order.created_at || order.issue_date)}
-                          </div>
+              ) : (
+                draftPurchaseOrders.map((order) => (
+                  <div key={order.id} className="px-5 py-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <div className="font-medium text-slate-900">{order.invoice_number}</div>
+                        <div className="mt-1 text-sm text-stone-500">
+                          {order.vendor_name} • {order.remaining_lines} open line{order.remaining_lines === 1 ? '' : 's'}
                         </div>
-                        <div className="flex flex-col items-start gap-2 sm:items-end">
-                          <div className="text-right">
-                            <div className="text-sm font-semibold text-slate-900">{order.remaining_units} units</div>
-                            <div className="text-xs text-stone-500">{formatCurrency(order.remaining_value)}</div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => void openReceiveModal(order.id)}
-                            disabled={loadingInvoiceId === order.id}
-                            className="inline-flex items-center gap-2 rounded-xl border border-stone-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {loadingInvoiceId === order.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Truck className="h-4 w-4" />}
-                            Receive
-                          </button>
+                        <div className="mt-2 text-xs text-stone-500">
+                          Created {formatDateTime(order.created_at || order.issue_date)}
                         </div>
                       </div>
+                      <div className="flex flex-col items-start gap-2 sm:items-end">
+                        <div className="text-right">
+                          <div className="text-sm font-semibold text-slate-900">{order.remaining_units} units</div>
+                          <div className="text-xs text-stone-500">{formatCurrency(order.remaining_value)}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void openReceiveModal(order.id)}
+                          disabled={loadingInvoiceId === order.id}
+                          className="inline-flex items-center gap-2 rounded-xl border border-stone-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {loadingInvoiceId === order.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Truck className="h-4 w-4" />}
+                          Receive
+                        </button>
+                      </div>
                     </div>
-                  ))
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+        </div>
+
+        <div className="sticky bottom-0 z-20 mt-6">
+          <div className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center gap-2 text-sm lg:text-base">
+                {selectedLineCount === 0 ? (
+                  <>
+                    <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                    <span className="text-stone-600">No purchase lines selected yet.</span>
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle className="h-5 w-5 text-amber-600" />
+                    <span className="font-medium text-stone-700">
+                      {selectedLineCount} line{selectedLineCount === 1 ? '' : 's'} ready for draft PO creation.
+                    </span>
+                  </>
                 )}
               </div>
-            </section>
+
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <button
+                  type="button"
+                  onClick={() => void loadPurchasingData()}
+                  disabled={isLoading}
+                  className="h-12 rounded-xl border border-stone-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCreateDraftPurchaseOrders}
+                  disabled={isCreating || selectedLineCount === 0}
+                  className="h-12 rounded-xl btn-brand px-6 text-base font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span className="inline-flex items-center justify-center gap-2">
+                    {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardList className="h-4 w-4" />}
+                    {isCreating ? 'Creating Draft POs...' : 'Create Draft POs'}
+                  </span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
