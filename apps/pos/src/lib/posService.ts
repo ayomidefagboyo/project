@@ -552,6 +552,27 @@ export interface StocktakeItem {
   unit_cost?: number;
 }
 
+export interface StocktakeHistoryItem {
+  session_id: string;
+  outlet_id: string;
+  terminal_id?: string | null;
+  performed_by?: string | null;
+  performed_by_name?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  status: string;
+  total_items: number;
+  adjusted_items: number;
+  unchanged_items: number;
+  positive_variance_items: number;
+  negative_variance_items: number;
+  net_quantity_variance: number;
+  total_variance_value?: number | null;
+  notes?: string | null;
+  top_reasons?: string[];
+  source?: string;
+}
+
 interface StocktakeCommitApiResponse {
   session_id: string;
   outlet_id: string;
@@ -2405,6 +2426,28 @@ class POSService {
       };
     } catch (error) {
       logger.error('Error committing stocktake:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  async getStocktakeHistory(
+    outletId: string,
+    options: { limit?: number } = {}
+  ): Promise<StocktakeHistoryItem[]> {
+    try {
+      const params = new URLSearchParams({
+        outlet_id: outletId,
+        limit: String(options.limit || 12),
+      });
+      const response = await apiClient.get<{ items: StocktakeHistoryItem[] }>(
+        `${this.baseUrl}/inventory/stocktakes/history?${params}`
+      );
+      if (!response.data) {
+        throw new Error(response.error || 'Failed to fetch stocktake history');
+      }
+      return response.data.items || [];
+    } catch (error) {
+      logger.error('Error fetching stocktake history:', error);
       throw this.handleError(error);
     }
   }

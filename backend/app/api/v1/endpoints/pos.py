@@ -3282,6 +3282,197 @@ async def commit_stocktake(
         )
 
 
+@router.get("/inventory/stocktakes/history")
+async def get_stocktake_history(
+    outlet_id: str,
+    limit: int = Query(12, ge=1, le=100),
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
+    current_user=Depends(CurrentUser())
+):
+    """Return recent stocktake sessions for an outlet, with fallback to movement aggregation."""
+    try:
+        supabase = get_supabase_admin()
+        _require_stocktake_role(
+            supabase,
+            current_user,
+            outlet_id,
+            x_pos_staff_session
+        )
+
+        def _extract_top_reasons_from_movements(movements: List[Dict[str, Any]]) -> List[str]:
+            ordered: List[str] = []
+            seen: Set[str] = set()
+            for movement in movements:
+                notes_raw = movement.get('notes')
+                reason: Optional[str] = None
+                if isinstance(notes_raw, str):
+                    stripped = notes_raw.strip()
+                    if stripped:
+                        if stripped.startswith('{'):
+                            try:
+                                parsed = json.loads(stripped)
+                                parsed_reason = str(parsed.get('reason') or '').strip()
+                                if parsed_reason:
+                                    reason = parsed_reason
+                            except Exception:
+                                reason = None
+                        elif stripped.startswith('[') and '] ' in stripped:
+                            reason = stripped[1:].split('] ', 1)[0].strip() or None
+                if reason and reason not in seen:
+                    seen.add(reason)
+                    ordered.append(reason)
+                if len(ordered) >= 3:
+                    break
+            return ordered
+
+        def _summarize_movement_sessions(movement_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            sessions_by_id: Dict[str, List[Dict[str, Any]]] = {}
+            for movement in movement_rows:
+                session_id = str(movement.get('reference_id') or '').strip()
+                if not session_id:
+                    continue
+                sessions_by_id.setdefault(session_id, []).append(movement)
+
+            session_summaries: List[Dict[str, Any]] = []
+            for session_id, session_movements in sessions_by_id.items():
+                movement_dates = [
+                    str(movement.get('movement_date') or '').strip()
+                    for movement in session_movements
+                    if str(movement.get('movement_date') or '').strip()
+                ]
+                movement_dates.sort()
+                session_movements_sorted = sorted(
+                    session_movements,
+                    key=lambda row: str(row.get('movement_date') or '')
+                )
+                session_summaries.append({
+                    "session_id": session_id,
+                    "outlet_id": outlet_id,
+                    "terminal_id": None,
+                    "performed_by": str(session_movements_sorted[0].get('performed_by') or '').strip() or None,
+                    "performed_by_name": None,
+                    "started_at": movement_dates[0] if movement_dates else None,
+                    "completed_at": movement_dates[-1] if movement_dates else None,
+                    "status": "completed",
+                    "total_items": len(session_movements_sorted),
+                    "adjusted_items": len(session_movements_sorted),
+                    "unchanged_items": 0,
+                    "positive_variance_items": len([row for row in session_movements_sorted if int(row.get('quantity_change') or 0) > 0]),
+                    "negative_variance_items": len([row for row in session_movements_sorted if int(row.get('quantity_change') or 0) < 0]),
+                    "net_quantity_variance": sum(int(row.get('quantity_change') or 0) for row in session_movements_sorted),
+                    "total_variance_value": round(
+                        sum(abs(_safe_float(row.get('total_value'), 0)) for row in session_movements_sorted),
+                        2
+                    ),
+                    "notes": None,
+                    "top_reasons": _extract_top_reasons_from_movements(session_movements_sorted),
+                    "source": "movement_fallback",
+                })
+
+            session_summaries.sort(
+                key=lambda row: str(row.get("completed_at") or row.get("started_at") or ''),
+                reverse=True
+            )
+            return session_summaries[:limit]
+
+        try:
+            session_result = (
+                supabase.table('pos_stocktake_sessions')
+                .select('*')
+                .eq('outlet_id', outlet_id)
+                .order('completed_at', desc=True)
+                .limit(limit)
+                .execute()
+            )
+            session_rows = session_result.data or []
+        except Exception as session_error:
+            if not _is_missing_table_error(session_error, 'pos_stocktake_sessions'):
+                logger.warning(
+                    "Failed to read pos_stocktake_sessions for outlet %s; falling back to movement aggregation: %s",
+                    outlet_id,
+                    session_error
+                )
+            movement_rows = (
+                supabase.table('pos_stock_movements')
+                .select('reference_id,quantity_change,total_value,notes,performed_by,movement_date')
+                .eq('outlet_id', outlet_id)
+                .eq('reference_type', 'stocktake_session')
+                .order('movement_date', desc=True)
+                .limit(max(limit * 100, 300))
+                .execute()
+            ).data or []
+            return {
+                "items": _summarize_movement_sessions(movement_rows),
+                "source": "movement_fallback",
+            }
+
+        session_ids = [
+            str(row.get('id') or '').strip()
+            for row in session_rows
+            if str(row.get('id') or '').strip()
+        ]
+
+        reasons_by_session_id: Dict[str, List[str]] = {}
+        if session_ids:
+            movement_rows = (
+                supabase.table('pos_stock_movements')
+                .select('reference_id,notes,movement_date')
+                .eq('outlet_id', outlet_id)
+                .eq('reference_type', 'stocktake_session')
+                .in_('reference_id', session_ids)
+                .order('movement_date', desc=True)
+                .execute()
+            ).data or []
+            grouped_movements: Dict[str, List[Dict[str, Any]]] = {}
+            for movement in movement_rows:
+                session_id = str(movement.get('reference_id') or '').strip()
+                if not session_id:
+                    continue
+                grouped_movements.setdefault(session_id, []).append(movement)
+            reasons_by_session_id = {
+                session_id: _extract_top_reasons_from_movements(rows)
+                for session_id, rows in grouped_movements.items()
+            }
+
+        items = []
+        for row in session_rows:
+            session_id = str(row.get('id') or '').strip()
+            items.append({
+                "session_id": session_id,
+                "outlet_id": str(row.get('outlet_id') or '').strip() or outlet_id,
+                "terminal_id": row.get('terminal_id'),
+                "performed_by": str(row.get('performed_by') or '').strip() or None,
+                "performed_by_name": str(row.get('performed_by_name') or '').strip() or None,
+                "started_at": row.get('started_at'),
+                "completed_at": row.get('completed_at'),
+                "status": str(row.get('status') or 'completed').strip() or 'completed',
+                "total_items": _safe_int(row.get('total_items'), 0),
+                "adjusted_items": _safe_int(row.get('adjusted_items'), 0),
+                "unchanged_items": _safe_int(row.get('unchanged_items'), 0),
+                "positive_variance_items": _safe_int(row.get('positive_variance_items'), 0),
+                "negative_variance_items": _safe_int(row.get('negative_variance_items'), 0),
+                "net_quantity_variance": _safe_int(row.get('net_quantity_variance'), 0),
+                "total_variance_value": round(_safe_float(row.get('total_variance_value'), 0), 2),
+                "notes": str(row.get('notes') or '').strip() or None,
+                "top_reasons": reasons_by_session_id.get(session_id, []),
+                "source": "session_table",
+            })
+
+        return {
+            "items": items,
+            "source": "session_table",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching stocktake history: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch stocktake history: {str(e)}"
+        )
+
+
 @router.get("/inventory/movements", response_model=List[StockMovementResponse])
 async def get_stock_movements(
     outlet_id: str,

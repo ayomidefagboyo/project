@@ -1,14 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, RefreshCw, Search } from 'lucide-react';
+import { AlertTriangle, Archive, CheckCircle2, History, Play, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { useOutlet } from '@/contexts/OutletContext';
-import { posService, type POSProduct, type POSDepartment } from '@/lib/posService';
+import { posService, type POSProduct, type POSDepartment, type StocktakeHistoryItem } from '@/lib/posService';
 import { getParsedStaffSession } from '@/lib/staffSessionStorage';
 import { useToast } from '@/components/ui/Toast';
 
 interface StocktakeEdit {
   counted_quantity: number;
   reason: string;
-  notes: string;
+}
+
+interface HeldStocktakeDraft {
+  id: string;
+  outlet_id: string;
+  selected_department: string;
+  edits: Record<string, StocktakeEdit>;
+  created_at: string;
+  updated_at: string;
 }
 
 const stocktakeReasons = [
@@ -22,9 +30,51 @@ const stocktakeReasons = [
 
 const ALL_DEPARTMENTS = '__all__';
 
+const createHeldDraftId = (): string =>
+  `stocktake-hold-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const parseHeldDrafts = (raw: string | null): HeldStocktakeDraft[] => {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((draft) => {
+        const edits: Record<string, StocktakeEdit> = {};
+        const rawEdits = draft?.edits && typeof draft.edits === 'object' ? draft.edits : {};
+        for (const [productId, value] of Object.entries(rawEdits)) {
+          const countedQuantity = Math.max(0, Math.floor(Number((value as StocktakeEdit)?.counted_quantity ?? 0)));
+          edits[productId] = {
+            counted_quantity: Number.isFinite(countedQuantity) ? countedQuantity : 0,
+            reason: String((value as StocktakeEdit)?.reason || '').trim(),
+          };
+        }
+        return {
+          id: String(draft?.id || createHeldDraftId()),
+          outlet_id: String(draft?.outlet_id || ''),
+          selected_department: String(draft?.selected_department || ALL_DEPARTMENTS),
+          edits,
+          created_at: String(draft?.created_at || new Date().toISOString()),
+          updated_at: String(draft?.updated_at || draft?.created_at || new Date().toISOString()),
+        };
+      })
+      .filter((draft) => draft.outlet_id && Object.keys(draft.edits).length > 0);
+  } catch (error) {
+    console.error('Failed to parse held stocktake drafts:', error);
+    return [];
+  }
+};
+
 const getDepartmentName = (category?: string | null) => {
   const normalized = String(category || '').trim();
   return normalized || 'Uncategorized';
+};
+
+const formatDateTime = (value?: string | null) => {
+  if (!value) return 'N/A';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString();
 };
 
 const StocktakingPage: React.FC = () => {
@@ -37,14 +87,56 @@ const StocktakingPage: React.FC = () => {
   const [selectedDepartment, setSelectedDepartment] = useState(ALL_DEPARTMENTS);
   const [search, setSearch] = useState('');
   const [onlyChanged, setOnlyChanged] = useState(false);
+  const [heldDrafts, setHeldDrafts] = useState<HeldStocktakeDraft[]>([]);
+  const [activeHeldDraftId, setActiveHeldDraftId] = useState<string | null>(null);
+  const [stocktakeHistory, setStocktakeHistory] = useState<StocktakeHistoryItem[]>([]);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const loadRequestRef = useRef(0);
+  const heldDraftStorageKey = useMemo(
+    () => (currentOutlet?.id ? `pos_stocktake_holds_${currentOutlet.id}` : null),
+    [currentOutlet?.id]
+  );
 
   const activeStaffId = useMemo(() => {
     const parsed = getParsedStaffSession<any>();
     return parsed?.staff_profile?.id || currentUser?.id || 'system';
   }, [currentUser?.id]);
+
+  const persistHeldDrafts = (nextDrafts: HeldStocktakeDraft[]) => {
+    setHeldDrafts(nextDrafts);
+    if (!heldDraftStorageKey) return;
+    try {
+      if (nextDrafts.length === 0) {
+        localStorage.removeItem(heldDraftStorageKey);
+      } else {
+        localStorage.setItem(heldDraftStorageKey, JSON.stringify(nextDrafts));
+      }
+    } catch (error) {
+      console.error('Failed to persist held stocktake drafts:', error);
+    }
+  };
+
+  const loadStocktakeHistory = async () => {
+    if (!currentOutlet?.id) {
+      setStocktakeHistory([]);
+      setIsHistoryLoading(false);
+      return;
+    }
+
+    setIsHistoryLoading(true);
+    try {
+      const history = await posService.getStocktakeHistory(currentOutlet.id, { limit: 8 });
+      setStocktakeHistory(history);
+    } catch (err) {
+      console.error('Failed to load stocktake history:', err);
+      showError('Failed to load stocktake history.');
+      setStocktakeHistory([]);
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  };
 
   const loadProducts = async () => {
     if (!currentOutlet?.id) {
@@ -111,7 +203,23 @@ const StocktakingPage: React.FC = () => {
 
   useEffect(() => {
     void loadProducts();
+    void loadStocktakeHistory();
   }, [currentOutlet?.id]);
+
+  useEffect(() => {
+    setActiveHeldDraftId(null);
+    setEdits({});
+    if (!heldDraftStorageKey) {
+      setHeldDrafts([]);
+      return;
+    }
+    try {
+      setHeldDrafts(parseHeldDrafts(localStorage.getItem(heldDraftStorageKey)));
+    } catch (error) {
+      console.error('Failed to load held stocktake drafts:', error);
+      setHeldDrafts([]);
+    }
+  }, [heldDraftStorageKey]);
 
   const departments = useMemo(() => {
     const unique = new Set<string>();
@@ -160,6 +268,14 @@ const StocktakingPage: React.FC = () => {
     });
   }, [scopedProducts, edits, onlyChanged, search]);
 
+  const productsById = useMemo(() => {
+    const map = new Map<string, POSProduct>();
+    for (const product of products) {
+      map.set(product.id, product);
+    }
+    return map;
+  }, [products]);
+
   const changedRows = useMemo(() => {
     return scopedProducts
       .map((product) => {
@@ -172,7 +288,6 @@ const StocktakingPage: React.FC = () => {
           counted,
           delta,
           reason: edit?.reason || '',
-          notes: edit?.notes || '',
         };
       })
       .filter((row) => row.delta !== 0);
@@ -188,7 +303,6 @@ const StocktakingPage: React.FC = () => {
       const existing = prev[productId] || {
         counted_quantity: product.quantity_on_hand,
         reason: '',
-        notes: '',
       };
 
       return {
@@ -199,6 +313,65 @@ const StocktakingPage: React.FC = () => {
         },
       };
     });
+  };
+
+  const buildHeldDraft = (draftId: string, nextEdits: Record<string, StocktakeEdit>): HeldStocktakeDraft => ({
+    id: draftId,
+    outlet_id: currentOutlet?.id || '',
+    selected_department: selectedDepartment,
+    edits: Object.fromEntries(
+      Object.entries(nextEdits)
+        .filter(([, value]) => value && Number.isFinite(value.counted_quantity))
+        .map(([productId, value]) => [
+          productId,
+          {
+            counted_quantity: Math.max(0, Math.floor(Number(value.counted_quantity || 0))),
+            reason: String(value.reason || '').trim(),
+          },
+        ])
+    ),
+    created_at: heldDrafts.find((draft) => draft.id === draftId)?.created_at || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+
+  const handleHoldStocktake = () => {
+    if (!currentOutlet?.id) return;
+
+    const editCount = Object.keys(edits).length;
+    if (editCount === 0) {
+      warning('No stocktake progress to hold yet.');
+      return;
+    }
+
+    const draftId = activeHeldDraftId || createHeldDraftId();
+    const nextDraft = buildHeldDraft(draftId, edits);
+    const nextDrafts = [nextDraft, ...heldDrafts.filter((draft) => draft.id !== draftId)];
+    persistHeldDrafts(nextDrafts);
+
+    setEdits({});
+    setActiveHeldDraftId(null);
+    setSelectedDepartment(ALL_DEPARTMENTS);
+    setSearch('');
+    setOnlyChanged(false);
+    success('Stocktake progress held. You can resume it later.');
+  };
+
+  const handleLoadHeldDraft = (draft: HeldStocktakeDraft) => {
+    setEdits(draft.edits);
+    setSelectedDepartment(draft.selected_department || ALL_DEPARTMENTS);
+    setSearch('');
+    setOnlyChanged(false);
+    setActiveHeldDraftId(draft.id);
+    success('Held stocktake loaded.');
+  };
+
+  const handleDeleteHeldDraft = (draftId: string) => {
+    if (!window.confirm('Delete this held stocktake?')) return;
+    const nextDrafts = heldDrafts.filter((draft) => draft.id !== draftId);
+    persistHeldDrafts(nextDrafts);
+    if (activeHeldDraftId === draftId) {
+      setActiveHeldDraftId(null);
+    }
   };
 
   const handleApplyStocktake = async () => {
@@ -225,7 +398,6 @@ const StocktakingPage: React.FC = () => {
           current_quantity: row.product.quantity_on_hand,
           counted_quantity: row.counted,
           reason: row.reason,
-          notes: row.notes,
           unit_cost: row.product.cost_price,
         })),
       });
@@ -233,13 +405,23 @@ const StocktakingPage: React.FC = () => {
       success(
         `Stocktake completed: ${result.adjusted_count} adjusted, ${result.unchanged_count} unchanged.`
       );
-      setEdits((prev) => {
-        const next = { ...prev };
-        for (const row of changedRows) {
-          delete next[row.product.id];
+      const nextEdits = { ...edits };
+      for (const row of changedRows) {
+        delete nextEdits[row.product.id];
+      }
+      setEdits(nextEdits);
+      if (activeHeldDraftId) {
+        if (Object.keys(nextEdits).length === 0) {
+          persistHeldDrafts(heldDrafts.filter((draft) => draft.id !== activeHeldDraftId));
+          setActiveHeldDraftId(null);
+        } else {
+          const updatedDraft = buildHeldDraft(activeHeldDraftId, nextEdits);
+          persistHeldDrafts([
+            updatedDraft,
+            ...heldDrafts.filter((draft) => draft.id !== activeHeldDraftId),
+          ]);
         }
-        return next;
-      });
+      }
       const countedByProductId = new Map(
         changedRows.map((row) => [row.product.id, row.counted])
       );
@@ -253,6 +435,7 @@ const StocktakingPage: React.FC = () => {
           };
         })
       );
+      await loadStocktakeHistory();
     } catch (err) {
       console.error('Stocktake failed:', err);
       const message = err instanceof Error ? err.message : 'Stocktake failed. Please try again.';
@@ -297,8 +480,22 @@ const StocktakingPage: React.FC = () => {
                 <RefreshCw className="w-5 h-5" />
                 Refresh
               </button>
+              <button
+                type="button"
+                onClick={handleHoldStocktake}
+                className="h-12 px-4 rounded-xl border border-stone-300 bg-white text-slate-700 hover:bg-stone-100 text-base font-semibold inline-flex items-center gap-2"
+              >
+                <Archive className="w-5 h-5" />
+                Hold Stocktake
+              </button>
             </div>
           </div>
+
+          {activeHeldDraftId && (
+            <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+              Continuing a held stocktake. Save it again to update the held copy, or apply it to clear completed rows.
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-5">
             <div className="rounded-xl border border-stone-200 bg-stone-50 p-4">
@@ -318,6 +515,119 @@ const StocktakingPage: React.FC = () => {
           </div>
         </div>
 
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div className="rounded-2xl border border-stone-200 bg-white p-4 lg:p-5">
+            <div className="flex items-center gap-2">
+              <Archive className="w-5 h-5 text-slate-700" />
+              <h3 className="text-lg font-semibold text-slate-900">Held Stocktakes</h3>
+            </div>
+            <div className="mt-4 space-y-3">
+              {heldDrafts.length === 0 ? (
+                <p className="text-sm text-stone-500">No held stocktakes yet.</p>
+              ) : (
+                heldDrafts.map((draft) => {
+                  const draftEditIds = Object.keys(draft.edits);
+                  const draftVarianceCount = draftEditIds.filter((productId) => {
+                    const product = productsById.get(productId);
+                    if (!product) return true;
+                    return (draft.edits[productId]?.counted_quantity ?? product.quantity_on_hand) !== product.quantity_on_hand;
+                  }).length;
+
+                  return (
+                    <div key={draft.id} className="rounded-xl border border-stone-200 bg-stone-50 p-4">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-900">
+                            {draft.selected_department === ALL_DEPARTMENTS ? 'All Departments' : draft.selected_department}
+                          </div>
+                          <div className="text-sm text-stone-500 mt-1">
+                            {draftEditIds.length} saved row{draftEditIds.length === 1 ? '' : 's'} • {draftVarianceCount} variance item{draftVarianceCount === 1 ? '' : 's'}
+                          </div>
+                          <div className="text-xs text-stone-500 mt-1">
+                            Updated {formatDateTime(draft.updated_at)}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleLoadHeldDraft(draft)}
+                            className="h-10 px-3 rounded-lg border border-stone-300 bg-white text-slate-700 hover:bg-stone-100 text-sm font-semibold inline-flex items-center gap-2"
+                          >
+                            <Play className="w-4 h-4" />
+                            Load
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteHeldDraft(draft.id)}
+                            className="h-10 w-10 rounded-lg border border-stone-300 bg-white text-rose-600 hover:bg-rose-50 inline-flex items-center justify-center"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-stone-200 bg-white p-4 lg:p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <History className="w-5 h-5 text-slate-700" />
+                <h3 className="text-lg font-semibold text-slate-900">Stocktake History</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => void loadStocktakeHistory()}
+                className="h-10 px-3 rounded-lg border border-stone-300 bg-white text-slate-700 hover:bg-stone-100 text-sm font-semibold inline-flex items-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Refresh
+              </button>
+            </div>
+            <div className="mt-4 space-y-3">
+              {isHistoryLoading ? (
+                <p className="text-sm text-stone-500">Loading stocktake history...</p>
+              ) : stocktakeHistory.length === 0 ? (
+                <p className="text-sm text-stone-500">No stocktake history yet.</p>
+              ) : (
+                stocktakeHistory.map((entry) => (
+                  <div key={entry.session_id} className="rounded-xl border border-stone-200 bg-stone-50 p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <div className="font-semibold text-slate-900">
+                          {entry.performed_by_name || entry.performed_by || 'Staff'}
+                        </div>
+                        <div className="text-xs text-stone-500 mt-1">{formatDateTime(entry.completed_at || entry.started_at)}</div>
+                      </div>
+                      <div className={`text-sm font-semibold ${entry.net_quantity_variance > 0 ? 'text-emerald-700' : entry.net_quantity_variance < 0 ? 'text-rose-700' : 'text-slate-700'}`}>
+                        {entry.net_quantity_variance > 0 ? `+${entry.net_quantity_variance}` : entry.net_quantity_variance}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mt-3 text-sm text-stone-600">
+                      <div>{entry.adjusted_items} adjusted</div>
+                      <div>{entry.unchanged_items} unchanged</div>
+                      <div>+{entry.positive_variance_items} / -{entry.negative_variance_items}</div>
+                      <div>Value {Number(entry.total_variance_value || 0).toLocaleString()}</div>
+                    </div>
+                    {entry.top_reasons && entry.top_reasons.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        {entry.top_reasons.map((reason) => (
+                          <span key={`${entry.session_id}-${reason}`} className="px-2.5 py-1 rounded-full bg-white border border-stone-200 text-xs font-medium text-stone-600">
+                            {reason}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+
         <div className="rounded-2xl border border-stone-200 bg-white p-4 lg:p-5">
           <div className="relative max-w-xl">
             <Search className="w-5 h-5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -332,7 +642,7 @@ const StocktakingPage: React.FC = () => {
 
           <div className="mt-4 border border-stone-200 rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1100px] text-sm lg:text-base">
+              <table className="w-full min-w-[920px] text-sm lg:text-base">
                 <thead className="bg-stone-100 text-stone-600">
                   <tr>
                     <th className="text-left font-semibold px-4 py-3">Product</th>
@@ -341,19 +651,18 @@ const StocktakingPage: React.FC = () => {
                     <th className="text-right font-semibold px-4 py-3">Counted Qty</th>
                     <th className="text-right font-semibold px-4 py-3">Variance</th>
                     <th className="text-left font-semibold px-4 py-3">Reason</th>
-                    <th className="text-left font-semibold px-4 py-3">Notes</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-200">
                   {isLoading && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-stone-500">Loading stock items...</td>
+                      <td colSpan={6} className="px-4 py-8 text-center text-stone-500">Loading stock items...</td>
                     </tr>
                   )}
 
                   {!isLoading && visibleProducts.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-stone-500">
+                      <td colSpan={6} className="px-4 py-8 text-center text-stone-500">
                         {products.length === 0
                           ? 'No products found for this outlet.'
                           : scopedProducts.length === 0
@@ -405,15 +714,6 @@ const StocktakingPage: React.FC = () => {
                               <option key={reason} value={reason}>{reason}</option>
                             ))}
                           </select>
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            type="text"
-                            value={edit?.notes || ''}
-                            onChange={(event) => updateEdit(product.id, { notes: event.target.value })}
-                            placeholder="Optional note"
-                            className="w-full h-11 rounded-lg border border-stone-300 px-3 text-sm lg:text-base focus:ring-2 focus:ring-slate-400 focus:border-transparent"
-                          />
                         </td>
                       </tr>
                     );
