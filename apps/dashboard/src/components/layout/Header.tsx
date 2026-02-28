@@ -105,40 +105,45 @@ const Header: React.FC<HeaderProps> = ({ isDarkMode, toggleDarkMode, onToggleSid
     <>
       <header className="bg-white/80 backdrop-blur-xl border-b border-gray-100 dark:bg-gray-900/80 dark:border-gray-800 sticky top-0 z-30">
         <div className="px-4 sm:px-6 py-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 flex-1 min-w-0">
-              <button
-                onClick={onToggleSidebar}
-                className="lg:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                aria-label="Open navigation menu"
-              >
-                <Menu className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-              </button>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              onClick={onToggleSidebar}
+              className="lg:hidden p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex-shrink-0"
+              aria-label="Open navigation menu"
+            >
+              <Menu className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+            </button>
 
-              <div className="relative flex-1 md:hidden">
-                <div
-                  className={`
-                    flex items-center bg-gray-50 dark:bg-gray-800 rounded-xl transition-all duration-200
-                    ${isSearchFocused
-                      ? 'ring-2 ring-gray-900 dark:ring-white bg-white dark:bg-gray-700'
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-700'
-                    }
-                    w-full
-                  `}
-                >
-                  <Search className="w-4 h-4 text-gray-400 ml-3" />
-                  <input
-                    type="text"
-                    placeholder="Search..."
-                    className="w-full px-3 py-2.5 bg-transparent text-sm text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none"
-                    onFocus={() => setIsSearchFocused(true)}
-                    onBlur={() => setIsSearchFocused(false)}
-                  />
-                </div>
+            <div className="relative flex-1 min-w-0">
+              <div
+                className={`
+                  flex items-center bg-gray-50 dark:bg-gray-800 rounded-xl transition-all duration-200
+                  ${isSearchFocused
+                    ? 'ring-2 ring-gray-900 dark:ring-white bg-white dark:bg-gray-700'
+                    : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                  }
+                  w-full
+                `}
+              >
+                <Search className="w-4 h-4 text-gray-400 ml-3 sm:ml-4 flex-shrink-0" />
+                <input
+                  type="text"
+                  placeholder="Search transactions, invoices..."
+                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-transparent text-sm text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none min-w-0"
+                  onFocus={() => setIsSearchFocused(true)}
+                  onBlur={() => setIsSearchFocused(false)}
+                />
+                {isSearchFocused && (
+                  <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 p-4">
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                      Start typing to search...
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="flex items-center gap-1 sm:gap-2">
+            <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
               <a
                 href={posAppUrl}
                 target="_blank"
@@ -236,37 +241,6 @@ const Header: React.FC<HeaderProps> = ({ isDarkMode, toggleDarkMode, onToggleSid
                           Sign Out
                         </span>
                       </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-3 hidden md:block">
-            <div className="relative w-full lg:max-w-xl">
-              <div
-                className={`
-                  flex items-center bg-gray-50 dark:bg-gray-800 rounded-xl transition-all duration-200
-                  ${isSearchFocused
-                    ? 'ring-2 ring-gray-900 dark:ring-white bg-white dark:bg-gray-700'
-                    : 'hover:bg-gray-100 dark:hover:bg-gray-700'
-                  }
-                  w-full
-                `}
-              >
-                <Search className="w-4 h-4 text-gray-400 ml-4" />
-                <input
-                  type="text"
-                  placeholder="Search transactions, invoices..."
-                  className="w-full px-4 py-3 bg-transparent text-sm text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none"
-                  onFocus={() => setIsSearchFocused(true)}
-                  onBlur={() => setIsSearchFocused(false)}
-                />
-                {isSearchFocused && (
-                  <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 p-4">
-                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                      Start typing to search...
                     </div>
                   </div>
                 )}

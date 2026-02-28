@@ -24,6 +24,7 @@ import Toast from '@/components/ui/Toast';
 import { useOutlet } from '@/contexts/OutletContext';
 import { dataService } from '@/lib/services';
 import { subscriptionService } from '@/lib/subscriptionService';
+import { resolvePosAppUrl } from '../../../../../shared/services/urlResolver';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -35,6 +36,7 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, className = '' }) => {
   const location = useLocation();
   const { currentUser, setUserOutlets, userOutlets } = useOutlet();
+  const posAppUrl = resolvePosAppUrl(import.meta.env.VITE_POS_APP_URL);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [showCreateStoreModal, setShowCreateStoreModal] = useState(false);
   const [toast, setToast] = useState<{
@@ -87,14 +89,14 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
 
   const navItems = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-    { name: 'POS Terminal', href: '/dashboard/pos', icon: ShoppingCart },
+    { name: 'Expenses', href: '/dashboard/expenses', icon: CreditCard },
     { name: 'Product Management', href: '/dashboard/products', icon: Package },
     { name: 'Staff Management', href: '/dashboard/staff', icon: Users },
     { name: 'Compazz Insights', href: '/dashboard/ai-assistant', icon: Bot },
     { name: 'Daily Reports', href: '/dashboard/daily-reports', icon: BarChart3 },
     { name: 'Stocktake Reports', href: '/dashboard/stocktake-reports', icon: ClipboardCheck },
     { name: 'Invoices', href: '/dashboard/invoices', icon: FileText },
-    { name: 'Expenses', href: '/dashboard/expenses', icon: CreditCard },
+    { name: 'POS Terminal', href: posAppUrl, icon: ShoppingCart, external: true },
     { name: 'Vendors', href: '/dashboard/vendors', icon: Building2 },
     { name: 'Audit Trail', href: '/dashboard/audit-trail', icon: Shield },
   ];
@@ -116,7 +118,35 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle, isDarkMode, classNa
   };
 
   const NavItem = ({ item, isCollapsed = false }: { item: any; isCollapsed?: boolean }) => {
-    const active = isActive(item.href);
+    const active = item.external ? false : isActive(item.href);
+
+    if (item.external) {
+      return (
+        <a
+          href={item.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={closeSidebarOnMobile}
+          className={`
+            group relative flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-200 ease-in-out
+            text-gray-600 hover:text-gray-900 hover:bg-gray-50 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-800/50
+            ${isCollapsed ? 'justify-center px-3' : ''}
+          `}
+        >
+          <item.icon className={`flex-shrink-0 ${isCollapsed ? 'w-6 h-6' : 'w-5 h-5'} transition-colors`} />
+          {!isCollapsed && (
+            <span className="font-medium text-sm truncate">{item.name}</span>
+          )}
+
+          {isCollapsed && (
+            <div className="absolute left-full ml-3 px-3 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap z-50">
+              {item.name}
+              <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1 w-2 h-2 bg-gray-900 rotate-45" />
+            </div>
+          )}
+        </a>
+      );
+    }
 
     return (
       <Link

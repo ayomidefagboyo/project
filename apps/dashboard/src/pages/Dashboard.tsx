@@ -42,6 +42,7 @@ interface DashboardInvoice {
   issue_date?: string | null;
   due_date?: string | null;
   status?: string | null;
+  payment_status?: string | null;
   total?: number | null;
   created_at?: string | null;
   invoice_items?: DashboardInvoiceItem[];
@@ -73,10 +74,35 @@ interface DashboardAuditEntryResponse {
   pages: number;
 }
 
+interface DashboardExpenseStatsResponse {
+  total_expenses: number;
+  total_count: number;
+  approved_amount: number;
+  pending_amount: number;
+  pending_count: number;
+}
+
 interface MetricChange {
   value: number;
   isPositive: boolean;
+  displayLabel?: string;
+  comparisonLabel?: string;
 }
+
+interface DashboardFinancialSummary {
+  operatingExpenses: number;
+  inventoryCost: number;
+  paidProcurement: number;
+  netProfit: number;
+}
+
+const DASHBOARD_INVOICE_PAGE_SIZE = 100;
+const EMPTY_FINANCIAL_SUMMARY: DashboardFinancialSummary = {
+  operatingExpenses: 0,
+  inventoryCost: 0,
+  paidProcurement: 0,
+  netProfit: 0,
+};
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -104,6 +130,8 @@ const Dashboard: React.FC = () => {
   const [dashboardInvoices, setDashboardInvoices] = useState<DashboardInvoice[]>([]);
   const [recentActivities, setRecentActivities] = useState<AuditEntry[]>([]);
   const [eodStats, setEodStats] = useState<any>(null);
+  const [financialSummary, setFinancialSummary] = useState<DashboardFinancialSummary>(EMPTY_FINANCIAL_SUMMARY);
+  const [operatingExpensesByOutlet, setOperatingExpensesByOutlet] = useState<Record<string, number>>({});
   const [invoiceStatsSummary, setInvoiceStatsSummary] = useState({
     total: 0,
     unpaidCount: 0,
@@ -445,8 +473,17 @@ const Dashboard: React.FC = () => {
     lowerIsBetter: boolean = false
   ): MetricChange | undefined => {
     if (!Number.isFinite(current) || !Number.isFinite(previous)) return undefined;
-    if (current === 0 && previous === 0) return { value: 0, isPositive: true };
-    if (previous === 0) return { value: 100, isPositive: !lowerIsBetter };
+    if (current === 0 && previous === 0) {
+      return { value: 0, isPositive: true, displayLabel: '0%', comparisonLabel: 'no change' };
+    }
+    if (previous === 0) {
+      return {
+        value: 0,
+        isPositive: !lowerIsBetter,
+        displayLabel: current === 0 ? '0%' : 'New',
+        comparisonLabel: 'no prior baseline',
+      };
+    }
 
     const raw = ((current - previous) / Math.abs(previous)) * 100;
     const rounded = Math.round(Math.abs(raw) * 10) / 10;
@@ -454,6 +491,7 @@ const Dashboard: React.FC = () => {
     return {
       value: rounded,
       isPositive: lowerIsBetter ? raw <= 0 : raw >= 0,
+      comparisonLabel: 'vs prior period',
     };
   };
 
@@ -509,6 +547,59 @@ const Dashboard: React.FC = () => {
     };
   };
 
+  const fetchVendorInvoicesForOutlet = async (outletId: string, dateFrom: string, dateTo: string) => {
+    let page = 1;
+    let totalPages = 1;
+    const collected: DashboardInvoice[] = [];
+
+    while (page <= totalPages) {
+      const response = await apiClient.get<DashboardInvoicesResponse>('/invoices/', {
+        outlet_id: outletId,
+        invoice_type: 'vendor',
+        page,
+        size: DASHBOARD_INVOICE_PAGE_SIZE,
+        date_from: dateFrom,
+        date_to: dateTo,
+      });
+
+      if (response.error || !response.data) {
+        throw new Error(response.error || 'Failed to load dashboard invoices');
+      }
+
+      const pageItems = Array.isArray(response.data.items) ? response.data.items : [];
+      collected.push(...pageItems);
+      totalPages = Math.max(1, Number(response.data.pages || 1));
+      page += 1;
+    }
+
+    return collected;
+  };
+
+  const fetchOperatingExpenseTotalsByOutlet = async (
+    outletIds: string[],
+    dateFrom: string,
+    dateTo: string
+  ): Promise<Record<string, number>> => {
+    const responses = await Promise.all(
+      outletIds.map((outletId) =>
+        apiClient.get<DashboardExpenseStatsResponse>('/expenses/stats/summary', {
+          outlet_id: outletId,
+          date_from: dateFrom,
+          date_to: dateTo,
+        })
+      )
+    );
+
+    return outletIds.reduce<Record<string, number>>((accumulator, outletId, index) => {
+      const response = responses[index];
+      accumulator[outletId] =
+        !response?.error && response?.data
+          ? normalizeMoney(response.data.total_expenses)
+          : 0;
+      return accumulator;
+    }, {});
+  };
+
   // Helper function to get date range label for button display
   const getDateRangeLabel = (range: string, customFrom: string, customTo: string): string => {
     switch (range) {
@@ -549,10 +640,10 @@ const Dashboard: React.FC = () => {
     const summary = invoices.reduce(
       (acc, invoice) => {
         const totalAmount = normalizeMoney(invoice.total);
-        const status = String(invoice.status || '').toLowerCase();
+        const paymentStatus = String(invoice.payment_status || invoice.status || '').toLowerCase();
 
         acc.total += 1;
-        if (status === 'paid') {
+        if (paymentStatus === 'paid') {
           acc.paidCount += 1;
         } else {
           acc.unpaidCount += 1;
@@ -576,6 +667,8 @@ const Dashboard: React.FC = () => {
         setDashboardInvoices([]);
         setRecentActivities([]);
         setEodStats(null);
+        setFinancialSummary(EMPTY_FINANCIAL_SUMMARY);
+        setOperatingExpensesByOutlet({});
         setSalesChange(undefined);
         setExpenseChange(undefined);
         setProfitChange(undefined);
@@ -584,30 +677,29 @@ const Dashboard: React.FC = () => {
         return;
       }
 
+      let paidProcurement = 0;
+
       // Load real vendor invoices from backend invoices endpoint.
       try {
         const invoiceResponses = await Promise.all(
           outletIds.map((outletId) =>
-            apiClient.get<DashboardInvoicesResponse>('/invoices/', {
-              outlet_id: outletId,
-              invoice_type: 'vendor',
-              page: 1,
-              size: 200,
-              date_from: currentDateRange.from,
-              date_to: currentDateRange.to,
-            })
+            fetchVendorInvoicesForOutlet(outletId, currentDateRange.from, currentDateRange.to)
           )
         );
 
         const loadedInvoices = invoiceResponses
-          .filter((response) => !response.error && response.data)
-          .flatMap((response) => response.data?.items || []);
+          .flatMap((response) => response || []);
 
         const sortedInvoices = [...loadedInvoices].sort((left, right) => {
           const leftTs = new Date(String(left.created_at || left.issue_date || '')).getTime();
           const rightTs = new Date(String(right.created_at || right.issue_date || '')).getTime();
           return rightTs - leftTs;
         });
+
+        paidProcurement = sortedInvoices.reduce((sum, invoice) => {
+          const paymentStatus = String(invoice.payment_status || invoice.status || '').toLowerCase();
+          return paymentStatus === 'paid' ? sum + normalizeMoney(invoice.total) : sum;
+        }, 0);
 
         setDashboardInvoices(sortedInvoices);
         updateInvoiceSummaryFromList(sortedInvoices);
@@ -658,7 +750,12 @@ const Dashboard: React.FC = () => {
       try {
         const previousRange = getPreviousDateRange(currentDateRange.from, currentDateRange.to);
 
-        const [currentStatsResponses, previousStatsResponses] = await Promise.all([
+        const [
+          currentStatsResponses,
+          previousStatsResponses,
+          currentOperatingExpensesByOutlet,
+          previousOperatingExpensesByOutlet,
+        ] = await Promise.all([
           Promise.all(
             outletIds.map((outletId) =>
               eodService.getEODStats(currentDateRange.from, currentDateRange.to, outletId)
@@ -669,6 +766,8 @@ const Dashboard: React.FC = () => {
               eodService.getEODStats(previousRange.from, previousRange.to, outletId)
             )
           ),
+          fetchOperatingExpenseTotalsByOutlet(outletIds, currentDateRange.from, currentDateRange.to),
+          fetchOperatingExpenseTotalsByOutlet(outletIds, previousRange.from, previousRange.to),
         ]);
 
         const aggregateStatsResponse = (responses: Array<{ data: any | null; error: string | null }>) => {
@@ -682,21 +781,42 @@ const Dashboard: React.FC = () => {
 
         const currentStats = aggregateStatsResponse(currentStatsResponses);
         const previousStats = aggregateStatsResponse(previousStatsResponses);
+        const currentOperatingExpenses = Object.values(currentOperatingExpensesByOutlet).reduce(
+          (sum, amount) => sum + normalizeMoney(amount),
+          0
+        );
+        const previousOperatingExpenses = Object.values(previousOperatingExpensesByOutlet).reduce(
+          (sum, amount) => sum + normalizeMoney(amount),
+          0
+        );
 
         setEodStats(currentStats);
+        setOperatingExpensesByOutlet(currentOperatingExpensesByOutlet);
         const currentSales = normalizeMoney(currentStats?.total_sales);
         const previousSales = normalizeMoney(previousStats?.total_sales);
-        const currentExpenses = normalizeMoney(currentStats?.total_expenses);
-        const previousExpenses = normalizeMoney(previousStats?.total_expenses);
-        const currentProfit = normalizeMoney(currentStats?.net_profit);
-        const previousProfit = normalizeMoney(previousStats?.net_profit);
+        const currentInventoryCost = normalizeMoney(currentStats?.total_expenses);
+        const previousInventoryCost = normalizeMoney(previousStats?.total_expenses);
+        const currentProfit = currentSales - currentInventoryCost - currentOperatingExpenses;
+        const previousProfit = previousSales - previousInventoryCost - previousOperatingExpenses;
+
+        setFinancialSummary({
+          operatingExpenses: currentOperatingExpenses,
+          inventoryCost: currentInventoryCost,
+          paidProcurement,
+          netProfit: currentProfit,
+        });
 
         setSalesChange(buildPercentChange(currentSales, previousSales, false));
-        setExpenseChange(buildPercentChange(currentExpenses, previousExpenses, true));
+        setExpenseChange(buildPercentChange(currentOperatingExpenses, previousOperatingExpenses, true));
         setProfitChange(buildPercentChange(currentProfit, previousProfit, false));
       } catch (eodError) {
         console.warn('Error loading EOD stats:', eodError);
         setEodStats(null);
+        setFinancialSummary({
+          ...EMPTY_FINANCIAL_SUMMARY,
+          paidProcurement,
+        });
+        setOperatingExpensesByOutlet({});
         setSalesChange(undefined);
         setExpenseChange(undefined);
         setProfitChange(undefined);
@@ -807,24 +927,14 @@ const Dashboard: React.FC = () => {
   };
 
   const calculateMetrics = () => {
-    const totalExpenses = dashboardInvoices.reduce(
-      (sum, invoice) => sum + normalizeMoney(invoice.total),
-      0
-    );
-    const pendingInvoices = dashboardInvoices.filter((invoice) => {
-      const status = String(invoice.status || '').toLowerCase();
-      return status !== 'paid';
-    }).length;
-    const approvedInvoices = dashboardInvoices.filter((invoice) => {
-      const status = String(invoice.status || '').toLowerCase();
-      return status === 'paid';
-    }).length;
-    
     return {
-      totalExpenses,
-      pendingInvoices,
-      approvedInvoices,
-      totalInvoices: dashboardInvoices.length
+      operatingExpenses: financialSummary.operatingExpenses,
+      inventoryCost: financialSummary.inventoryCost,
+      paidProcurement: financialSummary.paidProcurement,
+      netProfit: financialSummary.netProfit,
+      pendingInvoices: invoiceStatsSummary.unpaidCount,
+      approvedInvoices: invoiceStatsSummary.paidCount,
+      totalInvoices: invoiceStatsSummary.total,
     };
   };
 
@@ -842,8 +952,10 @@ const Dashboard: React.FC = () => {
         },
         metrics: {
           totalSales: eodStats?.total_sales || 0,
-          totalExpenses: eodStats?.total_expenses || metrics.totalExpenses,
-          netProfit: eodStats?.net_profit || 0,
+          totalExpenses: metrics.operatingExpenses,
+          inventoryCost: metrics.inventoryCost,
+          paidProcurement: metrics.paidProcurement,
+          netProfit: metrics.netProfit,
           pendingInvoices: metrics.pendingInvoices,
           approvedInvoices: metrics.approvedInvoices,
           totalInvoices: metrics.totalInvoices
@@ -880,7 +992,10 @@ const Dashboard: React.FC = () => {
     const headers = ['Metric', 'Value', 'Outlet'];
     const rows = [
       ['Total Sales', `$${data.metrics.totalSales.toLocaleString()}`, data.outlets.join('; ')],
-      ['Total Expenses', `$${data.metrics.totalExpenses.toLocaleString()}`, data.outlets.join('; ')],
+      ['Operating Expenses', `$${data.metrics.totalExpenses.toLocaleString()}`, data.outlets.join('; ')],
+      ['Inventory Cost (COGS)', `$${(data.metrics.inventoryCost || 0).toLocaleString()}`, data.outlets.join('; ')],
+      ['Paid Procurement', `$${(data.metrics.paidProcurement || 0).toLocaleString()}`, data.outlets.join('; ')],
+      ['Net Profit', `$${data.metrics.netProfit.toLocaleString()}`, data.outlets.join('; ')],
       ['Pending Invoices', data.metrics.pendingInvoices.toString(), data.outlets.join('; ')],
       ['Approved Invoices', data.metrics.approvedInvoices.toString(), data.outlets.join('; ')],
       ['Total Invoices', data.metrics.totalInvoices.toString(), data.outlets.join('; ')],
@@ -935,8 +1050,8 @@ const Dashboard: React.FC = () => {
       : currentOutlet?.name || 'All locations';
 
   const unpaidInvoices = dashboardInvoices.filter((invoice) => {
-    const status = String(invoice.status || '').toLowerCase();
-    return status !== 'paid';
+    const paymentStatus = String(invoice.payment_status || invoice.status || '').toLowerCase();
+    return paymentStatus !== 'paid';
   });
   const invoicesRequiringAttention =
     (unpaidInvoices.length > 0 ? unpaidInvoices : dashboardInvoices).slice(0, 6);
@@ -1268,10 +1383,10 @@ const Dashboard: React.FC = () => {
             onClick={() => navigate('/dashboard/daily-reports')}
           />
           <DashboardCard
-            title="Total Expenses"
-            value={eodStats ? currencyService.formatCurrency(eodStats.total_expenses) : currencyService.formatCurrency(metrics.totalExpenses)}
+            title="Operating Spend"
+            value={currencyService.formatCurrency(financialSummary.operatingExpenses)}
             icon={<CreditCard className="w-5 h-5" />}
-            subtitle={currentDateRange.label}
+            subtitle={`${currentDateRange.label} • manual expenses only`}
             change={expenseChange}
             onClick={() => navigate('/dashboard/expenses')}
           />
@@ -1284,9 +1399,9 @@ const Dashboard: React.FC = () => {
           />
           <DashboardCard
             title="Net Profit"
-            value={eodStats ? currencyService.formatCurrency(eodStats.net_profit) : currencyService.formatCurrency(0)}
+            value={currencyService.formatCurrency(financialSummary.netProfit)}
             icon={<BarChart3 className="w-5 h-5" />}
-            subtitle={currentDateRange.label}
+            subtitle={`After COGS ${currencyService.formatCurrency(financialSummary.inventoryCost)}`}
             change={profitChange}
             onClick={() => navigate('/dashboard/daily-reports')}
           />
@@ -1320,8 +1435,8 @@ const Dashboard: React.FC = () => {
                 {invoicesRequiringAttention.length > 0 ? (
                   <div className="space-y-3">
                     {invoicesRequiringAttention.map((invoice) => {
-                      const status = String(invoice.status || 'unknown');
-                      const normalizedStatus = status.toLowerCase();
+                      const paymentStatus = String(invoice.payment_status || invoice.status || 'unknown');
+                      const normalizedStatus = paymentStatus.toLowerCase();
                       const isPaid = normalizedStatus === 'paid';
                       const totalAmount = normalizeMoney(invoice.total);
                       const issueDate = invoice.issue_date || invoice.created_at;
@@ -1351,7 +1466,7 @@ const Dashboard: React.FC = () => {
                                   : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
                               }`}
                             >
-                              {status}
+                              {paymentStatus}
                             </span>
                           </div>
                           <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -1449,13 +1564,10 @@ const Dashboard: React.FC = () => {
                     if (!outlet) return null;
 
                     const outletInvoices = dashboardInvoices.filter((invoice) => invoice.outlet_id === outletId);
-                    const outletExpenses = outletInvoices.reduce(
-                      (sum, invoice) => sum + normalizeMoney(invoice.total),
-                      0
-                    );
+                    const outletOperatingExpenses = normalizeMoney(operatingExpensesByOutlet[outletId]);
                     const outletPending = outletInvoices.filter((invoice) => {
-                      const status = String(invoice.status || '').toLowerCase();
-                      return status !== 'paid';
+                      const paymentStatus = String(invoice.payment_status || invoice.status || '').toLowerCase();
+                      return paymentStatus !== 'paid';
                     }).length;
 
                     return (
@@ -1474,13 +1586,13 @@ const Dashboard: React.FC = () => {
                         
                         <div className="space-y-3">
                           <div className="flex justify-between items-center">
-                            <span className="text-sm text-gray-600 dark:text-gray-400">Monthly Expenses</span>
+                            <span className="text-sm text-gray-600 dark:text-gray-400">Operating Spend</span>
                             <span className="font-semibold text-gray-900 dark:text-white">
-                              {currencyService.formatCurrency(outletExpenses)}
+                              {currencyService.formatCurrency(outletOperatingExpenses)}
                             </span>
                           </div>
                           <div className="flex justify-between items-center">
-                            <span className="text-sm text-gray-600 dark:text-gray-400">Pending Items</span>
+                            <span className="text-sm text-gray-600 dark:text-gray-400">Unpaid Invoices</span>
                             <span className={`font-semibold ${
                               outletPending > 0 
                                 ? 'text-orange-600 dark:text-orange-400' 

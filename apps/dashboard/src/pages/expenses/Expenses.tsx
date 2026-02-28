@@ -49,6 +49,7 @@ const formatStatusLabel = (value?: string | null): string => {
 
 const Expenses: React.FC = () => {
   const { currentOutlet } = useOutlet();
+  const PAGE_SIZE = 100;
 
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -67,18 +68,28 @@ const Expenses: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
+      let page = 1;
+      let totalPages = 1;
+      const loadedExpenses: ExpenseRecord[] = [];
 
-      const response = await apiClient.get<ExpenseListResponse>('/expenses/', {
-        outlet_id: currentOutlet.id,
-        page: 1,
-        size: 300,
-      });
+      while (page <= totalPages) {
+        const response = await apiClient.get<ExpenseListResponse>('/expenses/', {
+          outlet_id: currentOutlet.id,
+          page,
+          size: PAGE_SIZE,
+        });
 
-      if (response.error || !response.data) {
-        throw new Error(response.error || 'Failed to load expenses');
+        if (response.error || !response.data) {
+          throw new Error(response.error || 'Failed to load expenses');
+        }
+
+        const pageItems = Array.isArray(response.data.items) ? response.data.items : [];
+        loadedExpenses.push(...pageItems);
+        totalPages = Math.max(1, Number(response.data.pages || 1));
+        page += 1;
       }
 
-      setExpenses(Array.isArray(response.data.items) ? response.data.items : []);
+      setExpenses(loadedExpenses);
     } catch (loadError) {
       console.error('Failed to load expenses:', loadError);
       setError(loadError instanceof Error ? loadError.message : 'Failed to load expenses');

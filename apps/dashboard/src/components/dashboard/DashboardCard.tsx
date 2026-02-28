@@ -10,6 +10,8 @@ interface DashboardCardProps {
   change?: {
     value: number;
     isPositive: boolean;
+    displayLabel?: string;
+    comparisonLabel?: string;
   };
   className?: string;
   onClick?: () => void;
@@ -75,9 +77,9 @@ const DashboardCard: React.FC<DashboardCardProps> = ({
             ) : (
               <TrendingDown className="w-4 h-4 mr-1" />
             )}
-            {Math.abs(change.value)}%
+            {change.displayLabel || `${Math.abs(change.value)}%`}
           </span>
-          <span className="text-muted-foreground text-xs font-light">vs last month</span>
+          <span className="text-muted-foreground text-xs font-light">{change.comparisonLabel || 'vs prior period'}</span>
         </div>
       )}
     </div>
