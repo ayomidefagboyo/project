@@ -6,7 +6,7 @@
 import { apiClient } from './apiClient';
 import { offlineDatabase } from './offlineDatabase';
 import logger from './logger';
-import { getParsedStaffSession } from './staffSessionStorage';
+import { clearStaffSession, getParsedStaffSession } from './staffSessionStorage';
 
 // ===============================================
 // TYPES AND INTERFACES
@@ -1502,7 +1502,7 @@ class POSService {
     const requestPromise = (async () => {
       try {
         const response = await apiClient.post<POSTransaction>(`${this.baseUrl}/transactions`, requestPayload);
-        if (!response.data) throw new Error(response.error || 'Failed to create transaction');
+        if (!response.data) throw this.createStatusError(response.error || 'Failed to create transaction', response.status);
 
         // Immediately cache the new transaction for other terminals
         if (this.isInitialized && response.data) {
@@ -1761,7 +1761,7 @@ class POSService {
   ): Promise<CreateDraftPurchaseOrdersResponse> {
     try {
       const response = await apiClient.post<CreateDraftPurchaseOrdersResponse>(`${this.baseUrl}/purchasing/draft-purchase-orders`, payload);
-      if (!response.data) throw new Error(response.error || 'Failed to create purchase orders');
+      if (!response.data) throw this.createStatusError(response.error || 'Failed to create purchase orders', response.status);
       return response.data;
     } catch (error) {
       logger.error('Error creating draft purchase orders:', error);
@@ -1852,6 +1852,17 @@ class POSService {
             }
           } catch (error) {
             logger.error('Failed to sync offline transaction:', error);
+            const statusCode = typeof (error as { status?: unknown })?.status === 'number'
+              ? Number((error as { status?: unknown }).status)
+              : 0;
+            if (statusCode === 401 || statusCode === 403) {
+              logger.warn('Stopping offline transaction sync: POS staff session is no longer authorized.');
+              clearStaffSession();
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('pos-staff-session-expired'));
+              }
+              break;
+            }
             if (transaction.offline_id) {
               failedTransactions.push(transaction.offline_id);
             }
@@ -3078,10 +3089,20 @@ class POSService {
    * Handle API errors consistently
    */
   private handleError(error: any): Error {
+    if (typeof error?.status === 'number' && error.status > 0) {
+      const nextError = new Error(`POS Error: ${error.message || 'Server error'}`) as Error & { status?: number };
+      nextError.status = error.status;
+      return nextError;
+    }
+
     if (error.response) {
       // Server responded with error status
       const message = error.response.data?.detail || error.response.data?.message || 'Server error';
-      return new Error(`POS Error: ${message}`);
+      const nextError = new Error(`POS Error: ${message}`) as Error & { status?: number };
+      if (typeof error.response.status === 'number') {
+        nextError.status = error.response.status;
+      }
+      return nextError;
     } else if (error.request) {
       // Network error
       return new Error('Network error: Please check your connection');
@@ -3089,6 +3110,14 @@ class POSService {
       // Other error
       return new Error(`Error: ${error.message}`);
     }
+  }
+
+  private createStatusError(message: string, status: number): Error {
+    const nextError = new Error(message) as Error & { status?: number };
+    if (typeof status === 'number' && status > 0) {
+      nextError.status = status;
+    }
+    return nextError;
   }
 }
 

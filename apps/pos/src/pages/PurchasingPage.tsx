@@ -47,6 +47,8 @@ const formatDateTime = (value?: string | null): string => {
   return parsed.toLocaleString();
 };
 
+const hasPreferredVendor = (vendorId?: string | null): boolean => Boolean(String(vendorId || '').trim());
+
 const PurchasingPage: React.FC = () => {
   const { currentOutlet } = useOutlet();
   const { success, error: showError, warning } = useToast();
@@ -111,7 +113,7 @@ const PurchasingPage: React.FC = () => {
       setSelectedByProductId((prev) => {
         const next: Record<string, boolean> = {};
         for (const item of recommendationResponse.items) {
-          if (prev[item.product_id]) {
+          if (prev[item.product_id] && hasPreferredVendor(item.vendor_id)) {
             next[item.product_id] = true;
           }
         }
@@ -183,6 +185,12 @@ const PurchasingPage: React.FC = () => {
   }, [analytics?.draft_purchase_orders, recommendations?.draft_purchase_orders, selectedVendorId]);
 
   const toggleSelect = (productId: string) => {
+    const targetItem = recommendationItems.find((item) => item.product_id === productId);
+    if (targetItem && !hasPreferredVendor(targetItem.vendor_id)) {
+      warning('Assign a preferred vendor to this product before creating a purchase order.');
+      return;
+    }
+
     setSelectedByProductId((prev) => ({
       ...prev,
       [productId]: !prev[productId],
@@ -190,9 +198,15 @@ const PurchasingPage: React.FC = () => {
   };
 
   const toggleSelectAllVisible = () => {
-    const selectable = recommendationItems.filter((item) => Number(item.recommended_qty || 0) > 0);
+    const selectable = recommendationItems.filter(
+      (item) => Number(item.recommended_qty || 0) > 0 && hasPreferredVendor(item.vendor_id)
+    );
     if (selectable.length === 0) {
-      warning('No recommended lines available to select.');
+      warning(
+        recommendationItems.some((item) => Number(item.recommended_qty || 0) > 0)
+          ? 'No recommended lines can be ordered yet. Assign preferred vendors first.'
+          : 'No recommended lines available to select.'
+      );
       return;
     }
     const allSelected = selectable.every((item) => selectedByProductId[item.product_id]);
@@ -222,13 +236,30 @@ const PurchasingPage: React.FC = () => {
       return;
     }
 
+    const orderableSelectedLines = selectedLines.filter((item) => hasPreferredVendor(item.vendor_id));
+    const skippedLines = selectedLines.filter((item) => !hasPreferredVendor(item.vendor_id));
+    if (orderableSelectedLines.length === 0) {
+      showError('Selected items cannot be ordered yet. Assign preferred vendors before creating purchase orders.');
+      return;
+    }
+
+    if (skippedLines.length > 0) {
+      const sample = skippedLines.slice(0, 3).map((item) => item.name).join(', ');
+      const remaining = skippedLines.length - Math.min(skippedLines.length, 3);
+      warning(
+        remaining > 0
+          ? `Skipping ${skippedLines.length} item(s) without preferred vendors: ${sample}, +${remaining} more.`
+          : `Skipping ${skippedLines.length} item(s) without preferred vendors: ${sample}.`
+      );
+    }
+
     setIsCreating(true);
     try {
       const result = await posService.createDraftPurchaseOrders({
         outlet_id: currentOutlet.id,
         source: mode === 'all' ? 'replenishment' : mode,
         department: selectedDepartment || undefined,
-        lines: selectedLines.map((item) => ({
+        lines: orderableSelectedLines.map((item) => ({
           product_id: item.product_id,
           quantity: item.draft_quantity,
           vendor_id: item.vendor_id || undefined,
@@ -490,6 +521,7 @@ const PurchasingPage: React.FC = () => {
                       {recommendationItems.map((item) => {
                         const selected = Boolean(selectedByProductId[item.product_id]);
                         const draftQty = Math.max(1, Math.floor(draftQtyByProductId[item.product_id] || item.recommended_qty || 1));
+                        const isOrderable = hasPreferredVendor(item.vendor_id);
                         const rowClass = item.stockout_risk
                           ? 'bg-red-50'
                           : item.is_low_stock
@@ -502,8 +534,9 @@ const PurchasingPage: React.FC = () => {
                               <input
                                 type="checkbox"
                                 checked={selected}
+                                disabled={!isOrderable}
                                 onChange={() => toggleSelect(item.product_id)}
-                                className="mt-1 h-4 w-4 rounded border-stone-300"
+                                className="mt-1 h-4 w-4 rounded border-stone-300 disabled:cursor-not-allowed disabled:opacity-50"
                               />
                             </td>
                             <td className="px-4 py-3 align-top">
@@ -512,6 +545,11 @@ const PurchasingPage: React.FC = () => {
                                 {item.sku} • {item.department}
                               </div>
                               <div className="mt-2 flex flex-wrap gap-1.5">
+                                {!isOrderable && (
+                                  <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-medium text-rose-700">
+                                    vendor required
+                                  </span>
+                                )}
                                 {item.reason_codes.slice(0, 3).map((reason) => (
                                   <span
                                     key={`${item.product_id}-${reason}`}
@@ -522,7 +560,9 @@ const PurchasingPage: React.FC = () => {
                                 ))}
                               </div>
                             </td>
-                            <td className="px-4 py-3 align-top text-slate-700">{item.vendor_name}</td>
+                            <td className="px-4 py-3 align-top text-slate-700">
+                              {isOrderable ? item.vendor_name : <span className="text-rose-700">Assign preferred vendor</span>}
+                            </td>
                             <td className="px-4 py-3 align-top text-slate-700">
                               <div>On hand: {item.quantity_on_hand}</div>
                               <div className="text-xs text-stone-500">On order: {item.on_order_qty}</div>
@@ -555,6 +595,7 @@ const PurchasingPage: React.FC = () => {
                   {recommendationItems.map((item) => {
                     const selected = Boolean(selectedByProductId[item.product_id]);
                     const draftQty = Math.max(1, Math.floor(draftQtyByProductId[item.product_id] || item.recommended_qty || 1));
+                    const isOrderable = hasPreferredVendor(item.vendor_id);
                     return (
                       <div
                         key={item.product_id}
@@ -566,14 +607,22 @@ const PurchasingPage: React.FC = () => {
                           <input
                             type="checkbox"
                             checked={selected}
+                            disabled={!isOrderable}
                             onChange={() => toggleSelect(item.product_id)}
-                            className="mt-1 h-4 w-4 rounded border-stone-300"
+                            className="mt-1 h-4 w-4 rounded border-stone-300 disabled:cursor-not-allowed disabled:opacity-50"
                           />
                           <div className="min-w-0 flex-1">
                             <div className="font-medium text-slate-900">{item.name}</div>
                             <div className="mt-1 text-xs text-stone-500">
-                              {item.vendor_name} • {item.department}
+                              {isOrderable ? item.vendor_name : 'Assign preferred vendor'} • {item.department}
                             </div>
+                            {!isOrderable && (
+                              <div className="mt-2">
+                                <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-medium text-rose-700">
+                                  vendor required
+                                </span>
+                              </div>
+                            )}
                             <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-stone-600">
                               <div>On hand: {item.quantity_on_hand}</div>
                               <div>On order: {item.on_order_qty}</div>

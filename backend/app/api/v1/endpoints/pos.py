@@ -59,6 +59,7 @@ PURCHASE_ORDER_NOTE_MARKER = "[Purchase order: yes]"
 PURCHASE_ORDER_SOURCE_PREFIX = "[PO source:"
 PURCHASE_ORDER_DEPARTMENT_PREFIX = "[PO department:"
 PURCHASE_ORDER_REQUESTED_FOR_PREFIX = "[PO requested for:"
+SYSTEM_VENDOR_NAME = "System / Unassigned"
 
 
 class PurchaseOrderDraftLine(BaseModel):
@@ -4232,6 +4233,44 @@ def _build_purchase_order_notes(
     return notes
 
 
+def _resolve_or_create_system_vendor(supabase, outlet_id: str) -> Tuple[str, str]:
+    existing_rows = (
+        supabase.table(Tables.VENDORS)
+        .select('id,name')
+        .eq('outlet_id', outlet_id)
+        .eq('name', SYSTEM_VENDOR_NAME)
+        .limit(1)
+        .execute()
+    ).data or []
+    if existing_rows:
+        existing = existing_rows[0]
+        existing_id = str(existing.get('id') or '').strip()
+        if existing_id:
+            return existing_id, str(existing.get('name') or SYSTEM_VENDOR_NAME).strip() or SYSTEM_VENDOR_NAME
+
+    vendor_id = str(uuid.uuid4())
+    created = (
+        supabase.table(Tables.VENDORS)
+        .insert({
+            'id': vendor_id,
+            'outlet_id': outlet_id,
+            'name': SYSTEM_VENDOR_NAME,
+            'vendor_type': 'supplier',
+            'payment_terms': 'ad_hoc',
+            'current_balance': 0.0,
+        })
+        .execute()
+    ).data or []
+
+    if created:
+        created_row = created[0]
+        created_id = str(created_row.get('id') or vendor_id).strip() or vendor_id
+        created_name = str(created_row.get('name') or SYSTEM_VENDOR_NAME).strip() or SYSTEM_VENDOR_NAME
+        return created_id, created_name
+
+    return vendor_id, SYSTEM_VENDOR_NAME
+
+
 def _build_purchasing_snapshot(
     supabase,
     outlet_id: str,
@@ -4271,6 +4310,11 @@ def _build_purchasing_snapshot(
         for row in product_rows
         if str(row.get('id') or '').strip()
     }
+    has_vendorless_products = any(not str(row.get('vendor_id') or '').strip() for row in product_rows)
+    system_vendor_id: Optional[str] = None
+    system_vendor_name = SYSTEM_VENDOR_NAME
+    if has_vendorless_products:
+        system_vendor_id, system_vendor_name = _resolve_or_create_system_vendor(supabase, outlet_id)
 
     vendor_ids = sorted(
         {
@@ -4279,6 +4323,8 @@ def _build_purchasing_snapshot(
             if str(row.get('vendor_id') or '').strip()
         }
     )
+    if system_vendor_id:
+        vendor_ids.append(system_vendor_id)
     vendor_name_by_id: Dict[str, str] = {}
     if vendor_ids:
         vendor_rows = (
@@ -4466,9 +4512,10 @@ def _build_purchasing_snapshot(
 
         category_value = str(product.get('category') or '').strip()
         vendor_key = str(product.get('vendor_id') or '').strip()
+        effective_vendor_id = vendor_key or (system_vendor_id or '')
         if normalized_department and category_value.lower() != normalized_department:
             continue
-        if normalized_vendor_id and vendor_key != normalized_vendor_id:
+        if normalized_vendor_id and effective_vendor_id != normalized_vendor_id:
             continue
 
         quantity_on_hand = max(0, _safe_int(product.get('quantity_on_hand'), 0))
@@ -4532,8 +4579,8 @@ def _build_purchasing_snapshot(
             'sku': str(product.get('sku') or '').strip() or 'N/A',
             'barcode': str(product.get('barcode') or '').strip() or None,
             'department': category_value or 'Uncategorized',
-            'vendor_id': vendor_key or None,
-            'vendor_name': vendor_name_by_id.get(vendor_key, 'Unassigned Vendor'),
+            'vendor_id': effective_vendor_id or None,
+            'vendor_name': vendor_name_by_id.get(effective_vendor_id, system_vendor_name if not vendor_key else 'Unassigned Vendor'),
             'quantity_on_hand': quantity_on_hand,
             'reorder_level': reorder_level,
             'reorder_quantity': reorder_quantity,
@@ -4785,24 +4832,26 @@ async def create_draft_purchase_orders(
                 detail=f"Some products could not be found for this outlet: {', '.join(missing_products)}"
             )
 
+        system_vendor_id: Optional[str] = None
+        system_vendor_name = SYSTEM_VENDOR_NAME
+
+        def resolve_vendor_id_for_line(line: PurchaseOrderDraftLine) -> str:
+            nonlocal system_vendor_id, system_vendor_name
+            product = products_by_id[str(line.product_id).strip()]
+            explicit_vendor_id = str(line.vendor_id or '').strip()
+            product_vendor_id = str(product.get('vendor_id') or '').strip()
+            resolved_vendor_id = explicit_vendor_id or product_vendor_id
+            if resolved_vendor_id:
+                return resolved_vendor_id
+            if not system_vendor_id:
+                system_vendor_id, system_vendor_name = _resolve_or_create_system_vendor(supabase, payload.outlet_id)
+            return system_vendor_id
+
         vendor_ids = sorted({
-            str(line.vendor_id or products_by_id[str(line.product_id).strip()].get('vendor_id') or '').strip()
+            resolve_vendor_id_for_line(line)
             for line in payload.lines
             if str(line.product_id or '').strip()
         })
-        if any(not vendor_id_value for vendor_id_value in vendor_ids):
-            missing_vendor_products = [
-                str(products_by_id[str(line.product_id).strip()].get('name') or 'Product')
-                for line in payload.lines
-                if not str(line.vendor_id or products_by_id[str(line.product_id).strip()].get('vendor_id') or '').strip()
-            ]
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "Each selected product must have a preferred vendor before a purchase order can be created. "
-                    f"Missing vendor on: {', '.join(missing_vendor_products)}"
-                )
-            )
 
         vendor_rows = (
             supabase.table(Tables.VENDORS)
@@ -4815,12 +4864,14 @@ async def create_draft_purchase_orders(
             for row in vendor_rows
             if str(row.get('id') or '').strip()
         }
+        if system_vendor_id:
+            vendor_name_by_id[system_vendor_id] = system_vendor_name
 
         grouped_lines: Dict[str, List[Dict[str, Any]]] = {}
         for line in payload.lines:
             product_id_value = str(line.product_id or '').strip()
             product = products_by_id[product_id_value]
-            resolved_vendor_id = str(line.vendor_id or product.get('vendor_id') or '').strip()
+            resolved_vendor_id = resolve_vendor_id_for_line(line)
             unit_cost = max(
                 0.0,
                 _safe_float(
