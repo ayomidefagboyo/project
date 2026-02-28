@@ -347,7 +347,7 @@ const PurchasingPage: React.FC = () => {
 
   return (
     <div className="h-full overflow-y-auto bg-stone-50">
-      <div className="mx-auto w-full max-w-7xl px-4 py-4 pb-28 sm:px-6 sm:py-6 sm:pb-32">
+      <div className="w-full px-4 py-4 pb-28 sm:px-6 sm:py-6 sm:pb-32">
         <div className="rounded-3xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="grid gap-3 xl:grid-cols-[minmax(0,220px)_minmax(0,220px)_minmax(0,1fr)]">
             <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3">
