@@ -879,7 +879,7 @@ class AnomalyService:
         due_time = self._safe_datetime(invoice.get("due_date"))
 
         history_result = self.supabase.table(Tables.INVOICES).select(
-            "id,vendor_id,invoice_number,total,total_amount,amount,status,invoice_date,issue_date,due_date,created_at"
+            "id,vendor_id,invoice_number,total,amount,status,invoice_date,issue_date,due_date,created_at"
         ).eq("outlet_id", outlet_id).neq("id", invoice_id).order("created_at", desc=True).limit(500).execute()
         history = history_result.data or []
 
