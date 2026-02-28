@@ -8,6 +8,8 @@ import { offlineDatabase } from './offlineDatabase';
 import logger from './logger';
 import { clearStaffSession, getParsedStaffSession } from './staffSessionStorage';
 
+const BLOCKED_OFFLINE_TRANSACTIONS_KEY = 'pos_blocked_offline_transactions';
+
 // ===============================================
 // TYPES AND INTERFACES
 // ===============================================
@@ -1859,12 +1861,20 @@ class POSService {
               logger.warn(
                 `Skipping offline transaction sync for ${transaction?.offline_id || 'queued sale'}: queued outlet does not match the active staff session.`
               );
+              await this.quarantineOfflineTransaction(
+                transaction,
+                'Queued outlet does not match the active staff session'
+              );
               continue;
             }
 
             if (activeStaffProfileId && queuedCashierId && queuedCashierId !== activeStaffProfileId) {
               logger.warn(
                 `Skipping offline transaction sync for ${transaction?.offline_id || 'queued sale'}: queued cashier does not match the active staff session.`
+              );
+              await this.quarantineOfflineTransaction(
+                transaction,
+                'Queued cashier does not match the active staff session'
               );
               continue;
             }
@@ -1898,6 +1908,9 @@ class POSService {
             }
 
             if (statusCode === 403) {
+              if (errorMessage.includes('Transaction cashier does not match active staff session')) {
+                await this.quarantineOfflineTransaction(transaction, errorMessage);
+              }
               logger.warn(`Skipping offline transaction sync: ${errorMessage}`);
               if (transaction.offline_id) {
                 failedTransactions.push(transaction.offline_id);
@@ -3161,6 +3174,37 @@ class POSService {
       nextError.status = status;
     }
     return nextError;
+  }
+
+  private async quarantineOfflineTransaction(transaction: any, reason: string): Promise<void> {
+    const offlineId = typeof transaction?.offline_id === 'string' ? transaction.offline_id.trim() : '';
+    const blockedEntry = {
+      ...transaction,
+      blocked_reason: reason,
+      blocked_at: new Date().toISOString(),
+    };
+
+    try {
+      if (this.isInitialized) {
+        const existing = await offlineDatabase.getSetting(BLOCKED_OFFLINE_TRANSACTIONS_KEY);
+        const blocked = Array.isArray(existing) ? existing : [];
+        await offlineDatabase.storeSetting(
+          BLOCKED_OFFLINE_TRANSACTIONS_KEY,
+          [blockedEntry, ...blocked].slice(0, 100)
+        );
+      } else {
+        const raw = localStorage.getItem(BLOCKED_OFFLINE_TRANSACTIONS_KEY) || '[]';
+        const blocked = JSON.parse(raw);
+        const nextBlocked = Array.isArray(blocked) ? [blockedEntry, ...blocked].slice(0, 100) : [blockedEntry];
+        localStorage.setItem(BLOCKED_OFFLINE_TRANSACTIONS_KEY, JSON.stringify(nextBlocked));
+      }
+    } catch (archiveError) {
+      logger.warn('Failed to archive blocked offline transaction:', archiveError);
+    }
+
+    if (offlineId) {
+      await this.removeOfflineTransaction(offlineId);
+    }
   }
 }
 
