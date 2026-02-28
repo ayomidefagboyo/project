@@ -901,6 +901,17 @@ function AppContent() {
     </div>
   );
 
+  const purchasingHeader = (
+    <div className="flex items-center justify-end w-full">
+      <div className="text-right">
+        <h2 className="text-lg sm:text-xl font-bold text-slate-900">Replenishment Planning</h2>
+        <p className="text-sm text-stone-500">
+          Build purchase orders from live stock levels, sales velocity, and open vendor commitments.
+        </p>
+      </div>
+    </div>
+  );
+
   // Handle different terminal phases
   if (terminalPhase === 'setup') {
     return <TerminalSetup onSetupComplete={handleTerminalSetup} />;
@@ -933,7 +944,7 @@ function AppContent() {
       : location.pathname === '/receive'
         ? receiveItemsHeader
       : location.pathname === '/purchasing'
-        ? null
+        ? purchasingHeader
       : location.pathname === '/stocktaking'
         ? stocktakingHeader
         : location.pathname === '/transfer-outlet'

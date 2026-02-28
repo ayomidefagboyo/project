@@ -1,11 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
   ClipboardList,
   Loader2,
   RefreshCw,
-  ShoppingCart,
   Truck,
   X,
 } from 'lucide-react';
@@ -66,9 +65,23 @@ const PurchasingPage: React.FC = () => {
   const [receivePaymentStatus, setReceivePaymentStatus] = useState<ReceivePaymentStatus>('paid');
   const [receivePaymentDate, setReceivePaymentDate] = useState(todayIsoDate());
   const [isReceiving, setIsReceiving] = useState(false);
+  const isMountedRef = useRef(true);
+  const requestSequenceRef = useRef(0);
 
-  const loadPurchasingData = useCallback(async () => {
-    if (!currentOutlet?.id) {
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      requestSequenceRef.current += 1;
+    };
+  }, []);
+
+  const loadPurchasingData = async () => {
+    const activeOutletId = currentOutlet?.id;
+    const requestId = requestSequenceRef.current + 1;
+    requestSequenceRef.current = requestId;
+
+    if (!activeOutletId) {
+      if (!isMountedRef.current) return;
       setRecommendations(null);
       setAnalytics(null);
       setSelectedByProductId({});
@@ -80,13 +93,17 @@ const PurchasingPage: React.FC = () => {
     setIsLoading(true);
     try {
       const [recommendationResponse, analyticsResponse] = await Promise.all([
-        posService.getPurchasingRecommendations(currentOutlet.id, {
+        posService.getPurchasingRecommendations(activeOutletId, {
           mode,
           department: selectedDepartment || undefined,
           vendorId: selectedVendorId || undefined,
         }),
-        posService.getPurchasingAnalytics(currentOutlet.id),
+        posService.getPurchasingAnalytics(activeOutletId),
       ]);
+
+      if (!isMountedRef.current || requestSequenceRef.current !== requestId) {
+        return;
+      }
 
       setRecommendations(recommendationResponse);
       setAnalytics(analyticsResponse);
@@ -108,18 +125,23 @@ const PurchasingPage: React.FC = () => {
         return next;
       });
     } catch (err) {
+      if (!isMountedRef.current || requestSequenceRef.current !== requestId) {
+        return;
+      }
       console.error('Failed to load purchasing data:', err);
       showError('Failed to load purchasing recommendations.');
       setRecommendations(null);
       setAnalytics(null);
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current && requestSequenceRef.current === requestId) {
+        setIsLoading(false);
+      }
     }
-  }, [currentOutlet?.id, mode, selectedDepartment, selectedVendorId, showError]);
+  };
 
   useEffect(() => {
     void loadPurchasingData();
-  }, [loadPurchasingData]);
+  }, [currentOutlet?.id, mode, selectedDepartment, selectedVendorId]);
 
   const recommendationItems = recommendations?.items || [];
   const summary = recommendations?.summary || analytics?.summary || null;
@@ -326,41 +348,28 @@ const PurchasingPage: React.FC = () => {
     <div className="h-full overflow-y-auto bg-stone-50">
       <div className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 sm:py-6">
         <div className="rounded-3xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">
-                <ShoppingCart className="h-4 w-4" />
-                Purchasing
-              </div>
-              <h2 className="mt-3 text-2xl font-semibold text-slate-900">Replenishment Planning</h2>
-              <p className="mt-1 text-sm text-stone-500">
-                Build purchase orders from live stock levels, sales velocity, and open vendor commitments.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <button
-                type="button"
-                onClick={() => void loadPurchasingData()}
-                disabled={isLoading}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-                Refresh
-              </button>
-              <button
-                type="button"
-                onClick={handleCreateDraftPurchaseOrders}
-                disabled={isCreating || selectedLineCount === 0}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardList className="h-4 w-4" />}
-                Create Draft POs
-              </button>
-            </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+            <button
+              type="button"
+              onClick={() => void loadPurchasingData()}
+              disabled={isLoading}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+            <button
+              type="button"
+              onClick={handleCreateDraftPurchaseOrders}
+              disabled={isCreating || selectedLineCount === 0}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardList className="h-4 w-4" />}
+              Create Draft POs
+            </button>
           </div>
 
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-stone-500">Recommended Units</p>
               <p className="mt-2 text-2xl font-semibold text-slate-900">{summary?.total_recommended_units || 0}</p>
