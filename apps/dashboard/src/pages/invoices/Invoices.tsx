@@ -132,23 +132,15 @@ const Invoices: React.FC = () => {
   const {
     currentUser,
     currentOutlet,
-    getAccessibleOutlets,
     canApproveVendorInvoices,
     userOutlets,
   } = useOutlet();
 
   const [vendorInvoices, setVendorInvoices] = useState<InvoiceRecord[]>([]);
-  const [selectedOutletId, setSelectedOutletId] = useState<string>('all');
   const [loading, setLoading] = useState(true);
   const [processingOutletId, setProcessingOutletId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
-
-  const accessibleOutlets = useMemo(
-    () => getAccessibleOutlets(),
-    [currentUser, userOutlets, getAccessibleOutlets]
-  );
-  const outletScopeKey = accessibleOutlets.join('|');
   const today = useMemo(() => startOfLocalDay(), []);
   const canManageStatuses = canApproveVendorInvoices();
 
@@ -235,14 +227,7 @@ const Invoices: React.FC = () => {
   };
 
   const loadVendorInvoices = async () => {
-    if (!currentUser) {
-      setVendorInvoices([]);
-      setLoading(false);
-      return;
-    }
-
-    const outletIds = getAccessibleOutlets();
-    if (outletIds.length === 0) {
+    if (!currentUser || !currentOutlet?.id) {
       setVendorInvoices([]);
       setLoading(false);
       return;
@@ -252,21 +237,7 @@ const Invoices: React.FC = () => {
       setLoading(true);
       setError(null);
       setInfoMessage(null);
-
-      const invoiceResults = await Promise.allSettled(
-        outletIds.map((outletId) => fetchInvoicesForOutlet(outletId))
-      );
-
-      const loadedInvoices = invoiceResults
-        .filter(
-          (result): result is PromiseFulfilledResult<InvoiceRecord[]> => result.status === 'fulfilled'
-        )
-        .flatMap((result) => result.value);
-
-      const failedInvoiceLoads = invoiceResults.filter((result) => result.status === 'rejected').length;
-      if (failedInvoiceLoads > 0 && loadedInvoices.length === 0) {
-        throw new Error('Failed to load invoices for your accessible outlets.');
-      }
+      const loadedInvoices = await fetchInvoicesForOutlet(currentOutlet.id);
 
       const sorted = [...loadedInvoices].sort((left, right) => {
         const leftDate = new Date(left.created_at || left.issue_date || 0).getTime();
@@ -275,10 +246,6 @@ const Invoices: React.FC = () => {
       });
 
       setVendorInvoices(sorted);
-
-      if (failedInvoiceLoads > 0) {
-        setError(`Some outlets failed to load (${failedInvoiceLoads}). Showing available invoices.`);
-      }
     } catch (err) {
       console.error('Error loading invoices:', err);
       setError(err instanceof Error ? err.message : 'Failed to load invoices');
@@ -288,10 +255,9 @@ const Invoices: React.FC = () => {
     }
   };
 
-  const primaryOutletId = accessibleOutlets[0] || '';
   const { isConnected: isRealtimeConnected } = useRealtimeSync({
-    outletId: primaryOutletId,
-    enabled: !!currentUser && accessibleOutlets.length > 0,
+    outletId: currentOutlet?.id || '',
+    enabled: !!currentUser && !!currentOutlet?.id,
     onInvoiceChange: () => {
       void loadVendorInvoices();
     },
@@ -301,7 +267,7 @@ const Invoices: React.FC = () => {
     if (currentUser) {
       void loadVendorInvoices();
     }
-  }, [currentUser?.id, outletScopeKey]);
+  }, [currentUser?.id, currentOutlet?.id]);
 
   const outletInsights = useMemo<OutletInsight[]>(() => {
     const byOutlet: Record<string, OutletInsight> = {};
@@ -363,13 +329,8 @@ const Invoices: React.FC = () => {
       }
     });
 
-    const selected = Object.values(byOutlet);
-    const filtered = selectedOutletId === 'all'
-      ? selected
-      : selected.filter((insight) => insight.outletId === selectedOutletId);
-
-    return filtered.sort((left, right) => right.unpaidAmount - left.unpaidAmount);
-  }, [outletConfigById, primaryCurrencyCode, selectedOutletId, vendorInvoices]);
+    return Object.values(byOutlet).sort((left, right) => right.unpaidAmount - left.unpaidAmount);
+  }, [outletConfigById, primaryCurrencyCode, vendorInvoices]);
 
   const businessTypeInsights = useMemo<BusinessTypeInsight[]>(() => {
     const byType: Record<string, BusinessTypeInsight> = {};
@@ -442,10 +403,10 @@ const Invoices: React.FC = () => {
 
   const hasMixedCurrencies = currenciesInScope.length > 1;
 
-  const handleExportInsightsCsv = (outletId: string | 'all' = 'all') => {
-    const rowsSource = outletId === 'all'
-      ? outletInsights
-      : outletInsights.filter((insight) => insight.outletId === outletId);
+  const handleExportInsightsCsv = (outletId?: string) => {
+    const rowsSource = outletId
+      ? outletInsights.filter((insight) => insight.outletId === outletId)
+      : outletInsights;
 
     if (rowsSource.length === 0) {
       setInfoMessage('No outlet insights to export.');
@@ -583,7 +544,7 @@ const Invoices: React.FC = () => {
                 <Store className="w-5 h-5 text-white dark:text-gray-900" />
               </div>
               <h1 className="text-2xl sm:text-3xl font-light text-gray-900 dark:text-white tracking-tight">
-                Outlet Invoice Insights
+                Invoice Insights
               </h1>
               <span
                 className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
@@ -596,25 +557,15 @@ const Invoices: React.FC = () => {
               </span>
             </div>
             <p className="text-gray-600 dark:text-gray-400 font-light">
-              Outlet-only view for owner decisions. Currency is synced from outlet settings
+              Vendor invoice exposure for {currentOutlet?.name || 'the selected outlet'}. Currency is synced from outlet settings
               {primaryCurrencyCode ? ` (primary: ${primaryCurrencyCode})` : ''}.
             </p>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap w-full lg:w-auto">
-            <select
-              className="appearance-none px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white w-full sm:w-auto"
-              value={selectedOutletId}
-              onChange={(event) => setSelectedOutletId(event.target.value)}
-            >
-              <option value="all">All Outlets</option>
-              {accessibleOutlets.map((outletId) => (
-                <option key={outletId} value={outletId}>
-                  {outletConfigById[outletId]?.name || outletId}
-                </option>
-              ))}
-            </select>
-
+            <div className="px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white w-full sm:w-auto">
+              {currentOutlet?.name || 'Selected outlet'}
+            </div>
             <Button
               variant="outline"
               size="sm"
@@ -631,7 +582,7 @@ const Invoices: React.FC = () => {
               variant="outline"
               size="sm"
               className="w-full sm:w-auto"
-              onClick={() => handleExportInsightsCsv(selectedOutletId === 'all' ? 'all' : selectedOutletId)}
+              onClick={() => handleExportInsightsCsv()}
             >
               <Download className="w-4 h-4 mr-1" />
               Export
@@ -644,7 +595,7 @@ const Invoices: React.FC = () => {
             <div className="flex items-start space-x-2">
               <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5" />
               <p className="text-amber-800 dark:text-amber-200 text-sm">
-                Multiple outlet currencies detected ({currenciesInScope.join(', ')}). Each outlet row uses its own currency.
+                Currency mismatch detected in this outlet&apos;s invoice data ({currenciesInScope.join(', ')}).
               </p>
             </div>
           </div>
@@ -670,8 +621,8 @@ const Invoices: React.FC = () => {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           <div className="card p-5">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground">Outlets in Scope</p>
-            <p className="text-2xl font-semibold mt-1 text-gray-900 dark:text-white">{summary.outlets}</p>
+            <p className="text-xs uppercase tracking-wider text-muted-foreground">Selected Outlet</p>
+            <p className="text-lg font-semibold mt-1 text-gray-900 dark:text-white">{currentOutlet?.name || 'Current outlet'}</p>
             <p className="text-xs text-muted-foreground mt-1">{summary.invoices} total invoices</p>
           </div>
 
@@ -696,15 +647,15 @@ const Invoices: React.FC = () => {
           <div className="card p-5">
             <p className="text-xs uppercase tracking-wider text-muted-foreground">Paid Value</p>
             <p className="text-2xl font-semibold mt-1 text-emerald-700 dark:text-emerald-300">{formatMoney(summary.paidAmount)}</p>
-            <p className="text-xs text-muted-foreground mt-1">{summary.outletsWithOverdue} outlets need attention</p>
+            <p className="text-xs text-muted-foreground mt-1">{summary.overdueCount} overdue invoices tracked</p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
           <div className="card p-4 sm:p-6">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Business Type Insights</h3>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Business Context</h3>
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-              Unpaid and overdue exposure by outlet type (supermarket, restaurant, etc).
+              Business type context and invoice exposure for the selected outlet.
             </p>
             <div className="space-y-3">
               {businessTypeInsights.length === 0 ? (
@@ -720,7 +671,7 @@ const Invoices: React.FC = () => {
                         {formatBusinessTypeLabel(entry.businessType)}
                       </p>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {entry.outlets} outlets | {entry.invoices} invoices
+                        {entry.invoices} invoices in this outlet
                       </p>
                     </div>
                     <div className="text-right">
@@ -738,13 +689,13 @@ const Invoices: React.FC = () => {
           </div>
 
           <div className="card p-4 sm:p-6">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Outlet Priority List</h3>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Current Outlet Priority</h3>
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-              Ranked by outstanding amount to guide follow-up.
+              Follow-up priority for the selected outlet.
             </p>
             <div className="space-y-3">
               {outletInsights.length === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">No outlet data available.</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">No invoice exposure data available.</p>
               ) : (
                 outletInsights.map((insight) => (
                   <div
@@ -770,16 +721,15 @@ const Invoices: React.FC = () => {
         </div>
 
         <div className="card p-4 sm:p-6">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Outlet-Level Invoice Insights</h3>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Selected Outlet Invoice Snapshot</h3>
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            This view is focused only on outlet insights and owner-level actions.
+            Owner actions for the currently selected outlet only.
           </p>
 
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead className="bg-gray-50 dark:bg-gray-800/60">
                 <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Outlet</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Business Type</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Currency</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Invoices</th>
@@ -793,14 +743,13 @@ const Invoices: React.FC = () => {
               <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                 {outletInsights.length === 0 ? (
                   <tr>
-                    <td className="px-4 py-6 text-sm text-gray-500 dark:text-gray-400 text-center" colSpan={9}>
+                    <td className="px-4 py-6 text-sm text-gray-500 dark:text-gray-400 text-center" colSpan={8}>
                       No outlet insights available.
                     </td>
                   </tr>
                 ) : (
                   outletInsights.map((insight) => (
                     <tr key={insight.outletId}>
-                      <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{insight.outletName}</td>
                       <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{formatBusinessTypeLabel(insight.businessType)}</td>
                       <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{insight.currency || 'Not set'}</td>
                       <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{insight.invoiceCount}</td>
@@ -812,14 +761,6 @@ const Invoices: React.FC = () => {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="inline-flex flex-wrap items-center justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setSelectedOutletId(insight.outletId)}
-                          >
-                            Focus
-                          </Button>
-
                           <Button
                             variant="ghost"
                             size="sm"
@@ -845,13 +786,6 @@ const Invoices: React.FC = () => {
                             </Button>
                           )}
 
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setSelectedOutletId('all')}
-                          >
-                            Clear
-                          </Button>
                         </div>
                       </td>
                     </tr>
@@ -865,7 +799,7 @@ const Invoices: React.FC = () => {
         <div className="card p-4 sm:p-6">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Latest Invoices (Context)</h3>
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            Recent items for the selected outlet scope to support follow-up decisions.
+            Recent invoices for the selected outlet to support follow-up decisions.
           </p>
 
           <div className="overflow-x-auto">
@@ -873,7 +807,6 @@ const Invoices: React.FC = () => {
               <thead className="bg-gray-50 dark:bg-gray-800/60">
                 <tr>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Invoice</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Outlet</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Issue Date</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Due Signal</th>
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Status</th>
@@ -882,7 +815,6 @@ const Invoices: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                 {vendorInvoices
-                  .filter((invoice) => selectedOutletId === 'all' || invoice.outlet_id === selectedOutletId)
                   .slice(0, 12)
                   .map((invoice) => {
                     const daysUntilDue = getDaysUntilDue(invoice);
@@ -898,7 +830,6 @@ const Invoices: React.FC = () => {
                     return (
                       <tr key={invoice.id}>
                         <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{invoice.invoice_number || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{outletConfigById[invoice.outlet_id]?.name || invoice.outlet_id}</td>
                         <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
                           {invoice.issue_date ? formatDate(invoice.issue_date) : 'N/A'}
                         </td>
