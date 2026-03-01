@@ -465,6 +465,8 @@ class InvoiceUpdate(BaseModel):
     tax_rate: Optional[float] = None
     payment_method: Optional[str] = None
     approved_by: Optional[str] = None
+    payment_status: Optional[str] = None
+    payment_date: Optional[str] = None
 
 
 class ReceiveInvoiceRequest(BaseModel):
@@ -498,7 +500,7 @@ async def get_invoices(
         supabase = get_supabase_admin()
 
         query = supabase.table(Tables.INVOICES)\
-            .select('*, invoice_items(*)')\
+            .select('*, vendors(id,name)')\
             .eq('outlet_id', outlet_id)\
             .order('created_at', desc=True)
 
@@ -735,6 +737,20 @@ async def update_invoice(
     try:
         supabase = get_supabase_admin()
 
+        existing_result = supabase.table(Tables.INVOICES)\
+            .select('*, invoice_items(*), vendors(*), customers(*)')\
+            .eq('id', invoice_id)\
+            .single()\
+            .execute()
+
+        if not existing_result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Invoice not found"
+            )
+
+        existing_invoice = _attach_invoice_payment_metadata(dict(existing_result.data))
+
         # Build update data (only include non-None fields)
         update_data = {}
         if update.status is not None:
@@ -747,6 +763,54 @@ async def update_invoice(
             update_data['tax_rate'] = update.tax_rate
         if update.payment_method is not None:
             update_data['payment_method'] = update.payment_method
+
+        payment_status_value: Optional[str] = None
+        if update.payment_status is not None:
+            payment_status_value = str(update.payment_status or '').strip().lower()
+            if payment_status_value not in {'paid', 'unpaid'}:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="payment_status must be 'paid' or 'unpaid'"
+                )
+
+        payment_date_value: Optional[str] = None
+        if update.payment_date is not None:
+            raw_payment_date = str(update.payment_date or '').strip()
+            if raw_payment_date:
+                try:
+                    payment_date_value = date.fromisoformat(raw_payment_date).isoformat()
+                except ValueError:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="payment_date must be in YYYY-MM-DD format"
+                    )
+
+        if payment_status_value is not None or update.payment_date is not None:
+            notes_value = update.notes if update.notes is not None else existing_invoice.get('notes')
+
+            next_payment_status = payment_status_value or str(existing_invoice.get('payment_status') or '').strip().lower() or None
+            if next_payment_status:
+                notes_value = _upsert_note_marker(
+                    notes_value,
+                    '[Payment status:',
+                    f"[Payment status: {next_payment_status}]"
+                )
+
+            if update.payment_date is not None:
+                notes_value = _upsert_note_marker(
+                    notes_value,
+                    '[Payment date:',
+                    f"[Payment date: {payment_date_value}]" if payment_date_value else None
+                )
+
+            update_data['notes'] = notes_value
+
+            if (
+                payment_status_value == 'unpaid'
+                and update.status is None
+                and str(existing_invoice.get('status') or '').strip().lower() == 'paid'
+            ):
+                update_data['status'] = 'received'
 
         if not update_data:
             raise HTTPException(
@@ -768,7 +832,7 @@ async def update_invoice(
                 detail="Invoice not found"
             )
 
-        invoice = result.data[0]
+        invoice = _attach_invoice_payment_metadata(dict(result.data[0]))
         actor = _resolve_invoice_audit_actor(
             supabase=supabase,
             current_user=current_user,

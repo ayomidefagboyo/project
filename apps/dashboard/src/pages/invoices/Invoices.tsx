@@ -1,14 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle,
-  Building2,
-  CalendarDays,
+  AlertCircle,
   CheckCircle2,
-  Clock,
+  Clock3,
+  CreditCard,
   Download,
+  Eye,
+  Loader2,
+  Receipt,
   RefreshCw,
-  Store,
-  TrendingUp,
+  Wallet,
   XCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -17,52 +18,59 @@ import { formatDate } from '@/lib/utils';
 import { apiClient } from '@/lib/apiClient';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 
-type InvoiceStatus = 'draft' | 'pending' | 'received' | 'paid' | 'overdue' | 'cancelled' | string;
+type InvoiceStatus = 'draft' | 'pending' | 'received' | 'paid' | 'cancelled' | string;
+type PaymentStatus = 'paid' | 'unpaid' | '' | string;
 
-interface InvoiceRecord {
+interface VendorRelation {
+  id?: string;
+  name?: string | null;
+}
+
+interface InvoiceListItem {
   id: string;
   outlet_id: string;
   invoice_number: string;
   vendor_id?: string | null;
+  vendors?: VendorRelation | null;
   issue_date?: string | null;
   due_date?: string | null;
-  status: InvoiceStatus;
-  total?: number | null;
+  status?: InvoiceStatus;
+  payment_status?: PaymentStatus | null;
+  payment_date?: string | null;
+  total?: number | string | null;
+  notes?: string | null;
   created_at?: string | null;
+  updated_at?: string | null;
+}
+
+interface InvoiceItemRecord {
+  id?: string;
+  description?: string | null;
+  quantity?: number | string | null;
+  unit_price?: number | string | null;
+  total?: number | string | null;
+  category?: string | null;
+  sku?: string | null;
+  barcode?: string | null;
+  received_quantity?: number | string | null;
+  remaining_quantity?: number | string | null;
+}
+
+interface InvoiceDetailRecord extends InvoiceListItem {
+  invoice_items?: InvoiceItemRecord[];
+  vendors?: VendorRelation | null;
+  customers?: Record<string, unknown> | null;
+  tax_rate?: number | string | null;
+  subtotal?: number | string | null;
+  tax_amount?: number | string | null;
 }
 
 interface InvoiceListResponse {
-  items: InvoiceRecord[];
+  items: InvoiceListItem[];
   total: number;
   page: number;
   size: number;
   pages: number;
-}
-
-interface OutletInsight {
-  outletId: string;
-  outletName: string;
-  businessType: string;
-  currency: string;
-  invoiceCount: number;
-  totalAmount: number;
-  paidCount: number;
-  paidAmount: number;
-  unpaidCount: number;
-  unpaidAmount: number;
-  overdueCount: number;
-  overdueAmount: number;
-  dueSoonCount: number;
-  dueSoonAmount: number;
-  overdueCandidateCount: number;
-}
-
-interface BusinessTypeInsight {
-  businessType: string;
-  outlets: number;
-  invoices: number;
-  unpaidAmount: number;
-  overdueAmount: number;
 }
 
 const INVOICE_PAGE_SIZE = 100;
@@ -80,24 +88,25 @@ const toNumber = (value: unknown): number => {
   return 0;
 };
 
-const normalizeStatus = (status: unknown): string => String(status || '').trim().toLowerCase();
+const normalizeStatus = (value: unknown): string => String(value || '').trim().toLowerCase();
 
-const isPaidStatus = (status: unknown): boolean => normalizeStatus(status) === 'paid';
-
-const isUnpaidStatus = (status: unknown): boolean => {
-  const normalized = normalizeStatus(status);
-  return normalized !== 'paid' && normalized !== 'cancelled';
-};
-
-const formatBusinessTypeLabel = (value?: string | null): string => {
-  const normalized = String(value || '').trim();
-  if (!normalized) {
-    return 'Unspecified';
+const normalizePaymentStatus = (invoice: Pick<InvoiceListItem, 'payment_status' | 'status'>): string => {
+  const direct = normalizeStatus(invoice.payment_status);
+  if (direct === 'paid' || direct === 'unpaid') {
+    return direct;
   }
-  return normalized
-    .split('_')
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(' ');
+
+  const workflowStatus = normalizeStatus(invoice.status);
+  if (workflowStatus === 'paid') {
+    return 'paid';
+  }
+  if (workflowStatus === 'cancelled') {
+    return '';
+  }
+  if (workflowStatus) {
+    return 'unpaid';
+  }
+  return '';
 };
 
 const parseDateValue = (value?: string | null): Date | null => {
@@ -128,58 +137,63 @@ const getDaysUntilDate = (dateValue?: string | null, fromDate?: Date): number | 
   return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 };
 
-const Invoices: React.FC = () => {
-  const {
-    currentUser,
-    currentOutlet,
-    canApproveVendorInvoices,
-    userOutlets,
-  } = useOutlet();
+const getVendorName = (invoice: InvoiceListItem | InvoiceDetailRecord): string => {
+  const name = String(invoice.vendors?.name || '').trim();
+  return name || 'Unassigned vendor';
+};
 
-  const [vendorInvoices, setVendorInvoices] = useState<InvoiceRecord[]>([]);
+const stripPaymentMarkers = (notes?: string | null): string => {
+  const lines = String(notes || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith('[Payment status:'))
+    .filter((line) => !line.startsWith('[Payment date:'))
+    .filter((line) => !line.startsWith('[Received on '));
+  return lines.join('\n');
+};
+
+const formatStatusLabel = (value?: string | null): string => {
+  const normalized = String(value || '').trim();
+  if (!normalized) {
+    return 'Unknown';
+  }
+  return normalized
+    .split('_')
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ');
+};
+
+const getTodayInputValue = (): string => {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const Invoices: React.FC = () => {
+  const { currentUser, currentOutlet, canApproveVendorInvoices } = useOutlet();
+
+  const [vendorInvoices, setVendorInvoices] = useState<InvoiceListItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [processingOutletId, setProcessingOutletId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
-  const today = useMemo(() => startOfLocalDay(), []);
+  const [processingInvoiceId, setProcessingInvoiceId] = useState<string | null>(null);
+  const [viewInvoice, setViewInvoice] = useState<InvoiceDetailRecord | null>(null);
+  const [isViewOpen, setIsViewOpen] = useState(false);
+  const [paymentModalInvoice, setPaymentModalInvoice] = useState<InvoiceListItem | null>(null);
+  const [paymentDate, setPaymentDate] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState('');
   const canManageStatuses = canApproveVendorInvoices();
+  const today = useMemo(() => startOfLocalDay(), []);
 
-  const outletConfigById = useMemo(() => {
-    const map: Record<string, { name: string; currency: string; businessType: string }> = {};
-    userOutlets.forEach((outlet) => {
-      map[outlet.id] = {
-        name: outlet.name || outlet.id,
-        currency: String(outlet.currency || '').trim().toUpperCase(),
-        businessType: String(outlet.businessType || '').trim() || 'unspecified',
-      };
-    });
-    return map;
-  }, [userOutlets]);
+  const currencyCode = useMemo(() => {
+    const outletCurrency = String(currentOutlet?.currency || '').trim().toUpperCase();
+    return outletCurrency || 'NGN';
+  }, [currentOutlet?.currency]);
 
-  const primaryCurrencyCode = useMemo(() => {
-    const currentCurrency = String(currentOutlet?.currency || '').trim().toUpperCase();
-    if (currentCurrency) {
-      return currentCurrency;
-    }
-
-    const firstOutletCurrency = userOutlets
-      .map((outlet) => String(outlet.currency || '').trim().toUpperCase())
-      .find(Boolean);
-
-    return firstOutletCurrency || '';
-  }, [currentOutlet?.currency, userOutlets]);
-
-  const formatMoney = (amount: number, outletId?: string): string => {
-    const outletCurrency = outletId ? outletConfigById[outletId]?.currency : undefined;
-    const currencyCode = outletCurrency || primaryCurrencyCode;
-
-    if (!currencyCode) {
-      return new Intl.NumberFormat('en-NG', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(amount);
-    }
-
+  const formatMoney = (amount: number): string => {
     try {
       return new Intl.NumberFormat('en-NG', {
         style: 'currency',
@@ -195,10 +209,8 @@ const Invoices: React.FC = () => {
     }
   };
 
-  const getDaysUntilDue = (invoice: InvoiceRecord): number | null => getDaysUntilDate(invoice.due_date, today);
-
-  const fetchInvoicesForOutlet = async (outletId: string): Promise<InvoiceRecord[]> => {
-    const records: InvoiceRecord[] = [];
+  const fetchInvoicesForOutlet = async (outletId: string): Promise<InvoiceListItem[]> => {
+    const records: InvoiceListItem[] = [];
     let page = 1;
 
     while (true) {
@@ -210,7 +222,7 @@ const Invoices: React.FC = () => {
       });
 
       if (response.error || !response.data) {
-        throw new Error(response.error || `Failed to load invoices for outlet ${outletId}`);
+        throw new Error(response.error || 'Failed to load vendor invoices');
       }
 
       const pageItems = Array.isArray(response.data.items) ? response.data.items : [];
@@ -236,26 +248,23 @@ const Invoices: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      setInfoMessage(null);
-      const loadedInvoices = await fetchInvoicesForOutlet(currentOutlet.id);
-
-      const sorted = [...loadedInvoices].sort((left, right) => {
+      const records = await fetchInvoicesForOutlet(currentOutlet.id);
+      const sorted = [...records].sort((left, right) => {
         const leftDate = new Date(left.created_at || left.issue_date || 0).getTime();
         const rightDate = new Date(right.created_at || right.issue_date || 0).getTime();
         return rightDate - leftDate;
       });
-
       setVendorInvoices(sorted);
-    } catch (err) {
-      console.error('Error loading invoices:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load invoices');
+    } catch (loadError) {
+      console.error('Failed to load vendor invoices', loadError);
       setVendorInvoices([]);
+      setError(loadError instanceof Error ? loadError.message : 'Failed to load vendor invoices');
     } finally {
       setLoading(false);
     }
   };
 
-  const { isConnected: isRealtimeConnected } = useRealtimeSync({
+  useRealtimeSync({
     outletId: currentOutlet?.id || '',
     enabled: !!currentUser && !!currentOutlet?.id,
     onInvoiceChange: () => {
@@ -264,600 +273,639 @@ const Invoices: React.FC = () => {
   });
 
   useEffect(() => {
-    if (currentUser) {
+    if (currentUser && currentOutlet?.id) {
       void loadVendorInvoices();
+    } else {
+      setVendorInvoices([]);
+      setLoading(false);
     }
   }, [currentUser?.id, currentOutlet?.id]);
 
-  const outletInsights = useMemo<OutletInsight[]>(() => {
-    const byOutlet: Record<string, OutletInsight> = {};
-
-    vendorInvoices.forEach((invoice) => {
-      const outletId = String(invoice.outlet_id || '').trim() || 'unknown';
-      const outletConfig = outletConfigById[outletId];
-
-      if (!byOutlet[outletId]) {
-        byOutlet[outletId] = {
-          outletId,
-          outletName: outletConfig?.name || outletId,
-          businessType: outletConfig?.businessType || 'unspecified',
-          currency: outletConfig?.currency || primaryCurrencyCode || '',
-          invoiceCount: 0,
-          totalAmount: 0,
-          paidCount: 0,
-          paidAmount: 0,
-          unpaidCount: 0,
-          unpaidAmount: 0,
-          overdueCount: 0,
-          overdueAmount: 0,
-          dueSoonCount: 0,
-          dueSoonAmount: 0,
-          overdueCandidateCount: 0,
-        };
-      }
-
-      const insight = byOutlet[outletId];
-      const amount = toNumber(invoice.total);
-      const status = normalizeStatus(invoice.status);
-      const daysUntilDue = getDaysUntilDue(invoice);
-
-      insight.invoiceCount += 1;
-      insight.totalAmount += amount;
-
-      if (isPaidStatus(status)) {
-        insight.paidCount += 1;
-        insight.paidAmount += amount;
-      }
-
-      if (isUnpaidStatus(status)) {
-        insight.unpaidCount += 1;
-        insight.unpaidAmount += amount;
-
-        if (daysUntilDue !== null && daysUntilDue >= 0 && daysUntilDue <= 7) {
-          insight.dueSoonCount += 1;
-          insight.dueSoonAmount += amount;
-        }
-
-        if (daysUntilDue !== null && daysUntilDue < 0 && status !== 'overdue') {
-          insight.overdueCandidateCount += 1;
-        }
-      }
-
-      if (status === 'overdue') {
-        insight.overdueCount += 1;
-        insight.overdueAmount += amount;
-      }
-    });
-
-    return Object.values(byOutlet).sort((left, right) => right.unpaidAmount - left.unpaidAmount);
-  }, [outletConfigById, primaryCurrencyCode, vendorInvoices]);
-
-  const businessTypeInsights = useMemo<BusinessTypeInsight[]>(() => {
-    const byType: Record<string, BusinessTypeInsight> = {};
-
-    outletInsights.forEach((insight) => {
-      const key = insight.businessType || 'unspecified';
-      if (!byType[key]) {
-        byType[key] = {
-          businessType: key,
-          outlets: 0,
-          invoices: 0,
-          unpaidAmount: 0,
-          overdueAmount: 0,
-        };
-      }
-
-      byType[key].outlets += 1;
-      byType[key].invoices += insight.invoiceCount;
-      byType[key].unpaidAmount += insight.unpaidAmount;
-      byType[key].overdueAmount += insight.overdueAmount;
-    });
-
-    return Object.values(byType).sort((left, right) => right.unpaidAmount - left.unpaidAmount);
-  }, [outletInsights]);
-
-  const summary = useMemo(() => {
-    const result = {
-      outlets: outletInsights.length,
-      invoices: 0,
-      unpaidCount: 0,
-      unpaidAmount: 0,
-      overdueCount: 0,
-      overdueAmount: 0,
-      dueSoonCount: 0,
-      dueSoonAmount: 0,
-      paidAmount: 0,
-      outletsWithUnpaid: 0,
-      outletsWithOverdue: 0,
-    };
-
-    outletInsights.forEach((insight) => {
-      result.invoices += insight.invoiceCount;
-      result.unpaidCount += insight.unpaidCount;
-      result.unpaidAmount += insight.unpaidAmount;
-      result.overdueCount += insight.overdueCount;
-      result.overdueAmount += insight.overdueAmount;
-      result.dueSoonCount += insight.dueSoonCount;
-      result.dueSoonAmount += insight.dueSoonAmount;
-      result.paidAmount += insight.paidAmount;
-      if (insight.unpaidCount > 0) {
-        result.outletsWithUnpaid += 1;
-      }
-      if (insight.overdueCount > 0 || insight.overdueCandidateCount > 0) {
-        result.outletsWithOverdue += 1;
-      }
-    });
-
-    return result;
-  }, [outletInsights]);
-
-  const currenciesInScope = useMemo(() => {
-    const seen = new Set<string>();
-    outletInsights.forEach((insight) => {
-      if (insight.currency) {
-        seen.add(insight.currency);
-      }
-    });
-    return Array.from(seen);
-  }, [outletInsights]);
-
-  const hasMixedCurrencies = currenciesInScope.length > 1;
-
-  const handleExportInsightsCsv = (outletId?: string) => {
-    const rowsSource = outletId
-      ? outletInsights.filter((insight) => insight.outletId === outletId)
-      : outletInsights;
-
-    if (rowsSource.length === 0) {
-      setInfoMessage('No outlet insights to export.');
-      return;
+  const filteredInvoices = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) {
+      return vendorInvoices;
     }
 
-    const escapeCsv = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
-    const rows = [
-      [
-        'Outlet',
-        'Business Type',
-        'Currency',
-        'Invoices',
-        'Unpaid Invoices',
-        'Overdue Invoices',
-        'Due in 7 Days',
-        'Total Amount',
-        'Outstanding Amount',
-        'Overdue Amount',
-      ],
-      ...rowsSource.map((insight) => [
-        insight.outletName,
-        formatBusinessTypeLabel(insight.businessType),
-        insight.currency,
-        String(insight.invoiceCount),
-        String(insight.unpaidCount),
-        String(insight.overdueCount),
-        String(insight.dueSoonCount),
-        insight.totalAmount.toFixed(2),
-        insight.unpaidAmount.toFixed(2),
-        insight.overdueAmount.toFixed(2),
-      ]),
-    ];
+    return vendorInvoices.filter((invoice) => {
+      const invoiceNumber = String(invoice.invoice_number || '').toLowerCase();
+      const vendorName = getVendorName(invoice).toLowerCase();
+      const notes = String(stripPaymentMarkers(invoice.notes) || '').toLowerCase();
+      return invoiceNumber.includes(query) || vendorName.includes(query) || notes.includes(query);
+    });
+  }, [searchQuery, vendorInvoices]);
 
-    const csv = rows.map((row) => row.map((value) => escapeCsv(value)).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `outlet-invoice-insights-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  const metrics = useMemo(() => {
+    let totalAmount = 0;
+    let outstandingAmount = 0;
+    let overdueAmount = 0;
+    let dueSoonAmount = 0;
+    let paidAmount = 0;
+    let outstandingCount = 0;
+    let overdueCount = 0;
+    let dueSoonCount = 0;
 
-    setInfoMessage('Outlet insights export is ready.');
+    filteredInvoices.forEach((invoice) => {
+      const amount = toNumber(invoice.total);
+      const paymentStatus = normalizePaymentStatus(invoice);
+      const daysUntilDue = getDaysUntilDate(invoice.due_date, today);
+
+      totalAmount += amount;
+
+      if (paymentStatus === 'paid') {
+        paidAmount += amount;
+        return;
+      }
+
+      if (paymentStatus === 'unpaid') {
+        outstandingAmount += amount;
+        outstandingCount += 1;
+
+        if (daysUntilDue !== null && daysUntilDue < 0) {
+          overdueAmount += amount;
+          overdueCount += 1;
+        } else if (daysUntilDue !== null && daysUntilDue <= 7) {
+          dueSoonAmount += amount;
+          dueSoonCount += 1;
+        }
+      }
+    });
+
+    return {
+      totalInvoices: filteredInvoices.length,
+      totalAmount,
+      outstandingAmount,
+      overdueAmount,
+      dueSoonAmount,
+      paidAmount,
+      outstandingCount,
+      overdueCount,
+      dueSoonCount,
+    };
+  }, [filteredInvoices, today]);
+
+  const handleViewInvoice = async (invoiceId: string) => {
+    try {
+      setProcessingInvoiceId(invoiceId);
+      setError(null);
+      const response = await apiClient.get<InvoiceDetailRecord>(`/invoices/${invoiceId}`);
+      if (response.error || !response.data) {
+        throw new Error(response.error || 'Failed to load invoice details');
+      }
+      setViewInvoice(response.data);
+      setIsViewOpen(true);
+    } catch (viewError) {
+      console.error('Failed to view invoice', viewError);
+      setError(viewError instanceof Error ? viewError.message : 'Failed to load invoice details');
+    } finally {
+      setProcessingInvoiceId(null);
+    }
   };
 
-  const handleMarkOverdueForOutlet = async (outletId: string) => {
-    if (!canManageStatuses) {
-      setError('You do not have permission to update invoice status.');
+  const handleOpenMarkPaid = (invoice: InvoiceListItem) => {
+    const defaultPaymentDate = String(invoice.payment_date || '').trim() || getTodayInputValue();
+    setPaymentModalInvoice(invoice);
+    setPaymentDate(defaultPaymentDate);
+    setInfoMessage(null);
+    setError(null);
+  };
+
+  const handleConfirmMarkPaid = async () => {
+    if (!paymentModalInvoice) {
       return;
     }
 
-    const candidates = vendorInvoices.filter((invoice) => {
-      if (invoice.outlet_id !== outletId) {
-        return false;
-      }
-      const status = normalizeStatus(invoice.status);
-      if (!isUnpaidStatus(status) || status === 'overdue') {
-        return false;
-      }
-      const daysUntilDue = getDaysUntilDue(invoice);
-      return daysUntilDue !== null && daysUntilDue < 0;
-    });
-
-    if (candidates.length === 0) {
-      setInfoMessage('No overdue candidates found for this outlet.');
+    if (!paymentDate) {
+      setError('Select a payment date before saving.');
       return;
     }
 
-    const outletName = outletConfigById[outletId]?.name || outletId;
-    const confirmed = window.confirm(
-      `Mark ${candidates.length} invoice(s) as overdue for ${outletName}?`
-    );
+    try {
+      setProcessingInvoiceId(paymentModalInvoice.id);
+      setError(null);
+      const response = await apiClient.put<InvoiceDetailRecord>(`/invoices/${paymentModalInvoice.id}`, {
+        payment_status: 'paid',
+        payment_date: paymentDate,
+      });
+
+      if (response.error || !response.data) {
+        throw new Error(response.error || 'Failed to mark invoice as paid');
+      }
+
+      setInfoMessage(`Marked ${paymentModalInvoice.invoice_number} as paid.`);
+      setPaymentModalInvoice(null);
+      await loadVendorInvoices();
+
+      if (viewInvoice?.id === paymentModalInvoice.id) {
+        setViewInvoice((current) => (current ? { ...current, ...response.data } : current));
+      }
+    } catch (markError) {
+      console.error('Failed to mark invoice paid', markError);
+      setError(markError instanceof Error ? markError.message : 'Failed to mark invoice as paid');
+    } finally {
+      setProcessingInvoiceId(null);
+    }
+  };
+
+  const handleMarkUnpaid = async (invoice: InvoiceListItem) => {
+    const confirmed = window.confirm(`Mark ${invoice.invoice_number} as unpaid? Existing payment date will remain for audit history.`);
     if (!confirmed) {
       return;
     }
 
     try {
-      setProcessingOutletId(outletId);
+      setProcessingInvoiceId(invoice.id);
       setError(null);
-      setInfoMessage(null);
+      const response = await apiClient.put<InvoiceDetailRecord>(`/invoices/${invoice.id}`, {
+        payment_status: 'unpaid',
+      });
 
-      const results = await Promise.all(
-        candidates.map(async (invoice) => {
-          const response = await apiClient.put<InvoiceRecord>(`/invoices/${invoice.id}`, { status: 'overdue' });
-          return response.error;
-        })
-      );
+      if (response.error || !response.data) {
+        throw new Error(response.error || 'Failed to mark invoice as unpaid');
+      }
 
-      const failed = results.filter(Boolean).length;
-      const updated = results.length - failed;
-
+      setInfoMessage(`Marked ${invoice.invoice_number} as unpaid.`);
       await loadVendorInvoices();
 
-      if (failed > 0) {
-        setError(`Updated ${updated} invoice(s), but ${failed} failed.`);
-      } else {
-        setInfoMessage(`Marked ${updated} invoice(s) as overdue for ${outletName}.`);
+      if (viewInvoice?.id === invoice.id) {
+        setViewInvoice((current) => (current ? { ...current, ...response.data } : current));
       }
-    } catch (err) {
-      console.error('Error marking overdue invoices:', err);
-      setError(err instanceof Error ? err.message : 'Failed to update overdue invoices');
+    } catch (markError) {
+      console.error('Failed to mark invoice unpaid', markError);
+      setError(markError instanceof Error ? markError.message : 'Failed to mark invoice as unpaid');
     } finally {
-      setProcessingOutletId(null);
+      setProcessingInvoiceId(null);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
-          <div className="flex items-center justify-center h-64">
-            <div className="text-center">
-              <div className="relative">
-                <div className="w-16 h-16 border-4 border-gray-200 dark:border-gray-700 rounded-full animate-spin border-t-gray-900 dark:border-t-white mx-auto" />
-                <Store className="w-6 h-6 text-gray-400 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2" />
-              </div>
-              <p className="mt-6 text-gray-600 dark:text-gray-400 font-light">Loading outlet invoice insights...</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const handleExportCsv = () => {
+    const rows = filteredInvoices.map((invoice) => {
+      const paymentStatus = normalizePaymentStatus(invoice) || 'unknown';
+      const daysUntilDue = getDaysUntilDate(invoice.due_date, today);
+      const dueSignal = daysUntilDue === null
+        ? 'No due date'
+        : daysUntilDue < 0
+          ? `${Math.abs(daysUntilDue)} day(s) overdue`
+          : `${daysUntilDue} day(s) remaining`;
+
+      return [
+        invoice.invoice_number,
+        getVendorName(invoice),
+        invoice.issue_date || '',
+        invoice.due_date || '',
+        formatStatusLabel(invoice.status),
+        formatStatusLabel(paymentStatus),
+        invoice.payment_date || '',
+        String(toNumber(invoice.total)),
+        dueSignal,
+        JSON.stringify(stripPaymentMarkers(invoice.notes) || ''),
+      ];
+    });
+
+    const csv = [
+      ['Invoice Number', 'Vendor', 'Issue Date', 'Due Date', 'Workflow Status', 'Payment Status', 'Payment Date', 'Amount', 'Due Signal', 'Notes'].join(','),
+      ...rows.map((row) => row.join(',')),
+    ].join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `vendor-invoice-ledger-${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const getWorkflowBadgeClass = (status?: string | null): string => {
+    switch (normalizeStatus(status)) {
+      case 'received':
+        return 'bg-blue-100 text-blue-700';
+      case 'paid':
+        return 'bg-emerald-100 text-emerald-700';
+      case 'pending':
+        return 'bg-amber-100 text-amber-700';
+      case 'draft':
+        return 'bg-slate-100 text-slate-700';
+      case 'cancelled':
+        return 'bg-rose-100 text-rose-700';
+      default:
+        return 'bg-slate-100 text-slate-700';
+    }
+  };
+
+  const getPaymentBadgeClass = (paymentStatus: string): string => {
+    switch (paymentStatus) {
+      case 'paid':
+        return 'bg-emerald-100 text-emerald-700';
+      case 'unpaid':
+        return 'bg-amber-100 text-amber-700';
+      default:
+        return 'bg-slate-100 text-slate-700';
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <div className="w-10 h-10 bg-gradient-to-tr from-gray-900 to-gray-700 dark:from-white dark:to-gray-200 rounded-xl flex items-center justify-center shadow-sm">
-                <Store className="w-5 h-5 text-white dark:text-gray-900" />
-              </div>
-              <h1 className="text-2xl sm:text-3xl font-light text-gray-900 dark:text-white tracking-tight">
-                Invoice Insights
-              </h1>
-              <span
-                className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                  isRealtimeConnected
-                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-200 dark:border-emerald-800'
-                    : 'bg-gray-100 text-gray-700 border border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700'
-                }`}
-              >
-                {isRealtimeConnected ? 'Live' : 'Polling'}
-              </span>
-            </div>
-            <p className="text-gray-600 dark:text-gray-400 font-light">
-              Vendor invoice exposure for {currentOutlet?.name || 'the selected outlet'}. Currency is synced from outlet settings
-              {primaryCurrencyCode ? ` (primary: ${primaryCurrencyCode})` : ''}.
-            </p>
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
+            <Receipt size={14} />
+            AP Ledger
           </div>
-
-          <div className="flex items-center gap-2 flex-wrap w-full lg:w-auto">
-            <div className="px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white w-full sm:w-auto">
-              {currentOutlet?.name || 'Selected outlet'}
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full sm:w-auto"
-              onClick={() => {
-                void loadVendorInvoices();
-              }}
-            >
-              <RefreshCw className="w-4 h-4 mr-1" />
-              Refresh
-            </Button>
-
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full sm:w-auto"
-              onClick={() => handleExportInsightsCsv()}
-            >
-              <Download className="w-4 h-4 mr-1" />
-              Export
-            </Button>
+          <div>
+            <h1 className="text-2xl font-semibold text-gray-900">Vendor Invoice Ledger</h1>
+            <p className="mt-1 text-sm text-gray-600">
+              Track vendor invoices, unpaid exposure, and payment history for cash outflow control.
+            </p>
           </div>
         </div>
 
-        {hasMixedCurrencies && (
-          <div className="card border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-900/10 p-4">
-            <div className="flex items-start space-x-2">
-              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5" />
-              <p className="text-amber-800 dark:text-amber-200 text-sm">
-                Currency mismatch detected in this outlet&apos;s invoice data ({currenciesInScope.join(', ')}).
-              </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => void loadVendorInvoices()} disabled={loading}>
+            <RefreshCw size={16} className={`mr-2 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleExportCsv} disabled={loading || filteredInvoices.length === 0}>
+            <Download size={16} className="mr-2" />
+            Export
+          </Button>
+        </div>
+      </div>
+
+      {error ? (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </div>
+      ) : null}
+
+      {infoMessage ? (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          {infoMessage}
+        </div>
+      ) : null}
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Total Invoices</p>
+              <p className="mt-2 text-2xl font-semibold text-gray-900">{metrics.totalInvoices}</p>
+            </div>
+            <div className="rounded-xl bg-slate-100 p-2 text-slate-600">
+              <Receipt size={18} />
             </div>
           </div>
-        )}
+          <p className="mt-3 text-xs text-gray-500">{formatMoney(metrics.totalAmount)} total invoice value</p>
+        </div>
 
-        {infoMessage && (
-          <div className="card border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-900/10 p-4">
-            <div className="flex items-center space-x-2">
-              <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              <p className="text-emerald-800 dark:text-emerald-200 font-light">{infoMessage}</p>
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Outstanding</p>
+              <p className="mt-2 text-2xl font-semibold text-gray-900">{formatMoney(metrics.outstandingAmount)}</p>
+            </div>
+            <div className="rounded-xl bg-amber-100 p-2 text-amber-700">
+              <Wallet size={18} />
             </div>
           </div>
-        )}
+          <p className="mt-3 text-xs text-gray-500">{metrics.outstandingCount} unpaid invoices</p>
+        </div>
 
-        {error && (
-          <div className="card border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-900/10 p-4">
-            <div className="flex items-center space-x-2">
-              <XCircle className="w-4 h-4 text-red-600 dark:text-red-400" />
-              <p className="text-red-800 dark:text-red-200 font-light">{error}</p>
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Overdue</p>
+              <p className="mt-2 text-2xl font-semibold text-gray-900">{formatMoney(metrics.overdueAmount)}</p>
+            </div>
+            <div className="rounded-xl bg-rose-100 p-2 text-rose-700">
+              <AlertCircle size={18} />
             </div>
           </div>
-        )}
+          <p className="mt-3 text-xs text-gray-500">{metrics.overdueCount} overdue invoices</p>
+        </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          <div className="card p-5">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground">Selected Outlet</p>
-            <p className="text-lg font-semibold mt-1 text-gray-900 dark:text-white">{currentOutlet?.name || 'Current outlet'}</p>
-            <p className="text-xs text-muted-foreground mt-1">{summary.invoices} total invoices</p>
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Due In 7 Days</p>
+              <p className="mt-2 text-2xl font-semibold text-gray-900">{formatMoney(metrics.dueSoonAmount)}</p>
+            </div>
+            <div className="rounded-xl bg-blue-100 p-2 text-blue-700">
+              <Clock3 size={18} />
+            </div>
           </div>
+          <p className="mt-3 text-xs text-gray-500">{metrics.dueSoonCount} invoices due soon</p>
+        </div>
 
-          <div className="card p-5">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground">Outstanding</p>
-            <p className="text-2xl font-semibold mt-1 text-amber-700 dark:text-amber-300">{formatMoney(summary.unpaidAmount)}</p>
-            <p className="text-xs text-muted-foreground mt-1">{summary.unpaidCount} unpaid invoices</p>
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Paid Outflow</p>
+              <p className="mt-2 text-2xl font-semibold text-gray-900">{formatMoney(metrics.paidAmount)}</p>
+            </div>
+            <div className="rounded-xl bg-emerald-100 p-2 text-emerald-700">
+              <CreditCard size={18} />
+            </div>
           </div>
+          <p className="mt-3 text-xs text-gray-500">Settled supplier payments in this ledger</p>
+        </div>
+      </section>
 
-          <div className="card p-5">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground">Overdue Exposure</p>
-            <p className="text-2xl font-semibold mt-1 text-red-700 dark:text-red-300">{formatMoney(summary.overdueAmount)}</p>
-            <p className="text-xs text-muted-foreground mt-1">{summary.overdueCount} overdue invoices</p>
+      <section className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-gray-200 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Invoices</h2>
+            <p className="text-sm text-gray-500">View invoice details and manage payment status.</p>
           </div>
-
-          <div className="card p-5">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground">Due in 7 Days</p>
-            <p className="text-2xl font-semibold mt-1 text-blue-700 dark:text-blue-300">{formatMoney(summary.dueSoonAmount)}</p>
-            <p className="text-xs text-muted-foreground mt-1">{summary.dueSoonCount} invoices</p>
-          </div>
-
-          <div className="card p-5">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground">Paid Value</p>
-            <p className="text-2xl font-semibold mt-1 text-emerald-700 dark:text-emerald-300">{formatMoney(summary.paidAmount)}</p>
-            <p className="text-xs text-muted-foreground mt-1">{summary.overdueCount} overdue invoices tracked</p>
+          <div className="w-full lg:w-80">
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search invoice number, vendor, or notes"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            />
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <div className="card p-4 sm:p-6">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Business Context</h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-              Business type context and invoice exposure for the selected outlet.
-            </p>
-            <div className="space-y-3">
-              {businessTypeInsights.length === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">No business type insights available.</p>
-              ) : (
-                businessTypeInsights.map((entry) => (
-                  <div
-                    key={entry.businessType}
-                    className="p-3 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">
-                        {formatBusinessTypeLabel(entry.businessType)}
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {entry.invoices} invoices in this outlet
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-semibold text-amber-700 dark:text-amber-300">
-                        {formatMoney(entry.unpaidAmount)} unpaid
-                      </p>
-                      <p className="text-xs text-red-600 dark:text-red-300">
-                        {formatMoney(entry.overdueAmount)} overdue
-                      </p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 px-6 py-16 text-sm text-gray-500">
+            <Loader2 size={16} className="animate-spin" />
+            Loading vendor invoices...
           </div>
-
-          <div className="card p-4 sm:p-6">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Current Outlet Priority</h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-              Follow-up priority for the selected outlet.
-            </p>
-            <div className="space-y-3">
-              {outletInsights.length === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">No invoice exposure data available.</p>
-              ) : (
-                outletInsights.map((insight) => (
-                  <div
-                    key={insight.outletId}
-                    className="p-3 rounded-lg border border-gray-200 dark:border-gray-700"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-medium text-gray-900 dark:text-white">{insight.outletName}</p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                          {formatBusinessTypeLabel(insight.businessType)} | {insight.unpaidCount} unpaid | {insight.overdueCount} overdue
-                        </p>
-                      </div>
-                      <p className="text-sm font-semibold text-gray-900 dark:text-white text-right">
-                        {formatMoney(insight.unpaidAmount, insight.outletId)}
-                      </p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+        ) : filteredInvoices.length === 0 ? (
+          <div className="px-6 py-16 text-center text-sm text-gray-500">
+            No vendor invoices found for this outlet.
           </div>
-        </div>
-
-        <div className="card p-4 sm:p-6">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Selected Outlet Invoice Snapshot</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            Owner actions for the currently selected outlet only.
-          </p>
-
+        ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead className="bg-gray-50 dark:bg-gray-800/60">
+            <table className="min-w-full divide-y divide-gray-200 text-sm">
+              <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Business Type</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Currency</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Invoices</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Unpaid</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Overdue</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Due 7d</th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Outstanding</th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Invoice</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Vendor</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Issue Date</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Due Date</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Workflow</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Payment</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Payment Date</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-500">Amount</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-500">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                {outletInsights.length === 0 ? (
-                  <tr>
-                    <td className="px-4 py-6 text-sm text-gray-500 dark:text-gray-400 text-center" colSpan={8}>
-                      No outlet insights available.
-                    </td>
-                  </tr>
-                ) : (
-                  outletInsights.map((insight) => (
-                    <tr key={insight.outletId}>
-                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{formatBusinessTypeLabel(insight.businessType)}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{insight.currency || 'Not set'}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{insight.invoiceCount}</td>
-                      <td className="px-4 py-3 text-sm text-amber-700 dark:text-amber-300">{insight.unpaidCount}</td>
-                      <td className="px-4 py-3 text-sm text-red-700 dark:text-red-300">{insight.overdueCount}</td>
-                      <td className="px-4 py-3 text-sm text-blue-700 dark:text-blue-300">{insight.dueSoonCount}</td>
-                      <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">
-                        {formatMoney(insight.unpaidAmount, insight.outletId)}
+              <tbody className="divide-y divide-gray-100 bg-white">
+                {filteredInvoices.map((invoice) => {
+                  const workflowStatus = normalizeStatus(invoice.status) || 'unknown';
+                  const paymentStatus = normalizePaymentStatus(invoice);
+                  const daysUntilDue = getDaysUntilDate(invoice.due_date, today);
+                  const isProcessing = processingInvoiceId === invoice.id;
+                  const isOverdue = paymentStatus === 'unpaid' && daysUntilDue !== null && daysUntilDue < 0;
+                  const canMarkPaid = canManageStatuses && paymentStatus !== 'paid';
+                  const canMarkUnpaid = canManageStatuses && paymentStatus === 'paid';
+
+                  return (
+                    <tr key={invoice.id} className="align-top">
+                      <td className="px-4 py-4">
+                        <div className="font-medium text-gray-900">{invoice.invoice_number}</div>
+                        {isOverdue ? (
+                          <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
+                            <AlertCircle size={12} />
+                            {Math.abs(daysUntilDue || 0)} day(s) overdue
+                          </div>
+                        ) : daysUntilDue !== null && paymentStatus === 'unpaid' && daysUntilDue <= 7 ? (
+                          <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                            <Clock3 size={12} />
+                            Due in {daysUntilDue} day(s)
+                          </div>
+                        ) : null}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="inline-flex flex-wrap items-center justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleExportInsightsCsv(insight.outletId)}
-                          >
-                            <Download className="w-4 h-4 mr-1" />
-                            Export
+                      <td className="px-4 py-4 text-gray-700">{getVendorName(invoice)}</td>
+                      <td className="px-4 py-4 text-gray-700">{invoice.issue_date ? formatDate(invoice.issue_date) : 'Not set'}</td>
+                      <td className="px-4 py-4 text-gray-700">{invoice.due_date ? formatDate(invoice.due_date) : 'Not set'}</td>
+                      <td className="px-4 py-4">
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${getWorkflowBadgeClass(workflowStatus)}`}>
+                          {formatStatusLabel(workflowStatus)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${getPaymentBadgeClass(paymentStatus)}`}>
+                          {paymentStatus ? formatStatusLabel(paymentStatus) : 'Unknown'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4 text-gray-700">{invoice.payment_date ? formatDate(invoice.payment_date) : 'Not recorded'}</td>
+                      <td className="px-4 py-4 text-right font-medium text-gray-900">{formatMoney(toNumber(invoice.total))}</td>
+                      <td className="px-4 py-4">
+                        <div className="flex justify-end gap-2">
+                          <Button variant="outline" size="sm" onClick={() => void handleViewInvoice(invoice.id)} disabled={isProcessing}>
+                            <Eye size={14} className="mr-1.5" />
+                            View
                           </Button>
-
-                          {canManageStatuses && insight.overdueCandidateCount > 0 && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
-                              onClick={() => {
-                                void handleMarkOverdueForOutlet(insight.outletId);
-                              }}
-                              disabled={processingOutletId === insight.outletId}
-                            >
-                              {processingOutletId === insight.outletId
-                                ? 'Updating...'
-                                : `Mark Overdue (${insight.overdueCandidateCount})`}
+                          {canMarkPaid ? (
+                            <Button variant="outline" size="sm" onClick={() => handleOpenMarkPaid(invoice)} disabled={isProcessing}>
+                              <CheckCircle2 size={14} className="mr-1.5" />
+                              Mark Paid
                             </Button>
-                          )}
-
+                          ) : null}
+                          {canMarkUnpaid ? (
+                            <Button variant="outline" size="sm" onClick={() => void handleMarkUnpaid(invoice)} disabled={isProcessing}>
+                              <XCircle size={14} className="mr-1.5" />
+                              Mark Unpaid
+                            </Button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
-                  ))
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {paymentModalInvoice ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-xl">
+            <div className="border-b border-gray-200 px-6 py-4">
+              <h3 className="text-lg font-semibold text-gray-900">Mark Invoice Paid</h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Choose the payment date for {paymentModalInvoice.invoice_number}.
+              </p>
+            </div>
+            <div className="space-y-4 px-6 py-5">
+              <div>
+                <label htmlFor="payment-date" className="mb-2 block text-sm font-medium text-gray-700">
+                  Payment Date
+                </label>
+                <input
+                  id="payment-date"
+                  type="date"
+                  value={paymentDate}
+                  onChange={(event) => setPaymentDate(event.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                />
+              </div>
+              <div className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                Existing payment date is preserved when you later mark an invoice unpaid.
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-gray-200 px-6 py-4">
+              <Button variant="ghost" onClick={() => setPaymentModalInvoice(null)} disabled={processingInvoiceId === paymentModalInvoice.id}>
+                Cancel
+              </Button>
+              <Button onClick={() => void handleConfirmMarkPaid()} disabled={processingInvoiceId === paymentModalInvoice.id}>
+                {processingInvoiceId === paymentModalInvoice.id ? (
+                  <Loader2 size={16} className="mr-2 animate-spin" />
+                ) : (
+                  <CheckCircle2 size={16} className="mr-2" />
                 )}
-              </tbody>
-            </table>
+                Save Payment
+              </Button>
+            </div>
           </div>
         </div>
+      ) : null}
 
-        <div className="card p-4 sm:p-6">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Latest Invoices (Context)</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-            Recent invoices for the selected outlet to support follow-up decisions.
-          </p>
+      {isViewOpen && viewInvoice ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-6">
+          <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+            <div className="flex items-start justify-between border-b border-gray-200 px-6 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Invoice {viewInvoice.invoice_number}</h3>
+                <p className="mt-1 text-sm text-gray-500">Full invoice context and payment state.</p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setIsViewOpen(false)}>
+                <XCircle size={16} className="mr-1.5" />
+                Close
+              </Button>
+            </div>
 
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead className="bg-gray-50 dark:bg-gray-800/60">
-                <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Invoice</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Issue Date</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Due Signal</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Status</th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Amount</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                {vendorInvoices
-                  .slice(0, 12)
-                  .map((invoice) => {
-                    const daysUntilDue = getDaysUntilDue(invoice);
-                    const dueText =
-                      daysUntilDue === null
-                        ? 'No due date'
-                        : daysUntilDue < 0
-                          ? `${Math.abs(daysUntilDue)} day(s) overdue`
-                          : daysUntilDue === 0
-                            ? 'Due today'
-                            : `Due in ${daysUntilDue} day(s)`;
+            <div className="overflow-y-auto px-6 py-5">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Vendor</p>
+                  <p className="mt-2 text-sm font-medium text-gray-900">{getVendorName(viewInvoice)}</p>
+                </div>
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Issue Date</p>
+                  <p className="mt-2 text-sm font-medium text-gray-900">{viewInvoice.issue_date ? formatDate(viewInvoice.issue_date) : 'Not set'}</p>
+                </div>
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Due Date</p>
+                  <p className="mt-2 text-sm font-medium text-gray-900">{viewInvoice.due_date ? formatDate(viewInvoice.due_date) : 'Not set'}</p>
+                </div>
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Total</p>
+                  <p className="mt-2 text-sm font-semibold text-gray-900">{formatMoney(toNumber(viewInvoice.total))}</p>
+                </div>
+              </div>
 
-                    return (
-                      <tr key={invoice.id}>
-                        <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{invoice.invoice_number || 'N/A'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
-                          {invoice.issue_date ? formatDate(invoice.issue_date) : 'N/A'}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{dueText}</td>
-                        <td className="px-4 py-3 text-sm">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                              isPaidStatus(invoice.status)
-                                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'
-                                : normalizeStatus(invoice.status) === 'overdue'
-                                  ? 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300'
-                                  : 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300'
-                            }`}
-                          >
-                            {normalizeStatus(invoice.status) || 'unknown'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900 dark:text-gray-100">
-                          {formatMoney(toNumber(invoice.total), invoice.outlet_id)}
-                        </td>
+              <div className="mt-4 grid gap-4 md:grid-cols-3">
+                <div className="rounded-2xl border border-gray-200 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Workflow Status</p>
+                  <span className={`mt-3 inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${getWorkflowBadgeClass(viewInvoice.status)}`}>
+                    {formatStatusLabel(viewInvoice.status)}
+                  </span>
+                </div>
+                <div className="rounded-2xl border border-gray-200 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Payment Status</p>
+                  <span className={`mt-3 inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${getPaymentBadgeClass(normalizePaymentStatus(viewInvoice))}`}>
+                    {formatStatusLabel(normalizePaymentStatus(viewInvoice) || 'unknown')}
+                  </span>
+                </div>
+                <div className="rounded-2xl border border-gray-200 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Payment Date</p>
+                  <p className="mt-3 text-sm font-medium text-gray-900">{viewInvoice.payment_date ? formatDate(viewInvoice.payment_date) : 'Not recorded'}</p>
+                </div>
+              </div>
+
+              <div className="mt-6 rounded-2xl border border-gray-200">
+                <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+                  <h4 className="text-sm font-semibold text-gray-900">Line Items</h4>
+                  <span className="text-xs text-gray-500">{viewInvoice.invoice_items?.length || 0} items</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-medium text-gray-500">Description</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-500">Qty</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-500">Unit Price</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-500">Received</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-500">Remaining</th>
+                        <th className="px-4 py-3 text-right font-medium text-gray-500">Total</th>
                       </tr>
-                    );
-                  })}
-              </tbody>
-            </table>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 bg-white">
+                      {(viewInvoice.invoice_items || []).map((item) => (
+                        <tr key={item.id || `${item.description}-${item.sku}`}>
+                          <td className="px-4 py-3 text-gray-900">
+                            <div className="font-medium">{item.description || 'Unnamed line item'}</div>
+                            {item.category ? <div className="text-xs text-gray-500">{item.category}</div> : null}
+                          </td>
+                          <td className="px-4 py-3 text-gray-700">{toNumber(item.quantity)}</td>
+                          <td className="px-4 py-3 text-gray-700">{formatMoney(toNumber(item.unit_price))}</td>
+                          <td className="px-4 py-3 text-gray-700">{item.received_quantity !== undefined && item.received_quantity !== null ? toNumber(item.received_quantity) : '—'}</td>
+                          <td className="px-4 py-3 text-gray-700">{item.remaining_quantity !== undefined && item.remaining_quantity !== null ? toNumber(item.remaining_quantity) : '—'}</td>
+                          <td className="px-4 py-3 text-right font-medium text-gray-900">{formatMoney(toNumber(item.total) || (toNumber(item.quantity) * toNumber(item.unit_price)))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-4 lg:grid-cols-2">
+                <div className="rounded-2xl border border-gray-200 p-4">
+                  <h4 className="text-sm font-semibold text-gray-900">Notes</h4>
+                  <p className="mt-3 whitespace-pre-wrap text-sm text-gray-600">
+                    {stripPaymentMarkers(viewInvoice.notes) || 'No notes recorded.'}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-gray-200 p-4">
+                  <h4 className="text-sm font-semibold text-gray-900">Summary</h4>
+                  <dl className="mt-3 space-y-2 text-sm text-gray-600">
+                    <div className="flex items-center justify-between">
+                      <dt>Subtotal</dt>
+                      <dd className="font-medium text-gray-900">{formatMoney(toNumber(viewInvoice.subtotal))}</dd>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <dt>Tax</dt>
+                      <dd className="font-medium text-gray-900">{formatMoney(toNumber(viewInvoice.tax_amount))}</dd>
+                    </div>
+                    <div className="flex items-center justify-between border-t border-gray-200 pt-2">
+                      <dt className="font-semibold text-gray-900">Total</dt>
+                      <dd className="font-semibold text-gray-900">{formatMoney(toNumber(viewInvoice.total))}</dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between border-t border-gray-200 px-6 py-4">
+              <div className="text-xs text-gray-500">
+                {viewInvoice.updated_at ? `Last updated ${formatDate(viewInvoice.updated_at)}` : 'Invoice details loaded'}
+              </div>
+              <div className="flex items-center gap-2">
+                {canManageStatuses && normalizePaymentStatus(viewInvoice) !== 'paid' ? (
+                  <Button variant="outline" size="sm" onClick={() => handleOpenMarkPaid(viewInvoice)}>
+                    <CheckCircle2 size={14} className="mr-1.5" />
+                    Mark Paid
+                  </Button>
+                ) : null}
+                {canManageStatuses && normalizePaymentStatus(viewInvoice) === 'paid' ? (
+                  <Button variant="outline" size="sm" onClick={() => void handleMarkUnpaid(viewInvoice)}>
+                    <XCircle size={14} className="mr-1.5" />
+                    Mark Unpaid
+                  </Button>
+                ) : null}
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 };
