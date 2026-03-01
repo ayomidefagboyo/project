@@ -14,9 +14,10 @@ import {
   Plus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { formatDate } from '@/lib/utils';
 import { useOutlet } from '@/contexts/OutletContext';
 import { eodService } from '@/lib/eodServiceNew';
+import { currencyService } from '@/lib/currencyService';
 import type { EnhancedDailyReport } from '@/types';
 
 const getTodayValue = (): string => {
@@ -88,12 +89,31 @@ const matchesSearch = (report: EnhancedDailyReport, query: string): boolean => {
 };
 
 const DailyReports: React.FC = () => {
-  const { currentOutlet } = useOutlet();
+  const { currentOutlet, businessSettings } = useOutlet();
   const [reports, setReports] = useState<EnhancedDailyReport[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const formatMoney = useCallback(
+    (amount: number) => {
+      const configuredCurrency =
+        businessSettings?.currency ||
+        currentOutlet?.currency ||
+        currencyService.getCurrentCurrency().code;
+
+      try {
+        return new Intl.NumberFormat(configuredCurrency === 'NGN' ? 'en-NG' : undefined, {
+          style: 'currency',
+          currency: configuredCurrency,
+        }).format(amount);
+      } catch (_error) {
+        return currencyService.formatCurrency(amount);
+      }
+    },
+    [businessSettings?.currency, currentOutlet?.currency]
+  );
 
   const loadReports = useCallback(async () => {
     if (!currentOutlet?.id) {
@@ -287,7 +307,7 @@ const DailyReports: React.FC = () => {
                 <div>
                   <p className="text-xs uppercase tracking-wider text-muted-foreground">Sales Captured</p>
                   <p className="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">
-                    {formatCurrency(summary.visibleSales)}
+                    {formatMoney(summary.visibleSales)}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">Current visible list</p>
                 </div>
@@ -300,9 +320,9 @@ const DailyReports: React.FC = () => {
                 <div>
                   <p className="text-xs uppercase tracking-wider text-muted-foreground">Net After Expenses</p>
                   <p className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-400">
-                    {formatCurrency(summary.visibleNet)}
+                    {formatMoney(summary.visibleNet)}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-1">Average: {formatCurrency(summary.averageNet)}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Average: {formatMoney(summary.averageNet)}</p>
                 </div>
                 <TrendingUp className="w-5 h-5 text-gray-400" />
               </div>
@@ -340,7 +360,7 @@ const DailyReports: React.FC = () => {
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-gray-500 dark:text-gray-400">Closing balance</span>
                   <span className="font-medium text-gray-900 dark:text-white">
-                    {formatCurrency(toAmount(summary.latestReport.closing_balance))}
+                    {formatMoney(toAmount(summary.latestReport.closing_balance))}
                   </span>
                 </div>
               </div>
@@ -362,18 +382,18 @@ const DailyReports: React.FC = () => {
             <div className="mt-4 space-y-3 text-sm">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-gray-500 dark:text-gray-400">Operating expenses</span>
-                <span className="font-medium text-gray-900 dark:text-white">{formatCurrency(summary.visibleExpenses)}</span>
+                <span className="font-medium text-gray-900 dark:text-white">{formatMoney(summary.visibleExpenses)}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-gray-500 dark:text-gray-400">Average daily sales</span>
                 <span className="font-medium text-gray-900 dark:text-white">
-                  {formatCurrency(summary.visibleReports > 0 ? summary.visibleSales / summary.visibleReports : 0)}
+                  {formatMoney(summary.visibleReports > 0 ? summary.visibleSales / summary.visibleReports : 0)}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-gray-500 dark:text-gray-400">Average closing balance</span>
                 <span className="font-medium text-gray-900 dark:text-white">
-                  {formatCurrency(
+                  {formatMoney(
                     summary.visibleReports > 0
                       ? filteredReports.reduce((sum, report) => sum + toAmount(report.closing_balance), 0) / summary.visibleReports
                       : 0
@@ -454,20 +474,20 @@ const DailyReports: React.FC = () => {
                   </div>
                   <div>
                     <p className="text-gray-500 dark:text-gray-400">Closing</p>
-                    <p className="text-gray-900 dark:text-white">{formatCurrency(toAmount(report.closing_balance))}</p>
+                    <p className="text-gray-900 dark:text-white">{formatMoney(toAmount(report.closing_balance))}</p>
                   </div>
                   <div>
                     <p className="text-gray-500 dark:text-gray-400">Sales</p>
-                    <p className="text-gray-900 dark:text-white">{formatCurrency(toAmount(report.total_sales))}</p>
+                    <p className="text-gray-900 dark:text-white">{formatMoney(toAmount(report.total_sales))}</p>
                   </div>
                   <div>
                     <p className="text-gray-500 dark:text-gray-400">Expenses</p>
-                    <p className="text-gray-900 dark:text-white">{formatCurrency(getReportExpenses(report))}</p>
+                    <p className="text-gray-900 dark:text-white">{formatMoney(getReportExpenses(report))}</p>
                   </div>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-gray-500 dark:text-gray-400">Net</span>
-                  <span className="font-medium text-emerald-600 dark:text-emerald-400">{formatCurrency(getReportNet(report))}</span>
+                  <span className="font-medium text-emerald-600 dark:text-emerald-400">{formatMoney(getReportNet(report))}</span>
                 </div>
               </div>
             ))}
@@ -517,16 +537,16 @@ const DailyReports: React.FC = () => {
                       {report.status}
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 text-sm text-right text-gray-900 dark:text-white">
-                      {formatCurrency(toAmount(report.total_sales))}
+                      {formatMoney(toAmount(report.total_sales))}
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 text-sm text-right text-gray-700 dark:text-gray-300">
-                      {formatCurrency(getReportExpenses(report))}
+                      {formatMoney(getReportExpenses(report))}
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 text-sm text-right font-medium text-emerald-600 dark:text-emerald-400">
-                      {formatCurrency(getReportNet(report))}
+                      {formatMoney(getReportNet(report))}
                     </td>
                     <td className="whitespace-nowrap px-6 py-4 text-sm text-right text-gray-900 dark:text-white">
-                      {formatCurrency(toAmount(report.closing_balance))}
+                      {formatMoney(toAmount(report.closing_balance))}
                     </td>
                   </tr>
                 ))}
