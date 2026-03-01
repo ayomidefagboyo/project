@@ -76,6 +76,20 @@ def _is_missing_table_error(exc: Exception, table_name: str) -> bool:
     )
 
 
+def _is_missing_column_error(exc: Exception, table_name: str, column_name: str) -> bool:
+    message = str(exc or "").lower()
+    return (
+        table_name.lower() in message
+        and column_name.lower() in message
+        and (
+            "does not exist" in message
+            or "could not find the" in message
+            or "42703" in message
+            or "pgrst204" in message
+        )
+    )
+
+
 def _extract_stocktake_reason_and_notes(raw_notes: Any) -> Dict[str, Optional[str]]:
     payload = _safe_json_object(raw_notes)
     if payload:
@@ -185,12 +199,25 @@ def _get_dashboard_inventory_products(supabase, outlet_ids: List[str]) -> List[D
     if not outlet_ids:
         return []
 
-    query = supabase.table(Tables.POS_PRODUCTS).select(
-        "id,outlet_id,name,quantity_on_hand,reorder_level,cost_price,unit_price,expiry_date,is_active"
-    )
-    query = _apply_outlet_filter(query, outlet_ids)
-    result = query.eq("is_active", True).execute()
-    return result.data or []
+    select_with_expiry = "id,outlet_id,name,quantity_on_hand,reorder_level,cost_price,unit_price,expiry_date,is_active"
+    select_without_expiry = "id,outlet_id,name,quantity_on_hand,reorder_level,cost_price,unit_price,is_active"
+
+    try:
+        query = supabase.table(Tables.POS_PRODUCTS).select(select_with_expiry)
+        query = _apply_outlet_filter(query, outlet_ids)
+        result = query.eq("is_active", True).execute()
+        return result.data or []
+    except Exception as exc:
+        if not _is_missing_column_error(exc, Tables.POS_PRODUCTS, "expiry_date"):
+            raise
+
+        logger.warning(
+            "pos_products.expiry_date missing in schema cache for dashboard overview; retrying without expiry data"
+        )
+        fallback_query = supabase.table(Tables.POS_PRODUCTS).select(select_without_expiry)
+        fallback_query = _apply_outlet_filter(fallback_query, outlet_ids)
+        fallback_result = fallback_query.eq("is_active", True).execute()
+        return fallback_result.data or []
 
 
 def _build_dashboard_insights(
