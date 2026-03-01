@@ -22,14 +22,67 @@ class EODService:
     
     def __init__(self):
         self._supabase = None
+        self._actor_name_cache: Dict[str, Optional[str]] = {}
     
     @property
     def supabase(self):
         if self._supabase is None:
             self._supabase = get_supabase_admin()
         return self._supabase
+
+    def _resolve_actor_display_name(self, actor_id: Optional[str]) -> Optional[str]:
+        resolved_actor_id = str(actor_id or "").strip()
+        if not resolved_actor_id:
+            return None
+
+        if resolved_actor_id in self._actor_name_cache:
+            return self._actor_name_cache[resolved_actor_id]
+
+        try:
+            staff_result = (
+                self.supabase.table(Tables.STAFF_PROFILES)
+                .select("display_name")
+                .eq("id", resolved_actor_id)
+                .limit(1)
+                .execute()
+            )
+            if staff_result.data:
+                display_name = str(staff_result.data[0].get("display_name") or "").strip()
+                if display_name:
+                    self._actor_name_cache[resolved_actor_id] = display_name
+                    return display_name
+        except Exception as staff_error:
+            logger.warning("Failed resolving EOD actor from staff_profiles: %s", staff_error)
+
+        try:
+            user_result = (
+                self.supabase.table(Tables.USERS)
+                .select("name,email")
+                .eq("id", resolved_actor_id)
+                .limit(1)
+                .execute()
+            )
+            if user_result.data:
+                profile = user_result.data[0]
+                display_name = str(profile.get("name") or profile.get("email") or "").strip()
+                if display_name:
+                    self._actor_name_cache[resolved_actor_id] = display_name
+                    return display_name
+        except Exception as user_error:
+            logger.warning("Failed resolving EOD actor from users: %s", user_error)
+
+        self._actor_name_cache[resolved_actor_id] = None
+        return None
+
+    def _serialize_report(self, report: Dict[str, Any]) -> EnhancedDailyReport:
+        payload = dict(report or {})
+        actor_id = str(payload.get("submitted_by") or "").strip()
+        actor_name = self._resolve_actor_display_name(actor_id)
+        if actor_name:
+            payload["created_by"] = actor_name
+        return EnhancedDailyReport(**payload)
     
-    async def create_eod_report(self, eod_data: EODCreate, outlet_id: str, user_id: str) -> EnhancedDailyReport:
+    async def create_eod_report(self, eod_data: EODCreate, outlet_id: str, actor_id: str) -> EnhancedDailyReport:
         """Create a new EOD report"""
         try:
             # Check if report already exists for this date
@@ -66,14 +119,14 @@ class EODService:
                 "inventory_cost": eod_data.inventory_cost,
                 "notes": eod_data.notes,
                 "outlet_id": outlet_id,
-                "submitted_by": user_id,
+                "submitted_by": actor_id,
                 "total_sales": total_sales,
                 "gross_profit": gross_profit,
                 "expected_cash": expected_cash,
                 "cash_variance": cash_variance,
                 "gross_margin_percent": gross_margin_percent,
                 "status": ReportStatus.APPROVED,
-                "approved_by": user_id,
+                "approved_by": actor_id,
                 "approved_at": datetime.now().isoformat(),
                 "discrepancies": self._calculate_discrepancies(eod_data)
             }
@@ -88,7 +141,7 @@ class EODService:
                 )
 
             report = response.data[0]
-            return EnhancedDailyReport(**report)
+            return self._serialize_report(report)
             
         except HTTPException:
             raise
@@ -134,7 +187,7 @@ class EODService:
             # Execute query
             response = query.execute()
             
-            reports = [EnhancedDailyReport(**report) for report in response.data]
+            reports = [self._serialize_report(report) for report in response.data]
             total = response.count or 0
             pages = (total + size - 1) // size
             
@@ -165,7 +218,7 @@ class EODService:
                 )
             
             report = response.data[0]
-            return EnhancedDailyReport(**report)
+            return self._serialize_report(report)
             
         except HTTPException:
             raise
@@ -224,7 +277,7 @@ class EODService:
                 )
             
             report = response.data[0]
-            return EnhancedDailyReport(**report)
+            return self._serialize_report(report)
             
         except HTTPException:
             raise
@@ -261,7 +314,7 @@ class EODService:
             response = self.supabase.table(Tables.EOD).select("*").eq("outlet_id", outlet_id).eq("date", report_date).execute()
             
             if response.data:
-                report = EnhancedDailyReport(**response.data[0])
+                report = self._serialize_report(response.data[0])
                 return EODExistsResponse(
                     exists=True,
                     report=report,

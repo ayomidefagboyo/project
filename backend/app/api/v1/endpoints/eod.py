@@ -125,8 +125,15 @@ async def create_eod_report(
         if not user_id:
             raise HTTPException(status_code=400, detail="User ID not found")
 
+        actor_id = (
+            str(current_user.get('staff_profile_id') or '').strip()
+            or str(user_id or '').strip()
+        )
+        if not actor_id:
+            raise HTTPException(status_code=400, detail="Actor ID not found")
+
         logger.info(f"Creating EOD report for outlet {outlet_id}, user {user_id}")
-        report = await eod_service.create_eod_report(eod_data, outlet_id, user_id)
+        report = await eod_service.create_eod_report(eod_data, outlet_id, actor_id)
 
         report_id = getattr(report, "id", None)
         if not report_id and isinstance(report, dict):

@@ -85,6 +85,7 @@ class EnhancedDailyReport(EODData):
     gross_margin_percent: float = Field(..., description="Gross margin percentage")
     discrepancies: Optional[Dict[str, Any]] = Field(None, description="Discrepancy details")
     submitted_by: str = Field(..., description="User who submitted the report")
+    created_by: Optional[str] = Field(None, description="Display name of the actor who submitted the report")
     submitted_at: Optional[datetime] = Field(None, description="Submission timestamp")
     approved_by: Optional[str] = Field(None, description="User who approved the report")
     approved_at: Optional[datetime] = Field(None, description="Approval timestamp")
