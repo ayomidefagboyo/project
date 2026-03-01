@@ -226,6 +226,7 @@ const Dashboard: React.FC = () => {
   const [businessType, setBusinessType] = useState<'supermarket' | 'restaurant' | 'lounge' | 'retail' | 'cafe'>('retail');
   const [dashboardOverview, setDashboardOverview] = useState<DashboardOverviewResponse | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showTopProductsModal, setShowTopProductsModal] = useState(false);
   const dashboardOverviewCacheRef = useRef<Record<string, DashboardOverviewResponse>>({});
 
   const syncOverviewState = (overview: DashboardOverviewResponse) => {
@@ -1039,7 +1040,8 @@ const Dashboard: React.FC = () => {
     (dashboardOverview?.inventory_alerts.out_of_stock_count || 0) +
     (dashboardOverview?.inventory_alerts.expiring_count || 0);
   const activeRangeLabel = currentDateRange.label;
-  const visibleTopProducts = (dashboardOverview?.top_products || []).slice(0, 4);
+  const allTopProducts = dashboardOverview?.top_products || [];
+  const visibleTopProducts = allTopProducts.slice(0, 4);
 
   const unpaidInvoices = dashboardInvoices.filter((invoice) => {
     const paymentStatus = String(invoice.payment_status || invoice.status || '').toLowerCase();
@@ -1411,9 +1413,11 @@ const Dashboard: React.FC = () => {
                       Best-selling items for {activeRangeLabel.toLowerCase()}.
                     </p>
                   </div>
-                  <Button variant="outline" size="sm" onClick={() => navigate('/dashboard/products')}>
-                    View catalog
-                  </Button>
+                  {allTopProducts.length > 4 && (
+                    <Button variant="outline" size="sm" onClick={() => setShowTopProductsModal(true)}>
+                      View more
+                    </Button>
+                  )}
                 </div>
                 <div className="mt-5 space-y-3">
                   {visibleTopProducts.length > 0 ? (
@@ -1514,6 +1518,47 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
       </div>
+      {showTopProductsModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+          onClick={() => setShowTopProductsModal(false)}
+        >
+          <div
+            className="w-full max-w-2xl rounded-2xl bg-white p-4 sm:p-6 shadow-2xl dark:bg-gray-800"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-gray-100 pb-4 dark:border-gray-700">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Top Products</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Best-selling items for {activeRangeLabel.toLowerCase()}.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setShowTopProductsModal(false)}>
+                Close
+              </Button>
+            </div>
+            <div className="mt-4 max-h-[70vh] space-y-3 overflow-y-auto pr-1">
+              {allTopProducts.map((product, index) => (
+                <div
+                  key={`${product.name}-modal-${index}`}
+                  className="flex items-center justify-between gap-4 rounded-xl border border-gray-100 p-3 dark:border-gray-700"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{product.name}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {product.quantity.toLocaleString()} units sold
+                    </p>
+                  </div>
+                  <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                    {currencyService.formatCurrency(product.revenue)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
         </>
       )}
     </div>
