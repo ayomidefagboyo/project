@@ -126,6 +126,17 @@ interface DashboardOverviewResponse {
     cashier_name: string;
     item_count: number;
   }>;
+  recent_activity?: Array<{
+    id: string;
+    outlet_id: string;
+    user_id?: string | null;
+    user_name?: string | null;
+    action: string;
+    entity_type?: string | null;
+    entity_id?: string | null;
+    details: string;
+    timestamp: string;
+  }>;
   inventory_alerts: {
     low_stock_count: number;
     out_of_stock_count: number;
@@ -216,6 +227,44 @@ const Dashboard: React.FC = () => {
   const [dashboardOverview, setDashboardOverview] = useState<DashboardOverviewResponse | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const dashboardOverviewCacheRef = useRef<Record<string, DashboardOverviewResponse>>({});
+
+  const syncOverviewState = (overview: DashboardOverviewResponse) => {
+    setDashboardOverview(overview);
+    setDashboardInvoices([]);
+    setRecentActivities(
+      (overview.recent_activity || []).map((entry) => ({
+        id: entry.id,
+        outletId: entry.outlet_id,
+        userId: String(entry.user_id || ''),
+        userName: String(entry.user_name || 'System'),
+        action: String(entry.action || 'view'),
+        entityType: String(entry.entity_type || 'sales') as AuditEntry['entityType'],
+        entityId: String(entry.entity_id || ''),
+        details: String(entry.details || ''),
+        timestamp: String(entry.timestamp || ''),
+      }))
+    );
+    setEodStats({
+      total_sales: overview.sales_summary.revenue,
+    });
+    setInvoiceStatsSummary({ total: 0, unpaidCount: 0, unpaidAmount: 0, paidCount: 0 });
+    setOperatingExpensesByOutlet({});
+    setFinancialSummary({
+      operatingExpenses: 0,
+      inventoryCost: 0,
+      paidProcurement: 0,
+      netProfit: overview.sales_summary.revenue,
+    });
+    setSalesChange(
+      buildPercentChange(
+        overview.sales_summary.revenue,
+        overview.sales_summary.previous_revenue,
+        false
+      )
+    );
+    setExpenseChange(undefined);
+    setProfitChange(undefined);
+  };
 
   const toggleOutletSelector = () => {
     if (!isOutletSelectorOpen) {
@@ -733,7 +782,7 @@ const Dashboard: React.FC = () => {
       const cachedOverview = dashboardOverviewCacheRef.current[cacheKey];
 
       if (cachedOverview) {
-        setDashboardOverview(cachedOverview);
+        syncOverviewState(cachedOverview);
         setLoading(false);
         setIsRefreshing(true);
       } else {
@@ -752,29 +801,7 @@ const Dashboard: React.FC = () => {
       }
 
       dashboardOverviewCacheRef.current[cacheKey] = response.data;
-      setDashboardOverview(response.data);
-      setDashboardInvoices([]);
-      setRecentActivities([]);
-      setEodStats({
-        total_sales: response.data.sales_summary.revenue,
-      });
-      setInvoiceStatsSummary({ total: 0, unpaidCount: 0, unpaidAmount: 0, paidCount: 0 });
-      setOperatingExpensesByOutlet({});
-      setFinancialSummary({
-        operatingExpenses: 0,
-        inventoryCost: 0,
-        paidProcurement: 0,
-        netProfit: response.data.sales_summary.revenue,
-      });
-      setSalesChange(
-        buildPercentChange(
-          response.data.sales_summary.revenue,
-          response.data.sales_summary.previous_revenue,
-          false
-        )
-      );
-      setExpenseChange(undefined);
-      setProfitChange(undefined);
+      syncOverviewState(response.data);
 
     } catch (err) {
       console.error('Error loading dashboard data:', err);
@@ -1402,31 +1429,6 @@ const Dashboard: React.FC = () => {
               </div>
 
               <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
-                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Payment Breakdown</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  Cash, POS, transfer, mobile, and credit collections for the selected range.
-                </p>
-                <div className="mt-5 space-y-3">
-                  {Object.entries(dashboardOverview?.payment_breakdown || {}).map(([method, amount]) => {
-                    const total = overviewSales || 1;
-                    const widthPercent = Math.max(4, Math.min(100, (Number(amount || 0) / total) * 100));
-
-                    return (
-                      <div key={method} className="space-y-1">
-                        <div className="flex items-center justify-between gap-3 text-sm">
-                          <span className="font-medium text-gray-700 dark:text-gray-200 capitalize">{method}</span>
-                          <span className="text-gray-900 dark:text-white">{currencyService.formatCurrency(Number(amount || 0))}</span>
-                        </div>
-                        <div className="h-2 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
-                          <div className="h-full rounded-full bg-gray-900 dark:bg-white" style={{ width: `${widthPercent}%` }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Top Products</h2>
@@ -1461,36 +1463,17 @@ const Dashboard: React.FC = () => {
 
           <div className="space-y-6">
             <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Transactions</h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Quick access to the latest completed sales.</p>
-              <div className="mt-5 space-y-3">
-                {(dashboardOverview?.recent_transactions || []).length > 0 ? (
-                  (dashboardOverview?.recent_transactions || []).map((transaction) => (
-                    <div key={transaction.id} className="rounded-xl border border-gray-100 dark:border-gray-700 p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                            {transaction.transaction_number || transaction.id}
-                          </p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            {transaction.cashier_name} • {transaction.item_count} item{transaction.item_count === 1 ? '' : 's'}
-                          </p>
-                        </div>
-                        <span className="text-xs uppercase text-gray-500 dark:text-gray-400">{transaction.payment_method}</span>
-                      </div>
-                      <div className="mt-3 flex items-center justify-between gap-3">
-                        <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                          {currencyService.formatCurrency(transaction.total_amount)}
-                        </span>
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                          {transaction.transaction_date ? new Date(transaction.transaction_date).toLocaleString() : 'N/A'}
-                        </span>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">No recent transactions in the selected range.</p>
-                )}
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Activity</h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Latest audited actions across the selected outlet scope.</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => navigate('/dashboard/audit-trail')}>
+                  View all
+                </Button>
+              </div>
+              <div className="mt-5">
+                <RecentActivity activities={recentActivities} />
               </div>
             </div>
 

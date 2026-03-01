@@ -186,13 +186,16 @@ def _get_dashboard_transactions(
             "product_id,product_name,quantity,line_total)"
         )
         .eq("status", "completed")
-        .neq("is_voided", True)
         .gte("transaction_date", f"{date_from.isoformat()}T00:00:00")
         .lte("transaction_date", f"{date_to.isoformat()}T23:59:59")
     )
     query = _apply_outlet_filter(query, outlet_ids)
     result = query.order("transaction_date", desc=True).execute()
-    return result.data or []
+    return [
+        row
+        for row in (result.data or [])
+        if row.get("is_voided") is not True
+    ]
 
 
 def _get_dashboard_inventory_products(supabase, outlet_ids: List[str]) -> List[Dict[str, Any]]:
@@ -205,8 +208,12 @@ def _get_dashboard_inventory_products(supabase, outlet_ids: List[str]) -> List[D
     try:
         query = supabase.table(Tables.POS_PRODUCTS).select(select_with_expiry)
         query = _apply_outlet_filter(query, outlet_ids)
-        result = query.eq("is_active", True).execute()
-        return result.data or []
+        result = query.execute()
+        return [
+            row
+            for row in (result.data or [])
+            if row.get("is_active") is not False
+        ]
     except Exception as exc:
         if not _is_missing_column_error(exc, Tables.POS_PRODUCTS, "expiry_date"):
             raise
@@ -216,8 +223,30 @@ def _get_dashboard_inventory_products(supabase, outlet_ids: List[str]) -> List[D
         )
         fallback_query = supabase.table(Tables.POS_PRODUCTS).select(select_without_expiry)
         fallback_query = _apply_outlet_filter(fallback_query, outlet_ids)
-        fallback_result = fallback_query.eq("is_active", True).execute()
-        return fallback_result.data or []
+        fallback_result = fallback_query.execute()
+        return [
+            row
+            for row in (fallback_result.data or [])
+            if row.get("is_active") is not False
+        ]
+
+
+def _get_dashboard_recent_activity(supabase, outlet_ids: List[str]) -> List[Dict[str, Any]]:
+    if not outlet_ids:
+        return []
+
+    try:
+        query = supabase.table(Tables.AUDIT_ENTRIES).select(
+            "id,outlet_id,user_id,user_name,action,entity_type,entity_id,details,timestamp"
+        )
+        query = _apply_outlet_filter(query, outlet_ids)
+        result = query.order("timestamp", desc=True).limit(4).execute()
+        return result.data or []
+    except Exception as exc:
+        if _is_missing_table_error(exc, Tables.AUDIT_ENTRIES):
+            return []
+        logger.warning("Failed to load audit activity for dashboard overview: %s", exc)
+        return []
 
 
 def _build_dashboard_insights(
@@ -297,6 +326,7 @@ async def get_dashboard_overview(
         current_transactions = _get_dashboard_transactions(supabase, resolved_outlet_ids, current_from, current_to)
         previous_transactions = _get_dashboard_transactions(supabase, resolved_outlet_ids, previous_from, previous_to)
         inventory_products = _get_dashboard_inventory_products(supabase, resolved_outlet_ids)
+        recent_activity = _get_dashboard_recent_activity(supabase, resolved_outlet_ids)
 
         total_revenue = sum(float(tx.get("total_amount", 0) or 0) for tx in current_transactions)
         total_transactions = len(current_transactions)
@@ -427,6 +457,7 @@ async def get_dashboard_overview(
             "payment_breakdown": {key: round(value, 2) for key, value in payment_breakdown.items()},
             "top_products": top_products,
             "recent_transactions": recent_transactions,
+            "recent_activity": recent_activity,
             "inventory_alerts": {
                 "low_stock_count": len(low_stock_items),
                 "out_of_stock_count": out_of_stock_count,
