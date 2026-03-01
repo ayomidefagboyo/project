@@ -1402,118 +1402,112 @@ const Dashboard: React.FC = () => {
         </div>
 
         {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
-          <div className="lg:col-span-2">
-            <div className="space-y-6">
-              <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Top Products</h2>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                      Best-selling items for {activeRangeLabel.toLowerCase()}.
-                    </p>
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 sm:gap-6 lg:gap-8">
+          <div className="xl:col-span-7 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Top Products</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  Best-selling items for {activeRangeLabel.toLowerCase()}.
+                </p>
+              </div>
+              {allTopProducts.length > 4 && (
+                <Button variant="outline" size="sm" onClick={() => setShowTopProductsModal(true)}>
+                  View more
+                </Button>
+              )}
+            </div>
+            <div className="mt-5 space-y-3">
+              {visibleTopProducts.length > 0 ? (
+                visibleTopProducts.map((product, index) => (
+                  <div key={`${product.name}-${index}`} className="flex items-center justify-between gap-4 rounded-xl border border-gray-100 dark:border-gray-700 p-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{product.name}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{product.quantity.toLocaleString()} units sold</p>
+                    </div>
+                    <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                      {currencyService.formatCurrency(product.revenue)}
+                    </span>
                   </div>
-                  {allTopProducts.length > 4 && (
-                    <Button variant="outline" size="sm" onClick={() => setShowTopProductsModal(true)}>
-                      View more
-                    </Button>
-                  )}
+                ))
+              ) : (
+                <p className="text-sm text-gray-500 dark:text-gray-400">No product sales recorded for this range.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="xl:col-span-5 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Activity</h2>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Latest audited actions across the selected outlet scope.</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => navigate('/dashboard/audit-trail')}>
+                View all
+              </Button>
+            </div>
+            <div className="mt-5">
+              <RecentActivity activities={recentActivities} />
+            </div>
+          </div>
+
+          <div className="xl:col-span-7 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Compazz Insights</h2>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">AI-style operational trends, anomalies, and recommendations.</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => navigate('/dashboard/ai-assistant')}>
+                Open
+              </Button>
+            </div>
+            <div className="mt-5 space-y-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Highlights</p>
+                <div className="space-y-2">
+                  {(dashboardOverview?.compazz_insights.highlights || []).map((insight, index) => (
+                    <div key={index} className="rounded-xl bg-gray-50 dark:bg-gray-900/40 p-3 text-sm text-gray-700 dark:text-gray-200">
+                      {insight}
+                    </div>
+                  ))}
                 </div>
-                <div className="mt-5 space-y-3">
-                  {visibleTopProducts.length > 0 ? (
-                    visibleTopProducts.map((product, index) => (
-                      <div key={`${product.name}-${index}`} className="flex items-center justify-between gap-4 rounded-xl border border-gray-100 dark:border-gray-700 p-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{product.name}</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{product.quantity.toLocaleString()} units sold</p>
-                        </div>
-                        <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                          {currencyService.formatCurrency(product.revenue)}
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-gray-500 dark:text-gray-400">No product sales recorded for this range.</p>
-                  )}
-                </div>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Recommended Actions</p>
+                <ul className="space-y-2">
+                  {(dashboardOverview?.compazz_insights.recommendations || []).map((recommendation, index) => (
+                    <li key={index} className="rounded-xl border border-gray-100 dark:border-gray-700 p-3 text-sm text-gray-700 dark:text-gray-200">
+                      {recommendation}
+                    </li>
+                  ))}
+                </ul>
               </div>
             </div>
           </div>
 
-          <div className="space-y-6">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Activity</h2>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Latest audited actions across the selected outlet scope.</p>
+          <div className="xl:col-span-5 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Inventory Alerts</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Low-stock and expiring product warnings.</p>
+            <div className="mt-5 space-y-3">
+              {(dashboardOverview?.inventory_alerts.low_stock_items || []).map((item) => (
+                <div key={item.id} className="rounded-xl border border-gray-100 dark:border-gray-700 p-3">
+                  <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{item.name}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    {item.quantity_on_hand} on hand • reorder at {item.reorder_level}
+                  </p>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => navigate('/dashboard/audit-trail')}>
-                  View all
-                </Button>
-              </div>
-              <div className="mt-5">
-                <RecentActivity activities={recentActivities} />
-              </div>
-            </div>
-
-            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Inventory Alerts</h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Low-stock and expiring product warnings.</p>
-              <div className="mt-5 space-y-3">
-                {(dashboardOverview?.inventory_alerts.low_stock_items || []).map((item) => (
-                  <div key={item.id} className="rounded-xl border border-gray-100 dark:border-gray-700 p-3">
-                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{item.name}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      {item.quantity_on_hand} on hand • reorder at {item.reorder_level}
-                    </p>
-                  </div>
-                ))}
-                {(dashboardOverview?.inventory_alerts.expiring_items || []).map((item) => (
-                  <div key={item.id} className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-900/10 p-3">
-                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{item.name}</p>
-                    <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
-                      Expires in {item.days_to_expiry} day{item.days_to_expiry === 1 ? '' : 's'}
-                    </p>
-                  </div>
-                ))}
-                {overviewInventoryAlertCount === 0 && (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">No current inventory alerts for this range.</p>
-                )}
-              </div>
-            </div>
-
-            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Compazz Insights</h2>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">AI-style operational trends, anomalies, and recommendations.</p>
+              ))}
+              {(dashboardOverview?.inventory_alerts.expiring_items || []).map((item) => (
+                <div key={item.id} className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-900/10 p-3">
+                  <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{item.name}</p>
+                  <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                    Expires in {item.days_to_expiry} day{item.days_to_expiry === 1 ? '' : 's'}
+                  </p>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => navigate('/dashboard/ai-assistant')}>
-                  Open
-                </Button>
-              </div>
-              <div className="mt-5 space-y-4">
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Highlights</p>
-                  <div className="space-y-2">
-                    {(dashboardOverview?.compazz_insights.highlights || []).map((insight, index) => (
-                      <div key={index} className="rounded-xl bg-gray-50 dark:bg-gray-900/40 p-3 text-sm text-gray-700 dark:text-gray-200">
-                        {insight}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Recommended Actions</p>
-                  <ul className="space-y-2">
-                    {(dashboardOverview?.compazz_insights.recommendations || []).map((recommendation, index) => (
-                      <li key={index} className="rounded-xl border border-gray-100 dark:border-gray-700 p-3 text-sm text-gray-700 dark:text-gray-200">
-                        {recommendation}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
+              ))}
+              {overviewInventoryAlertCount === 0 && (
+                <p className="text-sm text-gray-500 dark:text-gray-400">No current inventory alerts for this range.</p>
+              )}
             </div>
           </div>
         </div>
