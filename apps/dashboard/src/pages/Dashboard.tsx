@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   FileText, 
@@ -96,6 +96,62 @@ interface DashboardFinancialSummary {
   netProfit: number;
 }
 
+interface DashboardOverviewResponse {
+  outlet_ids: string[];
+  date_range: {
+    from: string;
+    to: string;
+    previous_from: string;
+    previous_to: string;
+  };
+  sales_summary: {
+    revenue: number;
+    transaction_count: number;
+    average_transaction_value: number;
+    previous_revenue: number;
+  };
+  payment_breakdown: Record<string, number>;
+  top_products: Array<{
+    name: string;
+    quantity: number;
+    revenue: number;
+  }>;
+  recent_transactions: Array<{
+    id: string;
+    transaction_number: string;
+    outlet_id: string;
+    total_amount: number;
+    payment_method: string;
+    transaction_date: string;
+    cashier_name: string;
+    item_count: number;
+  }>;
+  inventory_alerts: {
+    low_stock_count: number;
+    out_of_stock_count: number;
+    expiring_count: number;
+    low_stock_items: Array<{
+      id: string;
+      name: string;
+      outlet_id: string;
+      quantity_on_hand: number;
+      reorder_level: number;
+    }>;
+    expiring_items: Array<{
+      id: string;
+      name: string;
+      outlet_id: string;
+      expiry_date: string;
+      days_to_expiry: number;
+    }>;
+  };
+  compazz_insights: {
+    highlights: string[];
+    recommendations: string[];
+    anomaly_count: number;
+  };
+}
+
 const DASHBOARD_INVOICE_PAGE_SIZE = 100;
 const EMPTY_FINANCIAL_SUMMARY: DashboardFinancialSummary = {
   operatingExpenses: 0,
@@ -146,6 +202,8 @@ const Dashboard: React.FC = () => {
   const [selectedDateRange, setSelectedDateRange] = useState('this_month');
   const [customDateFrom, setCustomDateFrom] = useState('');
   const [customDateTo, setCustomDateTo] = useState('');
+  const [appliedCustomDateFrom, setAppliedCustomDateFrom] = useState('');
+  const [appliedCustomDateTo, setAppliedCustomDateTo] = useState('');
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
   const [isOutletSelectorOpen, setIsOutletSelectorOpen] = useState(false);
   const [outletSelectionDraft, setOutletSelectionDraft] = useState<string[]>([]);
@@ -155,6 +213,9 @@ const Dashboard: React.FC = () => {
   const [trialDaysRemaining, setTrialDaysRemaining] = useState(0);
   const [outletName, setOutletName] = useState('');
   const [businessType, setBusinessType] = useState<'supermarket' | 'restaurant' | 'lounge' | 'retail' | 'cafe'>('retail');
+  const [dashboardOverview, setDashboardOverview] = useState<DashboardOverviewResponse | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const dashboardOverviewCacheRef = useRef<Record<string, DashboardOverviewResponse>>({});
 
   const toggleOutletSelector = () => {
     if (!isOutletSelectorOpen) {
@@ -427,8 +488,8 @@ const Dashboard: React.FC = () => {
 
       case 'custom':
         return {
-          from: customDateFrom || today,
-          to: customDateTo || today,
+          from: appliedCustomDateFrom || today,
+          to: appliedCustomDateTo || today,
           label: 'Custom range'
         };
 
@@ -659,174 +720,68 @@ const Dashboard: React.FC = () => {
 
   const loadDashboardData = async () => {
     try {
-      setLoading(true);
       setError(null);
 
       const outletIds = dashboardView.selectedOutlets;
       if (outletIds.length === 0) {
-        setDashboardInvoices([]);
-        setRecentActivities([]);
-        setEodStats(null);
-        setFinancialSummary(EMPTY_FINANCIAL_SUMMARY);
-        setOperatingExpensesByOutlet({});
-        setSalesChange(undefined);
-        setExpenseChange(undefined);
-        setProfitChange(undefined);
-        setInvoiceStatsSummary({ total: 0, unpaidCount: 0, unpaidAmount: 0, paidCount: 0 });
+        setDashboardOverview(null);
         setLoading(false);
+        setIsRefreshing(false);
         return;
       }
+      const cacheKey = `${[...outletIds].sort().join(',')}|${currentDateRange.from}|${currentDateRange.to}`;
+      const cachedOverview = dashboardOverviewCacheRef.current[cacheKey];
 
-      let paidProcurement = 0;
-
-      // Load real vendor invoices from backend invoices endpoint.
-      try {
-        const invoiceResponses = await Promise.all(
-          outletIds.map((outletId) =>
-            fetchVendorInvoicesForOutlet(outletId, currentDateRange.from, currentDateRange.to)
-          )
-        );
-
-        const loadedInvoices = invoiceResponses
-          .flatMap((response) => response || []);
-
-        const sortedInvoices = [...loadedInvoices].sort((left, right) => {
-          const leftTs = new Date(String(left.created_at || left.issue_date || '')).getTime();
-          const rightTs = new Date(String(right.created_at || right.issue_date || '')).getTime();
-          return rightTs - leftTs;
-        });
-
-        paidProcurement = sortedInvoices.reduce((sum, invoice) => {
-          const paymentStatus = String(invoice.payment_status || invoice.status || '').toLowerCase();
-          return paymentStatus === 'paid' ? sum + normalizeMoney(invoice.total) : sum;
-        }, 0);
-
-        setDashboardInvoices(sortedInvoices);
-        updateInvoiceSummaryFromList(sortedInvoices);
-      } catch (invoiceError) {
-        console.warn('Failed to load dashboard invoices:', invoiceError);
-        setDashboardInvoices([]);
-        setInvoiceStatsSummary({ total: 0, unpaidCount: 0, unpaidAmount: 0, paidCount: 0 });
+      if (cachedOverview) {
+        setDashboardOverview(cachedOverview);
+        setLoading(false);
+        setIsRefreshing(true);
+      } else {
+        setLoading(true);
+        setIsRefreshing(false);
       }
 
-      // Load audit entries for live activity feed.
-      try {
-        const activityResponses = await Promise.all(
-          outletIds.map((outletId) =>
-            apiClient.get<DashboardAuditEntryResponse>('/audit/', {
-              outlet_id: outletId,
-              page: 1,
-              size: 30,
-              date_from: currentDateRange.from,
-              date_to: currentDateRange.to,
-            })
-          )
-        );
+      const response = await apiClient.get<DashboardOverviewResponse>('/reports/dashboard-overview', {
+        outlet_ids: outletIds.join(','),
+        date_from: currentDateRange.from,
+        date_to: currentDateRange.to,
+      });
 
-        const mappedActivities: AuditEntry[] = activityResponses
-          .filter((response) => !response.error && response.data)
-          .flatMap((response) => response.data?.items || [])
-          .map((entry) => ({
-            id: String(entry.id || ''),
-            outletId: String(entry.outlet_id || ''),
-            userId: String(entry.user_id || ''),
-            userName: String(entry.user_name || 'Unknown'),
-            action: String(entry.action || ''),
-            entityType: (String(entry.entity_type || 'report') as AuditEntry['entityType']),
-            entityId: String(entry.entity_id || ''),
-            details: String(entry.details || ''),
-            timestamp: String(entry.timestamp || ''),
-          }))
-          .sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime())
-          .slice(0, 4);
-
-        setRecentActivities(mappedActivities);
-      } catch (activityError) {
-        console.warn('Failed to load dashboard activity feed:', activityError);
-        setRecentActivities([]);
+      if (response.error || !response.data) {
+        throw new Error(response.error || 'Failed to load dashboard overview');
       }
 
-      // Load EOD statistics for current and previous period.
-      try {
-        const previousRange = getPreviousDateRange(currentDateRange.from, currentDateRange.to);
-
-        const [
-          currentStatsResponses,
-          previousStatsResponses,
-          currentOperatingExpensesByOutlet,
-          previousOperatingExpensesByOutlet,
-        ] = await Promise.all([
-          Promise.all(
-            outletIds.map((outletId) =>
-              eodService.getEODStats(currentDateRange.from, currentDateRange.to, outletId)
-            )
-          ),
-          Promise.all(
-            outletIds.map((outletId) =>
-              eodService.getEODStats(previousRange.from, previousRange.to, outletId)
-            )
-          ),
-          fetchOperatingExpenseTotalsByOutlet(outletIds, currentDateRange.from, currentDateRange.to),
-          fetchOperatingExpenseTotalsByOutlet(outletIds, previousRange.from, previousRange.to),
-        ]);
-
-        const aggregateStatsResponse = (responses: Array<{ data: any | null; error: string | null }>) => {
-          const validStats = responses
-            .filter((response) => !response.error && response.data)
-            .map((response) => response.data as NonNullable<typeof response.data>);
-          if (!validStats.length) return null;
-          if (validStats.length === 1) return validStats[0];
-          return aggregateEodStats(validStats);
-        };
-
-        const currentStats = aggregateStatsResponse(currentStatsResponses);
-        const previousStats = aggregateStatsResponse(previousStatsResponses);
-        const currentOperatingExpenses = Object.values(currentOperatingExpensesByOutlet).reduce(
-          (sum, amount) => sum + normalizeMoney(amount),
-          0
-        );
-        const previousOperatingExpenses = Object.values(previousOperatingExpensesByOutlet).reduce(
-          (sum, amount) => sum + normalizeMoney(amount),
-          0
-        );
-
-        setEodStats(currentStats);
-        setOperatingExpensesByOutlet(currentOperatingExpensesByOutlet);
-        const currentSales = normalizeMoney(currentStats?.total_sales);
-        const previousSales = normalizeMoney(previousStats?.total_sales);
-        const currentInventoryCost = normalizeMoney(currentStats?.total_expenses);
-        const previousInventoryCost = normalizeMoney(previousStats?.total_expenses);
-        const currentProfit = currentSales - currentInventoryCost - currentOperatingExpenses;
-        const previousProfit = previousSales - previousInventoryCost - previousOperatingExpenses;
-
-        setFinancialSummary({
-          operatingExpenses: currentOperatingExpenses,
-          inventoryCost: currentInventoryCost,
-          paidProcurement,
-          netProfit: currentProfit,
-        });
-
-        setSalesChange(buildPercentChange(currentSales, previousSales, false));
-        setExpenseChange(buildPercentChange(currentOperatingExpenses, previousOperatingExpenses, true));
-        setProfitChange(buildPercentChange(currentProfit, previousProfit, false));
-      } catch (eodError) {
-        console.warn('Error loading EOD stats:', eodError);
-        setEodStats(null);
-        setFinancialSummary({
-          ...EMPTY_FINANCIAL_SUMMARY,
-          paidProcurement,
-        });
-        setOperatingExpensesByOutlet({});
-        setSalesChange(undefined);
-        setExpenseChange(undefined);
-        setProfitChange(undefined);
-      }
+      dashboardOverviewCacheRef.current[cacheKey] = response.data;
+      setDashboardOverview(response.data);
+      setDashboardInvoices([]);
+      setRecentActivities([]);
+      setEodStats({
+        total_sales: response.data.sales_summary.revenue,
+      });
+      setInvoiceStatsSummary({ total: 0, unpaidCount: 0, unpaidAmount: 0, paidCount: 0 });
+      setOperatingExpensesByOutlet({});
+      setFinancialSummary({
+        operatingExpenses: 0,
+        inventoryCost: 0,
+        paidProcurement: 0,
+        netProfit: response.data.sales_summary.revenue,
+      });
+      setSalesChange(
+        buildPercentChange(
+          response.data.sales_summary.revenue,
+          response.data.sales_summary.previous_revenue,
+          false
+        )
+      );
+      setExpenseChange(undefined);
+      setProfitChange(undefined);
 
     } catch (err) {
       console.error('Error loading dashboard data:', err);
       setError('Failed to load dashboard data');
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
   };
 
@@ -834,7 +789,7 @@ const Dashboard: React.FC = () => {
     if (dashboardView.selectedOutlets.length > 0) {
       loadDashboardData();
     }
-  }, [dashboardView.selectedOutlets, selectedDateRange, customDateFrom, customDateTo]);
+  }, [dashboardView.selectedOutlets, selectedDateRange, appliedCustomDateFrom, appliedCustomDateTo]);
 
   // Check subscription status (Stripe-managed)
   const checkSubscriptionStatus = async () => {
@@ -943,6 +898,10 @@ const Dashboard: React.FC = () => {
   // Export report functionality
   const handleExportReport = () => {
     try {
+      if (!dashboardOverview) {
+        return;
+      }
+
       const reportData = {
         generatedAt: new Date().toISOString(),
         outlets: selectedOutletNames,
@@ -951,23 +910,14 @@ const Dashboard: React.FC = () => {
           endDate: currentDateRange.to
         },
         metrics: {
-          totalSales: eodStats?.total_sales || 0,
-          totalExpenses: metrics.operatingExpenses,
-          inventoryCost: metrics.inventoryCost,
-          paidProcurement: metrics.paidProcurement,
-          netProfit: metrics.netProfit,
-          pendingInvoices: metrics.pendingInvoices,
-          approvedInvoices: metrics.approvedInvoices,
-          totalInvoices: metrics.totalInvoices
+          totalSales: dashboardOverview.sales_summary.revenue || 0,
+          transactionCount: dashboardOverview.sales_summary.transaction_count || 0,
+          averageTransactionValue: dashboardOverview.sales_summary.average_transaction_value || 0,
+          lowStockCount: dashboardOverview.inventory_alerts.low_stock_count || 0,
+          expiringCount: dashboardOverview.inventory_alerts.expiring_count || 0,
         },
-        invoices: dashboardInvoices.map((invoice) => ({
-          id: invoice.id,
-          vendor: invoice.vendor_id ? `Vendor ${String(invoice.vendor_id).slice(0, 8)}` : 'N/A',
-          amount: normalizeMoney(invoice.total),
-          status: invoice.status || 'Unknown',
-          date: invoice.created_at || invoice.issue_date || '',
-          outlet: userOutlets.find((outlet) => outlet.id === invoice.outlet_id)?.name
-        }))
+        topProducts: dashboardOverview.top_products,
+        recentTransactions: dashboardOverview.recent_transactions,
       };
 
       // Create and download CSV
@@ -992,27 +942,32 @@ const Dashboard: React.FC = () => {
     const headers = ['Metric', 'Value', 'Outlet'];
     const rows = [
       ['Total Sales', `$${data.metrics.totalSales.toLocaleString()}`, data.outlets.join('; ')],
-      ['Operating Expenses', `$${data.metrics.totalExpenses.toLocaleString()}`, data.outlets.join('; ')],
-      ['Inventory Cost (COGS)', `$${(data.metrics.inventoryCost || 0).toLocaleString()}`, data.outlets.join('; ')],
-      ['Paid Procurement', `$${(data.metrics.paidProcurement || 0).toLocaleString()}`, data.outlets.join('; ')],
-      ['Net Profit', `$${data.metrics.netProfit.toLocaleString()}`, data.outlets.join('; ')],
-      ['Pending Invoices', data.metrics.pendingInvoices.toString(), data.outlets.join('; ')],
-      ['Approved Invoices', data.metrics.approvedInvoices.toString(), data.outlets.join('; ')],
-      ['Total Invoices', data.metrics.totalInvoices.toString(), data.outlets.join('; ')],
+      ['Transaction Count', data.metrics.transactionCount.toString(), data.outlets.join('; ')],
+      ['Average Transaction Value', `$${data.metrics.averageTransactionValue.toLocaleString()}`, data.outlets.join('; ')],
+      ['Low Stock Items', data.metrics.lowStockCount.toString(), data.outlets.join('; ')],
+      ['Expiring Soon Items', data.metrics.expiringCount.toString(), data.outlets.join('; ')],
       [''], // Empty row
-      ['Invoice Details', '', ''],
-      ['Invoice ID', 'Vendor', 'Amount', 'Status', 'Date', 'Outlet']
+      ['Top Products', '', ''],
+      ['Name', 'Units', 'Revenue']
     ];
 
-    // Add invoice details
-    data.invoices.forEach((invoice: any) => {
+    data.topProducts.forEach((product: any) => {
       rows.push([
-        invoice.id,
-        invoice.vendor || 'N/A',
-        `$${(invoice.amount || 0).toLocaleString()}`,
-        invoice.status || 'Unknown',
-        new Date(invoice.date).toLocaleDateString(),
-        invoice.outlet || 'N/A'
+        product.name || 'N/A',
+        String(product.quantity || 0),
+        `$${(product.revenue || 0).toLocaleString()}`
+      ]);
+    });
+
+    rows.push([''], ['Recent Transactions', '', ''], ['Transaction #', 'Amount', 'Payment', 'Cashier', 'Date']);
+
+    data.recentTransactions.forEach((transaction: any) => {
+      rows.push([
+        transaction.transaction_number || transaction.id || 'N/A',
+        `$${(transaction.total_amount || 0).toLocaleString()}`,
+        transaction.payment_method || 'N/A',
+        transaction.cashier_name || 'Unknown',
+        transaction.transaction_date ? new Date(transaction.transaction_date).toLocaleDateString() : 'N/A',
       ]);
     });
 
@@ -1048,6 +1003,14 @@ const Dashboard: React.FC = () => {
     selectedOutletNames.length > 0
       ? selectedOutletNames.join(', ')
       : currentOutlet?.name || 'All locations';
+
+  const overviewSales = dashboardOverview?.sales_summary.revenue || 0;
+  const overviewTransactionCount = dashboardOverview?.sales_summary.transaction_count || 0;
+  const overviewAverageTransaction = dashboardOverview?.sales_summary.average_transaction_value || 0;
+  const overviewInventoryAlertCount =
+    (dashboardOverview?.inventory_alerts.low_stock_count || 0) +
+    (dashboardOverview?.inventory_alerts.out_of_stock_count || 0) +
+    (dashboardOverview?.inventory_alerts.expiring_count || 0);
 
   const unpaidInvoices = dashboardInvoices.filter((invoice) => {
     const paymentStatus = String(invoice.payment_status || invoice.status || '').toLowerCase();
@@ -1198,7 +1161,7 @@ const Dashboard: React.FC = () => {
                   onClick={() => setShowCustomDatePicker(!showCustomDatePicker)}
                 >
                   <Calendar className="w-4 h-4" />
-                  <span>{getDateRangeLabel(selectedDateRange, customDateFrom, customDateTo)}</span>
+                  <span>{getDateRangeLabel(selectedDateRange, appliedCustomDateFrom, appliedCustomDateTo)}</span>
                   <ChevronDown className={`w-4 h-4 transition-transform ${showCustomDatePicker ? 'rotate-180' : ''}`} />
                 </Button>
 
@@ -1266,7 +1229,11 @@ const Dashboard: React.FC = () => {
                         <div className="flex justify-end pt-2 border-t border-gray-200 dark:border-gray-600">
                           <Button
                             size="sm"
-                            onClick={() => setShowCustomDatePicker(false)}
+                            onClick={() => {
+                              setAppliedCustomDateFrom(customDateFrom);
+                              setAppliedCustomDateTo(customDateTo);
+                              setShowCustomDatePicker(false);
+                            }}
                             className="bg-blue-600 hover:bg-blue-700 text-white"
                           >
                             Apply
@@ -1375,248 +1342,219 @@ const Dashboard: React.FC = () => {
         {/* Key Metrics Grid */}
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6 mb-8 sm:mb-12">
           <DashboardCard
-            title="Total Sales"
-            value={eodStats ? currencyService.formatCurrency(eodStats.total_sales) : currencyService.formatCurrency(0)}
+            title="Revenue"
+            value={currencyService.formatCurrency(overviewSales)}
             icon={<TrendingUp className="w-5 h-5" />}
-            subtitle={currentDateRange.label}
+            subtitle={`${currentDateRange.label}${isRefreshing ? ' • refreshing' : ''}`}
             change={salesChange}
             onClick={() => navigate('/dashboard/daily-reports')}
           />
           <DashboardCard
-            title="Operating Spend"
-            value={currencyService.formatCurrency(financialSummary.operatingExpenses)}
+            title="Transactions"
+            value={overviewTransactionCount.toLocaleString()}
+            icon={<Activity className="w-5 h-5" />}
+            subtitle="Completed sales in range"
+          />
+          <DashboardCard
+            title="Average Sale"
+            value={currencyService.formatCurrency(overviewAverageTransaction)}
             icon={<CreditCard className="w-5 h-5" />}
-            subtitle={`${currentDateRange.label} • manual expenses only`}
-            change={expenseChange}
-            onClick={() => navigate('/dashboard/expenses')}
+            subtitle="Average transaction value"
           />
           <DashboardCard
-            title="Unpaid Invoices"
-            value={invoiceStatsSummary.unpaidCount}
+            title="Inventory Alerts"
+            value={overviewInventoryAlertCount}
             icon={<AlertTriangle className="w-5 h-5" />}
-            subtitle={`${currencyService.formatCurrency(invoiceStatsSummary.unpaidAmount)} outstanding`}
-            onClick={() => navigate('/dashboard/invoices')}
-          />
-          <DashboardCard
-            title="Net Profit"
-            value={currencyService.formatCurrency(financialSummary.netProfit)}
-            icon={<BarChart3 className="w-5 h-5" />}
-            subtitle={`After COGS ${currencyService.formatCurrency(financialSummary.inventoryCost)}`}
-            change={profitChange}
-            onClick={() => navigate('/dashboard/daily-reports')}
+            subtitle={`${dashboardOverview?.inventory_alerts.low_stock_count || 0} low stock • ${dashboardOverview?.inventory_alerts.expiring_count || 0} expiring`}
+            onClick={() => navigate('/dashboard/products')}
           />
         </div>
 
         {/* Main Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
-          {/* Recent Vendor Invoices */}
           <div className="lg:col-span-2">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700">
-              <div className="p-4 sm:p-6 border-b border-gray-100 dark:border-gray-700">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <div>
-                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Recent Invoices</h2>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                      Latest vendor invoices requiring attention
+            <div className="space-y-6">
+              <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Sales Summary</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  Today's total revenue, transactions, and average transaction value for the selected period.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-5">
+                  <div className="rounded-xl bg-gray-50 dark:bg-gray-900/40 p-4">
+                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Revenue</p>
+                    <p className="mt-2 text-xl font-semibold text-gray-900 dark:text-white">
+                      {currencyService.formatCurrency(overviewSales)}
                     </p>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex items-center space-x-2 w-full sm:w-auto justify-center"
-                    onClick={() => navigate('/dashboard/invoices')}
-                  >
-                    <span>View all</span>
-                  </Button>
+                  <div className="rounded-xl bg-gray-50 dark:bg-gray-900/40 p-4">
+                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Transactions</p>
+                    <p className="mt-2 text-xl font-semibold text-gray-900 dark:text-white">
+                      {overviewTransactionCount.toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-gray-50 dark:bg-gray-900/40 p-4">
+                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Average</p>
+                    <p className="mt-2 text-xl font-semibold text-gray-900 dark:text-white">
+                      {currencyService.formatCurrency(overviewAverageTransaction)}
+                    </p>
+                  </div>
                 </div>
               </div>
-              
-              <div className="p-4 sm:p-6">
-                {invoicesRequiringAttention.length > 0 ? (
-                  <div className="space-y-3">
-                    {invoicesRequiringAttention.map((invoice) => {
-                      const paymentStatus = String(invoice.payment_status || invoice.status || 'unknown');
-                      const normalizedStatus = paymentStatus.toLowerCase();
-                      const isPaid = normalizedStatus === 'paid';
-                      const totalAmount = normalizeMoney(invoice.total);
-                      const issueDate = invoice.issue_date || invoice.created_at;
-                      const outletName =
-                        userOutlets.find((outlet) => outlet.id === invoice.outlet_id)?.name || 'Outlet';
-                      const itemCount = Array.isArray(invoice.invoice_items) ? invoice.invoice_items.length : 0;
 
-                      return (
-                        <button
-                          key={invoice.id}
-                          className="w-full rounded-xl border border-gray-200 dark:border-gray-700 p-3 sm:p-4 text-left hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors"
-                          onClick={() => navigate('/dashboard/invoices')}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
-                                {invoice.invoice_number || invoice.id}
-                              </p>
-                              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                {outletName} • {itemCount} item{itemCount === 1 ? '' : 's'}
-                              </p>
-                            </div>
-                            <span
-                              className={`text-xs font-medium px-2.5 py-1 rounded-full ${
-                                isPaid
-                                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                                  : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-                              }`}
-                            >
-                              {paymentStatus}
-                            </span>
-                          </div>
-                          <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                            <p className="text-sm text-gray-700 dark:text-gray-300">
-                              {currencyService.formatCurrency(totalAmount)}
-                            </p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                              {issueDate ? new Date(issueDate).toLocaleDateString() : 'No issue date'}
-                            </p>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-center py-12">
-                    <FileText className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No invoices yet</h3>
-                    <p className="text-gray-500 dark:text-gray-400 max-w-sm mx-auto">
-                      When you receive vendor invoices, they'll appear here for review and approval.
+              <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Payment Breakdown</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  Cash, POS, transfer, mobile, and credit collections for the selected range.
+                </p>
+                <div className="mt-5 space-y-3">
+                  {Object.entries(dashboardOverview?.payment_breakdown || {}).map(([method, amount]) => {
+                    const total = overviewSales || 1;
+                    const widthPercent = Math.max(4, Math.min(100, (Number(amount || 0) / total) * 100));
+
+                    return (
+                      <div key={method} className="space-y-1">
+                        <div className="flex items-center justify-between gap-3 text-sm">
+                          <span className="font-medium text-gray-700 dark:text-gray-200 capitalize">{method}</span>
+                          <span className="text-gray-900 dark:text-white">{currencyService.formatCurrency(Number(amount || 0))}</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
+                          <div className="h-full rounded-full bg-gray-900 dark:bg-white" style={{ width: `${widthPercent}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Top Products</h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      Best-selling items for the selected date range.
                     </p>
                   </div>
-                )}
+                  <Button variant="outline" size="sm" onClick={() => navigate('/dashboard/products')}>
+                    View catalog
+                  </Button>
+                </div>
+                <div className="mt-5 space-y-3">
+                  {(dashboardOverview?.top_products || []).length > 0 ? (
+                    (dashboardOverview?.top_products || []).map((product, index) => (
+                      <div key={`${product.name}-${index}`} className="flex items-center justify-between gap-4 rounded-xl border border-gray-100 dark:border-gray-700 p-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{product.name}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{product.quantity.toLocaleString()} units sold</p>
+                        </div>
+                        <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                          {currencyService.formatCurrency(product.revenue)}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">No product sales recorded for this range.</p>
+                  )}
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Activity Feed */}
-          <div className="space-y-8">
+          <div className="space-y-6">
             <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
-              <div className="flex items-center space-x-3 mb-6">
-                <div className="w-10 h-10 bg-green-50 dark:bg-green-900/20 rounded-xl flex items-center justify-center">
-                  <Activity className="w-5 h-5 text-green-600 dark:text-green-400" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Activity</h2>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Live updates</p>
-                </div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Transactions</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Quick access to the latest completed sales.</p>
+              <div className="mt-5 space-y-3">
+                {(dashboardOverview?.recent_transactions || []).length > 0 ? (
+                  (dashboardOverview?.recent_transactions || []).map((transaction) => (
+                    <div key={transaction.id} className="rounded-xl border border-gray-100 dark:border-gray-700 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                            {transaction.transaction_number || transaction.id}
+                          </p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            {transaction.cashier_name} • {transaction.item_count} item{transaction.item_count === 1 ? '' : 's'}
+                          </p>
+                        </div>
+                        <span className="text-xs uppercase text-gray-500 dark:text-gray-400">{transaction.payment_method}</span>
+                      </div>
+                      <div className="mt-3 flex items-center justify-between gap-3">
+                        <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                          {currencyService.formatCurrency(transaction.total_amount)}
+                        </span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          {transaction.transaction_date ? new Date(transaction.transaction_date).toLocaleString() : 'N/A'}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">No recent transactions in the selected range.</p>
+                )}
               </div>
-              
-              <RecentActivity
-                activities={recentActivities}
-                onViewAll={() => navigate('/dashboard/audit-trail')}
-              />
             </div>
 
-            {/* Quick Actions */}
             <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-6">Quick Actions</h2>
-              <div className="space-y-3">
-                <button className="w-full flex items-center space-x-3 p-4 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 text-left transition-colors">
-                  <div className="w-10 h-10 bg-blue-50 dark:bg-blue-900/20 rounded-xl flex items-center justify-center">
-                    <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Inventory Alerts</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Low-stock and expiring product warnings.</p>
+              <div className="mt-5 space-y-3">
+                {(dashboardOverview?.inventory_alerts.low_stock_items || []).map((item) => (
+                  <div key={item.id} className="rounded-xl border border-gray-100 dark:border-gray-700 p-3">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{item.name}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      {item.quantity_on_hand} on hand • reorder at {item.reorder_level}
+                    </p>
                   </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">Create Invoice</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Generate new invoice</p>
+                ))}
+                {(dashboardOverview?.inventory_alerts.expiring_items || []).map((item) => (
+                  <div key={item.id} className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-900/10 p-3">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{item.name}</p>
+                    <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                      Expires in {item.days_to_expiry} day{item.days_to_expiry === 1 ? '' : 's'}
+                    </p>
                   </div>
-                </button>
-                
-                <button className="w-full flex items-center space-x-3 p-4 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 text-left transition-colors">
-                  <div className="w-10 h-10 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl flex items-center justify-center">
-                    <CreditCard className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                ))}
+                {overviewInventoryAlertCount === 0 && (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">No current inventory alerts for this range.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Compazz Insights</h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">AI-style operational trends, anomalies, and recommendations.</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => navigate('/dashboard/ai-assistant')}>
+                  Open
+                </Button>
+              </div>
+              <div className="mt-5 space-y-4">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Highlights</p>
+                  <div className="space-y-2">
+                    {(dashboardOverview?.compazz_insights.highlights || []).map((insight, index) => (
+                      <div key={index} className="rounded-xl bg-gray-50 dark:bg-gray-900/40 p-3 text-sm text-gray-700 dark:text-gray-200">
+                        {insight}
+                      </div>
+                    ))}
                   </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">Add Expense</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Record new expense</p>
-                  </div>
-                </button>
-                
-                <button className="w-full flex items-center space-x-3 p-4 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 text-left transition-colors">
-                  <div className="w-10 h-10 bg-purple-50 dark:bg-purple-900/20 rounded-xl flex items-center justify-center">
-                    <BarChart3 className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">EOD Report</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">End of day summary</p>
-                  </div>
-                </button>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Recommended Actions</p>
+                  <ul className="space-y-2">
+                    {(dashboardOverview?.compazz_insights.recommendations || []).map((recommendation, index) => (
+                      <li key={index} className="rounded-xl border border-gray-100 dark:border-gray-700 p-3 text-sm text-gray-700 dark:text-gray-200">
+                        {recommendation}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             </div>
           </div>
         </div>
-
-        {/* Per-Outlet Breakdown */}
-        {canViewAllOutlets() && dashboardView.selectedOutlets.length > 1 && (
-          <div className="mt-12">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-8">Outlet Performance</h2>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                {dashboardView.selectedOutlets.length > 0 ? (
-                  dashboardView.selectedOutlets.map(outletId => {
-                    const outlet = userOutlets.find(o => o.id === outletId);
-                    if (!outlet) return null;
-
-                    const outletInvoices = dashboardInvoices.filter((invoice) => invoice.outlet_id === outletId);
-                    const outletOperatingExpenses = normalizeMoney(operatingExpensesByOutlet[outletId]);
-                    const outletPending = outletInvoices.filter((invoice) => {
-                      const paymentStatus = String(invoice.payment_status || invoice.status || '').toLowerCase();
-                      return paymentStatus !== 'paid';
-                    }).length;
-
-                    return (
-                      <div key={outlet.id} className="p-6 border border-gray-100 dark:border-gray-700 rounded-xl hover:shadow-sm transition-shadow">
-                        <div className="flex items-center justify-between mb-4">
-                          <div>
-                            <h4 className="font-semibold text-gray-900 dark:text-white">{outlet.name}</h4>
-                            <p className="text-xs text-gray-500 dark:text-gray-400 capitalize mt-1">
-                              {outlet.businessType}
-                            </p>
-                          </div>
-                          <div className="w-8 h-8 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center">
-                            <Building2 className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                          </div>
-                        </div>
-                        
-                        <div className="space-y-3">
-                          <div className="flex justify-between items-center">
-                            <span className="text-sm text-gray-600 dark:text-gray-400">Operating Spend</span>
-                            <span className="font-semibold text-gray-900 dark:text-white">
-                              {currencyService.formatCurrency(outletOperatingExpenses)}
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className="text-sm text-gray-600 dark:text-gray-400">Unpaid Invoices</span>
-                            <span className={`font-semibold ${
-                              outletPending > 0 
-                                ? 'text-orange-600 dark:text-orange-400' 
-                                : 'text-gray-900 dark:text-white'
-                            }`}>
-                              {outletPending}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="col-span-full text-center py-12">
-                    <Building2 className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-                    <p className="text-gray-500 dark:text-gray-400">
-                      Select outlets above to view performance breakdown
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
         </>
       )}

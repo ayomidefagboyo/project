@@ -134,6 +134,291 @@ def _allocate_transaction_amount_by_method(transaction: Dict[str, Any]) -> Dict[
     return {method: total_amount}
 
 
+def _parse_date_or_default(raw_value: Optional[str], fallback: date) -> date:
+    if not raw_value:
+        return fallback
+    return datetime.strptime(raw_value, "%Y-%m-%d").date()
+
+
+def _normalize_outlet_ids(raw_outlet_ids: Optional[str], current_user: Dict[str, Any]) -> List[str]:
+    parsed = [outlet_id.strip() for outlet_id in str(raw_outlet_ids or "").split(",") if outlet_id.strip()]
+    if parsed:
+        return parsed
+
+    fallback = str(current_user.get("outlet_id") or "").strip()
+    return [fallback] if fallback else []
+
+
+def _apply_outlet_filter(query, outlet_ids: List[str]):
+    if len(outlet_ids) == 1:
+        return query.eq("outlet_id", outlet_ids[0])
+    return query.in_("outlet_id", outlet_ids)
+
+
+def _get_dashboard_transactions(
+    supabase,
+    outlet_ids: List[str],
+    date_from: date,
+    date_to: date,
+) -> List[Dict[str, Any]]:
+    if not outlet_ids:
+        return []
+
+    query = (
+        supabase.table("pos_transactions")
+        .select(
+            "id,outlet_id,transaction_number,total_amount,tax_amount,discount_amount,payment_method,"
+            "split_payments,notes,transaction_date,cashier_name,status,is_voided,pos_transaction_items("
+            "product_id,product_name,quantity,line_total)"
+        )
+        .eq("status", "completed")
+        .neq("is_voided", True)
+        .gte("transaction_date", f"{date_from.isoformat()}T00:00:00")
+        .lte("transaction_date", f"{date_to.isoformat()}T23:59:59")
+    )
+    query = _apply_outlet_filter(query, outlet_ids)
+    result = query.order("transaction_date", desc=True).execute()
+    return result.data or []
+
+
+def _get_dashboard_inventory_products(supabase, outlet_ids: List[str]) -> List[Dict[str, Any]]:
+    if not outlet_ids:
+        return []
+
+    query = supabase.table(Tables.POS_PRODUCTS).select(
+        "id,outlet_id,name,quantity_on_hand,reorder_level,cost_price,unit_price,expiry_date,is_active"
+    )
+    query = _apply_outlet_filter(query, outlet_ids)
+    result = query.eq("is_active", True).execute()
+    return result.data or []
+
+
+def _build_dashboard_insights(
+    current_revenue: float,
+    previous_revenue: float,
+    low_stock_count: int,
+    out_of_stock_count: int,
+    top_products: List[Dict[str, Any]],
+    anomaly_count: int,
+) -> Dict[str, Any]:
+    highlights: List[str] = []
+    recommendations: List[str] = []
+
+    if previous_revenue > 0:
+        change_percent = ((current_revenue - previous_revenue) / abs(previous_revenue)) * 100
+        if change_percent >= 10:
+            highlights.append(f"Sales are up {change_percent:.1f}% versus the previous period.")
+        elif change_percent <= -10:
+            highlights.append(f"Sales are down {abs(change_percent):.1f}% versus the previous period.")
+
+    if low_stock_count > 0:
+        highlights.append(f"{low_stock_count} active products are below reorder level.")
+        recommendations.append("Review low-stock SKUs and raise replenishment orders for the fastest movers.")
+
+    if out_of_stock_count > 0:
+        highlights.append(f"{out_of_stock_count} products are already out of stock.")
+        recommendations.append("Prioritize stockouts first to protect immediate sales.")
+
+    if top_products:
+        lead_product = str(top_products[0].get("name") or "Top product")
+        highlights.append(f"{lead_product} is currently the strongest seller in the selected range.")
+
+    if anomaly_count > 0:
+        highlights.append(f"{anomaly_count} unresolved anomalies still need review.")
+        recommendations.append("Check Compazz Insights anomalies and resolve high-risk items.")
+
+    if not highlights:
+        highlights.append("Operations look stable for the selected range.")
+
+    if not recommendations:
+        recommendations.append("Keep monitoring top sellers, payments, and low-stock lines daily.")
+
+    return {
+        "highlights": highlights[:4],
+        "recommendations": recommendations[:3],
+        "anomaly_count": anomaly_count,
+    }
+
+
+@router.get("/dashboard-overview")
+async def get_dashboard_overview(
+    outlet_ids: Optional[str] = Query(None, description="Comma-separated outlet IDs"),
+    date_from: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: Dict[str, Any] = Depends(CurrentUser())
+):
+    """Aggregated admin dashboard payload with POS-first operational metrics."""
+    try:
+        supabase = get_supabase_admin()
+        resolved_outlet_ids = _normalize_outlet_ids(outlet_ids, current_user)
+        if not resolved_outlet_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No outlet specified"
+            )
+
+        today = date.today()
+        current_from = _parse_date_or_default(date_from, today)
+        current_to = _parse_date_or_default(date_to, today)
+        if current_to < current_from:
+            current_from, current_to = current_to, current_from
+
+        span_days = max(1, (current_to - current_from).days + 1)
+        previous_to = current_from - timedelta(days=1)
+        previous_from = previous_to - timedelta(days=span_days - 1)
+
+        current_transactions = _get_dashboard_transactions(supabase, resolved_outlet_ids, current_from, current_to)
+        previous_transactions = _get_dashboard_transactions(supabase, resolved_outlet_ids, previous_from, previous_to)
+        inventory_products = _get_dashboard_inventory_products(supabase, resolved_outlet_ids)
+
+        total_revenue = sum(float(tx.get("total_amount", 0) or 0) for tx in current_transactions)
+        total_transactions = len(current_transactions)
+        average_transaction = total_revenue / total_transactions if total_transactions > 0 else 0.0
+        previous_revenue = sum(float(tx.get("total_amount", 0) or 0) for tx in previous_transactions)
+
+        payment_breakdown = {
+            "cash": 0.0,
+            "pos": 0.0,
+            "transfer": 0.0,
+            "mobile": 0.0,
+            "credit": 0.0,
+        }
+        product_totals: Dict[str, Dict[str, float]] = {}
+        recent_transactions: List[Dict[str, Any]] = []
+
+        for index, tx in enumerate(current_transactions):
+            allocations = _allocate_transaction_amount_by_method(tx)
+            for method, amount in allocations.items():
+                if method not in payment_breakdown:
+                    payment_breakdown[method] = 0.0
+                payment_breakdown[method] += amount
+
+            if index < 8:
+                recent_transactions.append(
+                    {
+                        "id": tx.get("id"),
+                        "transaction_number": tx.get("transaction_number"),
+                        "outlet_id": tx.get("outlet_id"),
+                        "total_amount": float(tx.get("total_amount", 0) or 0),
+                        "payment_method": str(tx.get("payment_method") or "cash"),
+                        "transaction_date": tx.get("transaction_date"),
+                        "cashier_name": str(tx.get("cashier_name") or "Unknown"),
+                        "item_count": len(tx.get("pos_transaction_items") or []),
+                    }
+                )
+
+            for item in tx.get("pos_transaction_items") or []:
+                product_name = str(item.get("product_name") or "Unknown Product").strip() or "Unknown Product"
+                entry = product_totals.setdefault(product_name, {"quantity": 0.0, "revenue": 0.0})
+                entry["quantity"] += float(item.get("quantity", 0) or 0)
+                entry["revenue"] += float(item.get("line_total", 0) or 0)
+
+        top_products = [
+            {"name": name, "quantity": data["quantity"], "revenue": data["revenue"]}
+            for name, data in sorted(
+                product_totals.items(),
+                key=lambda item: item[1]["revenue"],
+                reverse=True,
+            )[:8]
+        ]
+
+        now = datetime.utcnow().date()
+        low_stock_items: List[Dict[str, Any]] = []
+        expiring_items: List[Dict[str, Any]] = []
+        out_of_stock_count = 0
+
+        for product in inventory_products:
+            quantity_on_hand = float(product.get("quantity_on_hand", 0) or 0)
+            reorder_level = float(product.get("reorder_level", 0) or 0)
+            if quantity_on_hand <= 0:
+                out_of_stock_count += 1
+
+            if reorder_level > 0 and quantity_on_hand <= reorder_level:
+                low_stock_items.append(
+                    {
+                        "id": product.get("id"),
+                        "name": product.get("name"),
+                        "outlet_id": product.get("outlet_id"),
+                        "quantity_on_hand": quantity_on_hand,
+                        "reorder_level": reorder_level,
+                    }
+                )
+
+            expiry_raw = str(product.get("expiry_date") or "").strip()
+            if expiry_raw:
+                try:
+                    expiry_date = datetime.fromisoformat(expiry_raw.replace("Z", "+00:00")).date()
+                except ValueError:
+                    try:
+                        expiry_date = datetime.strptime(expiry_raw[:10], "%Y-%m-%d").date()
+                    except ValueError:
+                        expiry_date = None
+                if expiry_date and now <= expiry_date <= now + timedelta(days=30):
+                    expiring_items.append(
+                        {
+                            "id": product.get("id"),
+                            "name": product.get("name"),
+                            "outlet_id": product.get("outlet_id"),
+                            "expiry_date": expiry_date.isoformat(),
+                            "days_to_expiry": (expiry_date - now).days,
+                        }
+                    )
+
+        anomaly_count = 0
+        try:
+            anomaly_query = supabase.table(Tables.ANOMALIES).select("id", count="exact").eq("resolved", False)
+            anomaly_query = _apply_outlet_filter(anomaly_query, resolved_outlet_ids)
+            anomaly_result = anomaly_query.execute()
+            anomaly_count = int(anomaly_result.count or 0)
+        except Exception as anomaly_error:
+            if not _is_missing_table_error(anomaly_error, Tables.ANOMALIES):
+                logger.warning("Failed to load anomalies for dashboard overview: %s", anomaly_error)
+
+        insights = _build_dashboard_insights(
+            current_revenue=total_revenue,
+            previous_revenue=previous_revenue,
+            low_stock_count=len(low_stock_items),
+            out_of_stock_count=out_of_stock_count,
+            top_products=top_products,
+            anomaly_count=anomaly_count,
+        )
+
+        return {
+            "outlet_ids": resolved_outlet_ids,
+            "date_range": {
+                "from": current_from.isoformat(),
+                "to": current_to.isoformat(),
+                "previous_from": previous_from.isoformat(),
+                "previous_to": previous_to.isoformat(),
+            },
+            "sales_summary": {
+                "revenue": round(total_revenue, 2),
+                "transaction_count": total_transactions,
+                "average_transaction_value": round(average_transaction, 2),
+                "previous_revenue": round(previous_revenue, 2),
+            },
+            "payment_breakdown": {key: round(value, 2) for key, value in payment_breakdown.items()},
+            "top_products": top_products,
+            "recent_transactions": recent_transactions,
+            "inventory_alerts": {
+                "low_stock_count": len(low_stock_items),
+                "out_of_stock_count": out_of_stock_count,
+                "expiring_count": len(expiring_items),
+                "low_stock_items": low_stock_items[:6],
+                "expiring_items": sorted(expiring_items, key=lambda item: item["days_to_expiry"])[:6],
+            },
+            "compazz_insights": insights,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating dashboard overview: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate dashboard overview: {str(e)}"
+        )
+
+
 # ===============================================
 # DAILY REPORT
 # ===============================================
