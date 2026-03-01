@@ -5,10 +5,11 @@ Daily, weekly, monthly summaries with sales, expenses, and profit breakdowns.
 
 from fastapi import APIRouter, HTTPException, Depends, status, Query
 from typing import Optional, Dict, Any, List
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, time, timedelta, timezone
 import logging
 import json
 import re
+from zoneinfo import ZoneInfo
 
 from app.core.database import get_supabase_admin, Tables
 from app.core.security import CurrentUser
@@ -154,6 +155,30 @@ def _parse_date_or_default(raw_value: Optional[str], fallback: date) -> date:
     return datetime.strptime(raw_value, "%Y-%m-%d").date()
 
 
+def _resolve_timezone(raw_timezone: Optional[str]) -> ZoneInfo:
+    candidate = str(raw_timezone or "").strip()
+    if candidate:
+        try:
+            return ZoneInfo(candidate)
+        except Exception:
+            logger.warning("Invalid dashboard timezone '%s'; falling back to UTC", candidate)
+    return ZoneInfo("UTC")
+
+
+def _local_date_range_to_utc_bounds(
+    date_from: date,
+    date_to: date,
+    timezone_name: Optional[str]
+) -> tuple[str, str]:
+    local_tz = _resolve_timezone(timezone_name)
+    start_local = datetime.combine(date_from, time.min, tzinfo=local_tz)
+    end_local_exclusive = datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=local_tz)
+    return (
+        start_local.astimezone(timezone.utc).isoformat(),
+        end_local_exclusive.astimezone(timezone.utc).isoformat(),
+    )
+
+
 def _normalize_outlet_ids(raw_outlet_ids: Optional[str], current_user: Dict[str, Any]) -> List[str]:
     parsed = [outlet_id.strip() for outlet_id in str(raw_outlet_ids or "").split(",") if outlet_id.strip()]
     if parsed:
@@ -174,9 +199,12 @@ def _get_dashboard_transactions(
     outlet_ids: List[str],
     date_from: date,
     date_to: date,
+    timezone_name: Optional[str],
 ) -> List[Dict[str, Any]]:
     if not outlet_ids:
         return []
+
+    utc_start, utc_end_exclusive = _local_date_range_to_utc_bounds(date_from, date_to, timezone_name)
 
     query = (
         supabase.table("pos_transactions")
@@ -186,8 +214,8 @@ def _get_dashboard_transactions(
             "product_id,product_name,quantity,line_total)"
         )
         .eq("status", "completed")
-        .gte("transaction_date", f"{date_from.isoformat()}T00:00:00")
-        .lte("transaction_date", f"{date_to.isoformat()}T23:59:59")
+        .gte("transaction_date", utc_start)
+        .lt("transaction_date", utc_end_exclusive)
     )
     query = _apply_outlet_filter(query, outlet_ids)
     result = query.order("transaction_date", desc=True).execute()
@@ -301,6 +329,7 @@ async def get_dashboard_overview(
     outlet_ids: Optional[str] = Query(None, description="Comma-separated outlet IDs"),
     date_from: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     date_to: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    timezone_name: Optional[str] = Query(None, alias="timezone", description="IANA timezone for date boundary calculations"),
     current_user: Dict[str, Any] = Depends(CurrentUser())
 ):
     """Aggregated admin dashboard payload with POS-first operational metrics."""
@@ -313,7 +342,8 @@ async def get_dashboard_overview(
                 detail="No outlet specified"
             )
 
-        today = date.today()
+        resolved_timezone = str(timezone_name or "").strip() or "UTC"
+        today = datetime.now(_resolve_timezone(resolved_timezone)).date()
         current_from = _parse_date_or_default(date_from, today)
         current_to = _parse_date_or_default(date_to, today)
         if current_to < current_from:
@@ -323,8 +353,20 @@ async def get_dashboard_overview(
         previous_to = current_from - timedelta(days=1)
         previous_from = previous_to - timedelta(days=span_days - 1)
 
-        current_transactions = _get_dashboard_transactions(supabase, resolved_outlet_ids, current_from, current_to)
-        previous_transactions = _get_dashboard_transactions(supabase, resolved_outlet_ids, previous_from, previous_to)
+        current_transactions = _get_dashboard_transactions(
+            supabase,
+            resolved_outlet_ids,
+            current_from,
+            current_to,
+            resolved_timezone,
+        )
+        previous_transactions = _get_dashboard_transactions(
+            supabase,
+            resolved_outlet_ids,
+            previous_from,
+            previous_to,
+            resolved_timezone,
+        )
         inventory_products = _get_dashboard_inventory_products(supabase, resolved_outlet_ids)
         recent_activity = _get_dashboard_recent_activity(supabase, resolved_outlet_ids)
 

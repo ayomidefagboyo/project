@@ -176,6 +176,7 @@ const Dashboard: React.FC = () => {
   const {
     currentUser,
     currentOutlet,
+    businessSettings,
     userOutlets,
     canViewAllOutlets,
     getAccessibleOutlets,
@@ -452,8 +453,12 @@ const Dashboard: React.FC = () => {
         const hasValidSelection =
           prev.selectedOutlets.length > 0 &&
           prev.selectedOutlets.every((outletId) => accessibleOutlets.includes(outletId));
+        const shouldSyncToCurrentOutlet =
+          Boolean(defaultOutletId) &&
+          prev.selectedOutlets.length === 1 &&
+          prev.selectedOutlets[0] !== defaultOutletId;
 
-        if (hasValidSelection) {
+        if (hasValidSelection && !shouldSyncToCurrentOutlet) {
           return prev;
         }
 
@@ -494,47 +499,100 @@ const Dashboard: React.FC = () => {
     }
   }, [currentUser, currentOutlet?.id, userOutlets.length, canViewAllOutlets]);
 
+  const getTimezoneDateParts = (source: Date, timezone: string) => {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const parts = formatter.formatToParts(source);
+    const lookup = (type: string) => parts.find((part) => part.type === type)?.value || '';
+    return {
+      year: Number(lookup('year') || 0),
+      month: Number(lookup('month') || 0),
+      day: Number(lookup('day') || 0),
+    };
+  };
+
+  const buildDateString = (year: number, month: number, day: number) => {
+    const paddedMonth = String(month).padStart(2, '0');
+    const paddedDay = String(day).padStart(2, '0');
+    return `${year}-${paddedMonth}-${paddedDay}`;
+  };
+
+  const asCivilDate = (year: number, month: number, day: number) => new Date(Date.UTC(year, month - 1, day));
+
+  const shiftCivilDate = (base: Date, dayOffset: number) => {
+    const shifted = new Date(base);
+    shifted.setUTCDate(shifted.getUTCDate() + dayOffset);
+    return shifted;
+  };
+
+  const getUtcCivilParts = (source: Date) => ({
+    year: source.getUTCFullYear(),
+    month: source.getUTCMonth() + 1,
+    day: source.getUTCDate(),
+  });
+
   // Date range calculation helper
-  const getDateRange = (range: string) => {
+  const getDateRange = (range: string, timezone: string) => {
     const now = new Date();
-    const today = now.toISOString().split('T')[0];
+    const todayParts = getTimezoneDateParts(now, timezone);
+    const todayCivil = asCivilDate(todayParts.year, todayParts.month, todayParts.day);
+    const today = buildDateString(todayParts.year, todayParts.month, todayParts.day);
 
     switch (range) {
       case 'today':
         return { from: today, to: today, label: 'Today' };
 
       case 'yesterday':
-        const yesterday = new Date(now);
-        yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayStr = yesterday.toISOString().split('T')[0];
+        const yesterday = shiftCivilDate(todayCivil, -1);
+        const yesterdayParts = getUtcCivilParts(yesterday);
+        const yesterdayStr = buildDateString(yesterdayParts.year, yesterdayParts.month, yesterdayParts.day);
         return { from: yesterdayStr, to: yesterdayStr, label: 'Yesterday' };
 
       case 'last_7_days':
-        const sevenDaysAgo = new Date(now);
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        return { from: sevenDaysAgo.toISOString().split('T')[0], to: today, label: 'Last 7 days' };
+        const sevenDaysAgo = shiftCivilDate(todayCivil, -7);
+        const sevenDaysAgoParts = getUtcCivilParts(sevenDaysAgo);
+        return {
+          from: buildDateString(sevenDaysAgoParts.year, sevenDaysAgoParts.month, sevenDaysAgoParts.day),
+          to: today,
+          label: 'Last 7 days'
+        };
 
       case 'last_30_days':
-        const thirtyDaysAgo = new Date(now);
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        return { from: thirtyDaysAgo.toISOString().split('T')[0], to: today, label: 'Last 30 days' };
+        const thirtyDaysAgo = shiftCivilDate(todayCivil, -30);
+        const thirtyDaysAgoParts = getUtcCivilParts(thirtyDaysAgo);
+        return {
+          from: buildDateString(thirtyDaysAgoParts.year, thirtyDaysAgoParts.month, thirtyDaysAgoParts.day),
+          to: today,
+          label: 'Last 30 days'
+        };
 
       case 'this_month':
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        return { from: monthStart.toISOString().split('T')[0], to: today, label: 'This month' };
+        return {
+          from: buildDateString(todayParts.year, todayParts.month, 1),
+          to: today,
+          label: 'This month'
+        };
 
       case 'last_month':
-        const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+        const lastMonthEnd = new Date(Date.UTC(todayParts.year, todayParts.month - 1, 0));
+        const lastMonthEndParts = getUtcCivilParts(lastMonthEnd);
         return {
-          from: lastMonthStart.toISOString().split('T')[0],
-          to: lastMonthEnd.toISOString().split('T')[0],
+          from: buildDateString(lastMonthEndParts.year, lastMonthEndParts.month, 1),
+          to: buildDateString(lastMonthEndParts.year, lastMonthEndParts.month, lastMonthEndParts.day),
           label: 'Last month'
         };
 
       case 'this_quarter':
-        const quarterStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
-        return { from: quarterStart.toISOString().split('T')[0], to: today, label: 'This quarter' };
+        const quarterMonthStart = Math.floor((todayParts.month - 1) / 3) * 3 + 1;
+        return {
+          from: buildDateString(todayParts.year, quarterMonthStart, 1),
+          to: today,
+          label: 'This quarter'
+        };
 
       case 'custom':
         return {
@@ -544,12 +602,16 @@ const Dashboard: React.FC = () => {
         };
 
       default:
-        const defaultMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        return { from: defaultMonthStart.toISOString().split('T')[0], to: today, label: 'This month' };
+        return { from: buildDateString(todayParts.year, todayParts.month, 1), to: today, label: 'This month' };
     }
   };
 
-  const currentDateRange = getDateRange(selectedDateRange);
+  const dashboardTimezone =
+    businessSettings?.timezone ||
+    currentOutlet?.timezone ||
+    Intl.DateTimeFormat().resolvedOptions().timeZone ||
+    'UTC';
+  const currentDateRange = getDateRange(selectedDateRange, dashboardTimezone);
 
   const getPreviousDateRange = (from: string, to: string) => {
     const fromDate = new Date(from);
@@ -795,6 +857,7 @@ const Dashboard: React.FC = () => {
         outlet_ids: outletIds.join(','),
         date_from: currentDateRange.from,
         date_to: currentDateRange.to,
+        timezone: dashboardTimezone,
       });
 
       if (response.error || !response.data) {
@@ -817,7 +880,7 @@ const Dashboard: React.FC = () => {
     if (dashboardView.selectedOutlets.length > 0) {
       loadDashboardData();
     }
-  }, [dashboardView.selectedOutlets, selectedDateRange, appliedCustomDateFrom, appliedCustomDateTo]);
+  }, [dashboardView.selectedOutlets, selectedDateRange, appliedCustomDateFrom, appliedCustomDateTo, dashboardTimezone]);
 
   // Check subscription status (Stripe-managed)
   const checkSubscriptionStatus = async () => {
