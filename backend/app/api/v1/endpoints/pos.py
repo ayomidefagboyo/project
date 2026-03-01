@@ -20,6 +20,7 @@ from app.core.security import CurrentUser
 from app.schemas.anomaly import AnomalyDetectionRequest
 from app.services.staff_service import StaffService
 from app.services.anomaly_service import anomaly_service
+from app.services.audit_service import build_audit_actor, insert_audit_entry
 from app.schemas.pos import (
     # Products
     POSProductCreate, POSProductUpdate, POSProductResponse,
@@ -57,6 +58,8 @@ PAYMENT_METHOD_VALUES = {method.value for method in PaymentMethod}
 POS_TRANSACTIONS_MISSING_COLUMNS: Set[str] = set()
 POS_AUDIT_VALID_USER_IDS: Set[str] = set()
 POS_AUDIT_INVALID_USER_IDS: Set[str] = set()
+POS_AUDIT_VALID_STAFF_PROFILE_IDS: Set[str] = set()
+POS_AUDIT_INVALID_STAFF_PROFILE_IDS: Set[str] = set()
 PURCHASE_ORDER_NOTE_MARKER = "[Purchase order: yes]"
 PURCHASE_ORDER_SOURCE_PREFIX = "[PO source:"
 PURCHASE_ORDER_DEPARTMENT_PREFIX = "[PO department:"
@@ -475,23 +478,45 @@ def _log_pos_audit_entry(
     action: str,
     entity_type: str,
     entity_id: str,
-    details: str
+    details: str,
+    staff_profile_id: Optional[str] = None,
+    actor_type: Optional[str] = None,
+    actor_role: Optional[str] = None,
+    auth_source: Optional[str] = None,
 ) -> None:
     """Best-effort audit writer for POS actions."""
     try:
-        resolved_user_name = str(user_name or "").strip() or "Unknown"
-        resolved_user_id = _resolve_pos_audit_user_id(supabase, user_id)
-        supabase.table(Tables.AUDIT_ENTRIES).insert({
-            "id": str(uuid.uuid4()),
-            "outlet_id": outlet_id,
-            "user_id": resolved_user_id,
-            "user_name": resolved_user_name,
-            "action": action,
-            "entity_type": entity_type,
-            "entity_id": entity_id,
-            "details": details,
-            "timestamp": datetime.utcnow().isoformat(),
-        }).execute()
+        raw_user_id = str(user_id or "").strip() or None
+        resolved_user_id = _resolve_pos_audit_user_id(supabase, raw_user_id)
+        resolved_staff_profile_id = _resolve_pos_audit_staff_profile_id(
+            supabase,
+            staff_profile_id,
+            None if resolved_user_id else raw_user_id,
+        )
+        actor = build_audit_actor(
+            {
+                "user_id": resolved_user_id,
+                "user_name": user_name,
+                "staff_profile_id": resolved_staff_profile_id,
+                "actor_type": actor_type,
+                "actor_role": actor_role,
+                "auth_source": auth_source,
+            }
+        )
+        insert_audit_entry(
+            supabase,
+            outlet_id=outlet_id,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            details=details,
+            user_id=actor.get("user_id"),
+            user_name=actor.get("user_name"),
+            staff_profile_id=actor.get("staff_profile_id"),
+            actor_type=actor.get("actor_type"),
+            actor_role=actor.get("actor_role"),
+            auth_source=actor.get("auth_source"),
+        )
     except Exception as audit_error:
         logger.warning(
             "Failed to write POS audit entry for %s %s (%s): %s",
@@ -534,6 +559,78 @@ def _resolve_pos_audit_user_id(supabase, user_id: Optional[str]) -> Optional[str
             lookup_error,
         )
         return None
+
+
+def _resolve_pos_audit_staff_profile_id(
+    supabase,
+    explicit_staff_profile_id: Optional[str],
+    fallback_candidate: Optional[str] = None,
+) -> Optional[str]:
+    candidates = []
+    explicit = str(explicit_staff_profile_id or "").strip()
+    fallback = str(fallback_candidate or "").strip()
+    if explicit:
+        candidates.append(explicit)
+    if fallback and fallback not in candidates:
+        candidates.append(fallback)
+
+    for candidate in candidates:
+        if candidate in POS_AUDIT_VALID_STAFF_PROFILE_IDS:
+            return candidate
+        if candidate in POS_AUDIT_INVALID_STAFF_PROFILE_IDS:
+            continue
+
+        try:
+            lookup = (
+                supabase.table(Tables.STAFF_PROFILES)
+                .select("id")
+                .eq("id", candidate)
+                .limit(1)
+                .execute()
+            )
+            if lookup.data:
+                POS_AUDIT_VALID_STAFF_PROFILE_IDS.add(candidate)
+                POS_AUDIT_INVALID_STAFF_PROFILE_IDS.discard(candidate)
+                return candidate
+
+            POS_AUDIT_INVALID_STAFF_PROFILE_IDS.add(candidate)
+        except Exception as lookup_error:
+            logger.warning(
+                "Failed to validate POS audit staff profile %s; writing audit entry without staff_profile_id: %s",
+                candidate,
+                lookup_error,
+            )
+            return None
+
+    return None
+
+
+def _resolve_staff_display_name(
+    supabase,
+    staff_profile_id: Optional[str],
+    fallback_name: Optional[str] = None,
+) -> str:
+    resolved_fallback = str(fallback_name or "").strip() or "Unknown"
+    candidate = str(staff_profile_id or "").strip()
+    if not candidate:
+        return resolved_fallback
+
+    try:
+        result = (
+            supabase.table(Tables.STAFF_PROFILES)
+            .select("display_name")
+            .eq("id", candidate)
+            .limit(1)
+            .execute()
+        )
+        if result.data:
+            display_name = str(result.data[0].get("display_name") or "").strip()
+            if display_name:
+                return display_name
+    except Exception as lookup_error:
+        logger.warning("Failed to resolve staff profile display name %s: %s", candidate, lookup_error)
+
+    return resolved_fallback
 
 
 def _schedule_auto_anomaly_detection(
@@ -2877,6 +2974,10 @@ async def void_transaction(
             outlet_id=str(transaction.get('outlet_id') or ''),
             user_id=actor_id,
             user_name=voider_name,
+            staff_profile_id=str(actor_context.get('staff_profile_id') or '').strip() or None,
+            actor_type='staff_profile' if actor_context.get('staff_profile_id') else 'user',
+            actor_role=str(actor_context.get('role') or '').strip() or None,
+            auth_source=str(actor_context.get('source') or current_user.get('auth_source') or '').strip() or None,
             action='void',
             entity_type='transaction',
             entity_id=transaction_id,
@@ -3278,6 +3379,10 @@ async def commit_stocktake(
             outlet_id=stocktake.outlet_id,
             user_id=actor_id,
             user_name=performed_by_name,
+            staff_profile_id=str(staff_profile_id or '').strip() or None,
+            actor_type='staff_profile' if staff_profile_id else 'user',
+            actor_role=str(actor_context.get('role') or '').strip() or None,
+            auth_source=str(actor_context.get('source') or current_user.get('auth_source') or '').strip() or None,
             action="create",
             entity_type="stocktake",
             entity_id=session_id,
@@ -3825,6 +3930,10 @@ async def create_inventory_transfer(
             outlet_id=transfer.from_outlet_id,
             user_id=performed_by,
             user_name=performed_by_name,
+            staff_profile_id=str(staff_profile_id or '').strip() or None,
+            actor_type='staff_profile' if staff_profile_id else 'user',
+            actor_role=str(actor_context.get('role') or '').strip() or None,
+            auth_source=str(actor_context.get('source') or current_user.get('auth_source') or '').strip() or None,
             action="transfer",
             entity_type="inventory_transfer",
             entity_id=transfer_id,
@@ -3835,6 +3944,10 @@ async def create_inventory_transfer(
             outlet_id=transfer.to_outlet_id,
             user_id=performed_by,
             user_name=performed_by_name,
+            staff_profile_id=str(staff_profile_id or '').strip() or None,
+            actor_type='staff_profile' if staff_profile_id else 'user',
+            actor_role=str(actor_context.get('role') or '').strip() or None,
+            auth_source=str(actor_context.get('source') or current_user.get('auth_source') or '').strip() or None,
             action="receive",
             entity_type="inventory_transfer",
             entity_id=transfer_id,
@@ -4989,6 +5102,10 @@ async def create_draft_purchase_orders(
                 outlet_id=payload.outlet_id,
                 user_id=str(current_user.get('id') or '').strip() or None,
                 user_name=current_user.get('staff_profile_name') or current_user.get('name') or current_user.get('email'),
+                staff_profile_id=str(current_user.get('staff_profile_id') or '').strip() or None,
+                actor_type='staff_profile' if current_user.get('staff_profile_id') else 'user',
+                actor_role=str(current_user.get('staff_role') or current_user.get('role') or '').strip() or None,
+                auth_source=str(current_user.get('auth_source') or '').strip() or None,
                 action='create',
                 entity_type='invoice',
                 entity_id=invoice_id,
@@ -5035,24 +5152,44 @@ async def create_draft_purchase_orders(
 @router.post("/held-receipts", response_model=HeldReceiptResponse)
 async def create_held_receipt(
     receipt: HeldReceiptCreate,
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
     current_user=Depends(CurrentUser())
 ):
     """Create a held receipt (put sale on hold)"""
     try:
         supabase = get_supabase_admin()
-        
-        # Get cashier name: POS uses staff_profile id, so try staff_profiles.display_name first, then users.name
-        cashier_name = "Cashier"
-        try:
-            staff_result = supabase.table(Tables.STAFF_PROFILES).select('display_name').eq('id', receipt.cashier_id).execute()
-            if staff_result.data and len(staff_result.data) > 0:
-                cashier_name = staff_result.data[0].get('display_name') or cashier_name
-            else:
-                user_result = supabase.table('users').select('name').eq('id', receipt.cashier_id).execute()
-                if user_result.data and len(user_result.data) > 0:
-                    cashier_name = user_result.data[0].get('name') or cashier_name
-        except Exception:
-            pass
+        actor_context = _resolve_staff_context(
+            supabase,
+            current_user,
+            receipt.outlet_id,
+            x_pos_staff_session,
+        )
+        actor_user_id = _resolve_actor_user_id(current_user)
+
+        cashier_id = str(
+            actor_context.get("staff_profile_id")
+            or receipt.cashier_id
+            or actor_user_id
+        ).strip()
+        cashier_name = _resolve_staff_display_name(
+            supabase,
+            actor_context.get("staff_profile_id"),
+            current_user.get("staff_profile_name") or current_user.get("name") or current_user.get("email") or "Cashier",
+        )
+
+        if not actor_context.get("staff_profile_id"):
+            try:
+                user_result = (
+                    supabase.table(Tables.USERS)
+                    .select("name")
+                    .eq("id", cashier_id)
+                    .limit(1)
+                    .execute()
+                )
+                if user_result.data:
+                    cashier_name = str(user_result.data[0].get("name") or cashier_name).strip() or cashier_name
+            except Exception:
+                pass
         
         # Prepare held receipt data (ensure JSON-serializable types)
         receipt_id = str(uuid.uuid4())
@@ -5075,7 +5212,7 @@ async def create_held_receipt(
         receipt_data = {
             'id': receipt_id,
             'outlet_id': receipt.outlet_id,
-            'cashier_id': receipt.cashier_id,
+            'cashier_id': cashier_id,
             'cashier_name': cashier_name,
             'items': items_json,
             'total': float(receipt.total),
@@ -5096,8 +5233,12 @@ async def create_held_receipt(
         _log_pos_audit_entry(
             supabase=supabase,
             outlet_id=receipt.outlet_id,
-            user_id=str(receipt.cashier_id),
+            user_id=actor_user_id,
             user_name=cashier_name,
+            staff_profile_id=str(actor_context.get("staff_profile_id") or "").strip() or None,
+            actor_type="staff_profile" if actor_context.get("staff_profile_id") else "user",
+            actor_role=str(actor_context.get("role") or "").strip() or None,
+            auth_source=str(actor_context.get("source") or current_user.get("auth_source") or "").strip() or None,
             action='hold',
             entity_type='held_receipt',
             entity_id=receipt_id,
@@ -5182,6 +5323,7 @@ async def get_held_receipt(
 @router.delete("/held-receipts/{receipt_id}")
 async def delete_held_receipt(
     receipt_id: str,
+    x_pos_staff_session: Optional[str] = Header(None, alias="X-POS-Staff-Session"),
     current_user=Depends(CurrentUser())
 ):
     """Delete a held receipt"""
@@ -5190,7 +5332,7 @@ async def delete_held_receipt(
         
         # Check if receipt exists
         check_result = supabase.table(Tables.POS_HELD_RECEIPTS)\
-            .select('id,outlet_id,cashier_name,total')\
+            .select('id,outlet_id,cashier_id,cashier_name,total')\
             .eq('id', receipt_id)\
             .execute()
         
@@ -5207,11 +5349,28 @@ async def delete_held_receipt(
             .execute()
 
         receipt_row = check_result.data[0]
+        outlet_id = str(receipt_row.get('outlet_id') or '').strip()
+        actor_context = _resolve_staff_context(
+            supabase,
+            current_user,
+            outlet_id,
+            x_pos_staff_session,
+        )
+        actor_user_id = _resolve_actor_user_id(current_user)
+        actor_name = _resolve_staff_display_name(
+            supabase,
+            actor_context.get("staff_profile_id"),
+            current_user.get("staff_profile_name") or current_user.get("name") or current_user.get("email") or "Unknown",
+        )
         _log_pos_audit_entry(
             supabase=supabase,
-            outlet_id=str(receipt_row.get('outlet_id') or ''),
-            user_id=str(current_user.get('id') or ''),
-            user_name=current_user.get('name') or current_user.get('email'),
+            outlet_id=outlet_id,
+            user_id=actor_user_id,
+            user_name=actor_name,
+            staff_profile_id=str(actor_context.get("staff_profile_id") or "").strip() or None,
+            actor_type="staff_profile" if actor_context.get("staff_profile_id") else "user",
+            actor_role=str(actor_context.get("role") or "").strip() or None,
+            auth_source=str(actor_context.get("source") or current_user.get("auth_source") or "").strip() or None,
             action='delete',
             entity_type='held_receipt',
             entity_id=receipt_id,
@@ -5644,6 +5803,10 @@ async def return_transaction(
             outlet_id=str(original_transaction.get('outlet_id') or ''),
             user_id=actor_id,
             user_name=processor_name,
+            staff_profile_id=str(actor_context.get('staff_profile_id') or '').strip() or None,
+            actor_type='staff_profile' if actor_context.get('staff_profile_id') else 'user',
+            actor_role=str(actor_context.get('role') or '').strip() or None,
+            auth_source=str(actor_context.get('source') or current_user.get('auth_source') or '').strip() or None,
             action='return',
             entity_type='transaction',
             entity_id=return_transaction_id,

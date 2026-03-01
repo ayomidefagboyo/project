@@ -1,0 +1,27 @@
+alter table if exists public.audit_entries
+    add column if not exists staff_profile_id uuid,
+    add column if not exists actor_type text,
+    add column if not exists actor_role text,
+    add column if not exists auth_source text;
+
+do $$
+begin
+    if not exists (
+        select 1
+        from pg_constraint
+        where conname = 'audit_entries_staff_profile_id_fkey'
+          and conrelid = 'public.audit_entries'::regclass
+    ) then
+        alter table public.audit_entries
+            add constraint audit_entries_staff_profile_id_fkey
+            foreign key (staff_profile_id)
+            references public.staff_profiles(id)
+            on delete set null;
+    end if;
+end $$;
+
+create index if not exists idx_audit_entries_staff_profile_id
+    on public.audit_entries (staff_profile_id);
+
+create index if not exists idx_audit_entries_actor_type
+    on public.audit_entries (actor_type);

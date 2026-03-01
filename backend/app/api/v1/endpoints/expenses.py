@@ -11,20 +11,11 @@ import logging
 
 from app.core.database import get_supabase_admin, Tables
 from app.core.security import CurrentUser
+from app.services.audit_service import build_audit_actor, insert_audit_entry
 from pydantic import BaseModel, Field
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-
-def _is_audit_user_fk_error(exc: Exception) -> bool:
-    """Detect audit_entries.user_id foreign-key failures."""
-    message = str(exc or "")
-    lowered = message.lower()
-    return (
-        "audit_entries_user_id_fkey" in lowered
-        or ("key (user_id)=" in lowered and "is not present in table \"users\"" in lowered)
-    )
 
 
 # ===============================================
@@ -458,28 +449,20 @@ async def get_expense_stats(
 def _log_audit(supabase, outlet_id: str, user: Dict, action: str, entity_type: str, entity_id: str, details: str):
     """Log an audit entry"""
     try:
-        payload = {
-            'id': str(uuid.uuid4()),
-            'outlet_id': outlet_id,
-            'user_id': str(user.get('id') or '').strip() or None,
-            'user_name': user.get('name', 'Unknown'),
-            'action': action,
-            'entity_type': entity_type,
-            'entity_id': entity_id,
-            'details': details,
-            'timestamp': datetime.utcnow().isoformat()
-        }
-        try:
-            supabase.table(Tables.AUDIT_ENTRIES).insert(payload).execute()
-        except Exception as audit_error:
-            if payload.get('user_id') and _is_audit_user_fk_error(audit_error):
-                logger.warning(
-                    "Expense audit user %s is missing from users; retrying audit entry without user_id",
-                    payload['user_id']
-                )
-                payload['user_id'] = None
-                supabase.table(Tables.AUDIT_ENTRIES).insert(payload).execute()
-                return
-            raise
+        actor = build_audit_actor(user)
+        insert_audit_entry(
+            supabase,
+            outlet_id=outlet_id,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            details=details,
+            user_id=actor.get('user_id'),
+            user_name=actor.get('user_name'),
+            staff_profile_id=actor.get('staff_profile_id'),
+            actor_type=actor.get('actor_type'),
+            actor_role=actor.get('actor_role'),
+            auth_source=actor.get('auth_source'),
+        )
     except Exception as e:
         logger.warning(f"Failed to log audit entry: {e}")

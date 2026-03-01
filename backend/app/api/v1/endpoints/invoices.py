@@ -18,21 +18,12 @@ from app.core.security import CurrentUser, get_user_outlet_id
 from app.schemas.anomaly import AnomalyDetectionRequest
 from app.services.anomaly_service import anomaly_service
 from app.services.staff_service import StaffService
+from app.services.audit_service import build_audit_actor, insert_audit_entry
 from pydantic import BaseModel, Field
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 MATERIAL_PRICE_CHANGE_THRESHOLD = 5000.0
-
-
-def _is_audit_user_fk_error(exc: Exception) -> bool:
-    """Detect audit_entries.user_id foreign-key failures."""
-    message = str(exc or "")
-    lowered = message.lower()
-    return (
-        "audit_entries_user_id_fkey" in lowered
-        or ("key (user_id)=" in lowered and "is not present in table \"users\"" in lowered)
-    )
 
 
 def _schedule_invoice_anomaly_detection(outlet_id: Optional[str], invoice_id: Optional[str], source_event: str) -> None:
@@ -95,6 +86,8 @@ def _resolve_invoice_audit_actor(
             'user_id': actor_user_id or None,
             'user_name': actor_name or 'Unknown',
             'staff_profile_id': staff_profile_id,
+            'actor_role': str(current_user.get('staff_role') or current_user.get('role') or '').strip() or None,
+            'auth_source': str(current_user.get('auth_source') or 'staff_session').strip() or 'staff_session',
         }
 
     token = str(staff_session_token or '').strip()
@@ -138,6 +131,8 @@ def _resolve_invoice_audit_actor(
         'user_id': actor_user_id or None,
         'user_name': actor_name or 'Unknown',
         'staff_profile_id': staff_profile_id or None,
+        'actor_role': str(current_user.get('staff_role') or current_user.get('role') or '').strip() or None,
+        'auth_source': str(current_user.get('auth_source') or ('staff_session' if staff_profile_id else 'api_user')).strip() or None,
     }
 
 
@@ -1658,33 +1653,20 @@ def _recalculate_invoice_totals(supabase, invoice_id: str):
 def _log_audit(supabase, outlet_id: str, user: Dict, action: str, entity_type: str, entity_id: str, details: str):
     """Log an audit entry"""
     try:
-        user_id = str(user.get('user_id') or user.get('id') or '').strip()
-        user_name = (
-            str(user.get('user_name') or user.get('name') or user.get('email') or 'Unknown').strip()
-            or 'Unknown'
+        actor = build_audit_actor(user)
+        insert_audit_entry(
+            supabase,
+            outlet_id=outlet_id,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            details=details,
+            user_id=actor.get('user_id'),
+            user_name=actor.get('user_name'),
+            staff_profile_id=actor.get('staff_profile_id'),
+            actor_type=actor.get('actor_type'),
+            actor_role=actor.get('actor_role'),
+            auth_source=actor.get('auth_source'),
         )
-        payload = {
-            'id': str(uuid.uuid4()),
-            'outlet_id': outlet_id,
-            'user_id': user_id or None,
-            'user_name': user_name,
-            'action': action,
-            'entity_type': entity_type,
-            'entity_id': entity_id,
-            'details': details,
-            'timestamp': datetime.utcnow().isoformat()
-        }
-        try:
-            supabase.table(Tables.AUDIT_ENTRIES).insert(payload).execute()
-        except Exception as audit_error:
-            if payload.get('user_id') and _is_audit_user_fk_error(audit_error):
-                logger.warning(
-                    "Invoice audit user %s is missing from users; retrying audit entry without user_id",
-                    payload['user_id']
-                )
-                payload['user_id'] = None
-                supabase.table(Tables.AUDIT_ENTRIES).insert(payload).execute()
-                return
-            raise
     except Exception as e:
         logger.warning(f"Failed to log audit entry: {e}")

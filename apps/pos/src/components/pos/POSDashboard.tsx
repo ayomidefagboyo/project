@@ -31,7 +31,7 @@ import { ToastContainer, useToast } from '../ui/Toast';
 import logger from '../../lib/logger';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
 import { useTerminalId } from '../../hooks/useTerminalId';
-import { getStaffSessionRaw, setStaffSessionRaw, clearStaffSession } from '../../lib/staffSessionStorage';
+import { getStaffSessionRaw, getParsedStaffSession, setStaffSessionRaw, clearStaffSession } from '../../lib/staffSessionStorage';
 import { consumeRefundExchangeIntent, type RefundExchangeIntentLine } from '../../lib/refundExchangeIntent';
 
 // Sub-components (we'll create these next)
@@ -1636,8 +1636,10 @@ const POSDashboard = forwardRef<POSDashboardHandle, POSDashboardProps>(({ termin
     if (!currentOutlet?.id || cart.length === 0 || !currentUser) return;
 
     const totals = calculateCartTotals();
-    const holdCashierId = currentStaff?.id || currentUser.id;
-    const holdCashierName = currentStaff?.display_name || currentUser.name || 'Cashier';
+    const persistedStaffProfile = getParsedStaffSession<{ staff_profile?: StaffProfile }>()?.staff_profile || null;
+    const effectiveStaff = currentStaff || persistedStaffProfile;
+    const holdCashierId = effectiveStaff?.id || currentUser.id;
+    const holdCashierName = effectiveStaff?.display_name || currentUser.name || 'Cashier';
 
     // Prepare items for backend - include full product data for restoration
     const items = cart.map(item => ({

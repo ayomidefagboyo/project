@@ -7,8 +7,12 @@ import { apiClient } from '@/lib/apiClient';
 interface AuditTrailEntry {
   id: string;
   outlet_id: string;
-  user_id: string;
+  user_id?: string | null;
+  staff_profile_id?: string | null;
   user_name: string;
+  actor_type?: string | null;
+  actor_role?: string | null;
+  auth_source?: string | null;
   action: string;
   entity_type: string;
   entity_id?: string | null;
