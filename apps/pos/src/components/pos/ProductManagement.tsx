@@ -73,6 +73,11 @@ const formatActionError = (error: unknown, fallback: string): string => {
   return fallback;
 };
 
+const toDateInputValue = (value?: string | null): string => {
+  const normalized = String(value || '').trim();
+  return normalized ? normalized.slice(0, 10) : '';
+};
+
 const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementProps>(({ onShowNewRow }, ref) => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -588,6 +593,9 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
         vendor_id: merged.vendor_id,
         image_url: merged.image_url,
         display_order: merged.display_order,
+        expiry_date: toDateInputValue(
+          typeof merged.expiry_date === 'string' ? merged.expiry_date : undefined
+        ) || undefined,
         base_unit_name: merged.base_unit_name || 'Unit',
         pack_enabled: packEnabled,
         pack_name: packEnabled ? (merged.pack_name || 'Pack') : undefined,
@@ -656,6 +664,9 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
         barcode: newProduct.barcode,
         markup_percentage: defaultMarkup,
         auto_pricing: autoPricingEnabled,
+        expiry_date: toDateInputValue(
+          typeof newProduct.expiry_date === 'string' ? newProduct.expiry_date : undefined
+        ) || undefined,
         base_unit_name: newProduct.base_unit_name || 'Unit',
         pack_enabled: packEnabled,
         pack_name: packEnabled ? (newProduct.pack_name || 'Pack') : undefined,
@@ -852,6 +863,11 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
         const packPriceValue = Number(draft.pack_price ?? product.pack_price ?? 0);
         const quantityValue = Number(draft.quantity_on_hand ?? product.quantity_on_hand ?? 0);
         const reorderLevelValue = Number(draft.reorder_level ?? product.reorder_level ?? 0);
+        const expiryDateValue = toDateInputValue(
+          typeof (draft.expiry_date ?? product.expiry_date) === 'string'
+            ? String(draft.expiry_date ?? product.expiry_date)
+            : undefined
+        );
         const isActiveValue =
           typeof draft.is_active === 'boolean' ? draft.is_active : product.is_active;
 
@@ -996,6 +1012,18 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                 />
               ) : (
                 product.reorder_level
+              )}
+            </td>
+            <td className="p-4">
+              {isEditing ? (
+                <input
+                  type="date"
+                  defaultValue={expiryDateValue}
+                  onBlur={(e) => handleCellEdit(product.id, 'expiry_date', e.target.value || undefined)}
+                  className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 text-sm"
+                />
+              ) : (
+                <span className="text-sm text-slate-600">{expiryDateValue || '—'}</span>
               )}
             </td>
             <td className="p-4 text-center">
@@ -1189,6 +1217,7 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                   <th className="text-right p-4 font-semibold text-slate-900">Pack Price</th>
                   <th className="text-right p-4 font-semibold text-slate-900">Stock</th>
                   <th className="text-right p-4 font-semibold text-slate-900">Reorder Level</th>
+                  <th className="text-left p-4 font-semibold text-slate-900">Expiry</th>
                   <th className="text-center p-4 font-semibold text-slate-900">Status</th>
                   <th className="w-16 p-4"></th>
                 </tr>
@@ -1275,6 +1304,16 @@ const ProductManagement = forwardRef<ProductManagementHandle, ProductManagementP
                         value={newProduct.reorder_level || ''}
                         onChange={(e) => handleNewProductChange('reorder_level', parseInt(e.target.value) || 0)}
                         className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 text-sm text-right"
+                      />
+                    </td>
+                    <td className="p-2">
+                      <input
+                        type="date"
+                        value={toDateInputValue(
+                          typeof newProduct.expiry_date === 'string' ? newProduct.expiry_date : undefined
+                        )}
+                        onChange={(e) => handleNewProductChange('expiry_date', e.target.value || undefined)}
+                        className="w-full px-2 py-1 border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 text-sm"
                       />
                     </td>
                     <td className="p-4 text-center">

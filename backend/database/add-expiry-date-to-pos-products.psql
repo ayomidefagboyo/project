@@ -1,0 +1,9 @@
+-- Add product-level expiry tracking for POS catalog rows.
+-- Safe to run multiple times.
+
+ALTER TABLE IF EXISTS public.pos_products
+  ADD COLUMN IF NOT EXISTS expiry_date DATE;
+
+CREATE INDEX IF NOT EXISTS idx_pos_products_expiry_date
+  ON public.pos_products(expiry_date)
+  WHERE expiry_date IS NOT NULL;

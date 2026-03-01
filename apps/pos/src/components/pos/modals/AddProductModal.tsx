@@ -56,6 +56,7 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
     min_stock_level: '',
     supplier_name: '',
     has_expiry: false,
+    expiry_date: '',
     shelf_life_days: '',
     description: ''
   });
@@ -115,6 +116,10 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
         ...prev,
         [name]: nextValue
       } as typeof prev;
+
+      if (name === 'has_expiry' && !nextValue) {
+        next.expiry_date = '';
+      }
 
       if (name === 'unit_price') {
         setUnitPriceManuallyEdited(true);
@@ -223,6 +228,7 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
         reorder_quantity: parseInt(formData.min_stock_level) || 0, // Set reorder quantity same as reorder level
         tax_rate: 0.075, // 7.5% VAT for Nigeria
         min_shelf_life_days: formData.has_expiry && formData.shelf_life_days ? parseInt(formData.shelf_life_days) : undefined,
+        expiry_date: formData.has_expiry && formData.expiry_date ? formData.expiry_date : undefined,
         sku: formData.barcode || `SKU-${Date.now()}`, // Generate SKU if not provided
         barcode: formData.barcode || undefined,
         markup_percentage: markup,
@@ -244,6 +250,7 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
         min_stock_level: '',
         supplier_name: '',
         has_expiry: false,
+        expiry_date: '',
         shelf_life_days: '',
         description: ''
       });
@@ -501,19 +508,33 @@ const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClose, onSu
 
           {/* Shelf Life (conditional) */}
           {formData.has_expiry && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Shelf Life (days)
-              </label>
-              <input
-                type="number"
-                name="shelf_life_days"
-                value={formData.shelf_life_days}
-                onChange={handleInputChange}
-                min="1"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="365"
-              />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Current Stock Expiry Date
+                </label>
+                <input
+                  type="date"
+                  name="expiry_date"
+                  value={formData.expiry_date}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Shelf Life (days)
+                </label>
+                <input
+                  type="number"
+                  name="shelf_life_days"
+                  value={formData.shelf_life_days}
+                  onChange={handleInputChange}
+                  min="1"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="365"
+                />
+              </div>
             </div>
           )}
 

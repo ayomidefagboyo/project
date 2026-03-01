@@ -217,6 +217,7 @@ class POSProductUpdate(BaseModel):
     vendor_id: Optional[str] = None
     image_url: Optional[str] = None
     display_order: Optional[int] = None
+    expiry_date: Optional[date] = None
     base_unit_name: Optional[str] = Field(None, max_length=30)
     pack_enabled: Optional[bool] = None
     pack_name: Optional[str] = Field(None, max_length=30)
