@@ -1038,6 +1038,8 @@ const Dashboard: React.FC = () => {
     (dashboardOverview?.inventory_alerts.low_stock_count || 0) +
     (dashboardOverview?.inventory_alerts.out_of_stock_count || 0) +
     (dashboardOverview?.inventory_alerts.expiring_count || 0);
+  const activeRangeLabel = currentDateRange.label;
+  const visibleTopProducts = (dashboardOverview?.top_products || []).slice(0, 4);
 
   const unpaidInvoices = dashboardInvoices.filter((invoice) => {
     const paymentStatus = String(invoice.payment_status || invoice.status || '').toLowerCase();
@@ -1372,7 +1374,7 @@ const Dashboard: React.FC = () => {
             title="Revenue"
             value={currencyService.formatCurrency(overviewSales)}
             icon={<TrendingUp className="w-5 h-5" />}
-            subtitle={`${currentDateRange.label}${isRefreshing ? ' • refreshing' : ''}`}
+            subtitle={`${activeRangeLabel}${isRefreshing ? ' • refreshing' : ''}`}
             change={salesChange}
             onClick={() => navigate('/dashboard/daily-reports')}
           />
@@ -1380,13 +1382,13 @@ const Dashboard: React.FC = () => {
             title="Transactions"
             value={overviewTransactionCount.toLocaleString()}
             icon={<Activity className="w-5 h-5" />}
-            subtitle="Completed sales in range"
+            subtitle={activeRangeLabel}
           />
           <DashboardCard
             title="Average Sale"
             value={currencyService.formatCurrency(overviewAverageTransaction)}
             icon={<CreditCard className="w-5 h-5" />}
-            subtitle="Average transaction value"
+            subtitle={activeRangeLabel}
           />
           <DashboardCard
             title="Inventory Alerts"
@@ -1402,38 +1404,11 @@ const Dashboard: React.FC = () => {
           <div className="lg:col-span-2">
             <div className="space-y-6">
               <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
-                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Sales Summary</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  Today's total revenue, transactions, and average transaction value for the selected period.
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-5">
-                  <div className="rounded-xl bg-gray-50 dark:bg-gray-900/40 p-4">
-                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Revenue</p>
-                    <p className="mt-2 text-xl font-semibold text-gray-900 dark:text-white">
-                      {currencyService.formatCurrency(overviewSales)}
-                    </p>
-                  </div>
-                  <div className="rounded-xl bg-gray-50 dark:bg-gray-900/40 p-4">
-                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Transactions</p>
-                    <p className="mt-2 text-xl font-semibold text-gray-900 dark:text-white">
-                      {overviewTransactionCount.toLocaleString()}
-                    </p>
-                  </div>
-                  <div className="rounded-xl bg-gray-50 dark:bg-gray-900/40 p-4">
-                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Average</p>
-                    <p className="mt-2 text-xl font-semibold text-gray-900 dark:text-white">
-                      {currencyService.formatCurrency(overviewAverageTransaction)}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4 sm:p-6">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Top Products</h2>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                      Best-selling items for the selected date range.
+                      Best-selling items for {activeRangeLabel.toLowerCase()}.
                     </p>
                   </div>
                   <Button variant="outline" size="sm" onClick={() => navigate('/dashboard/products')}>
@@ -1441,8 +1416,8 @@ const Dashboard: React.FC = () => {
                   </Button>
                 </div>
                 <div className="mt-5 space-y-3">
-                  {(dashboardOverview?.top_products || []).length > 0 ? (
-                    (dashboardOverview?.top_products || []).map((product, index) => (
+                  {visibleTopProducts.length > 0 ? (
+                    visibleTopProducts.map((product, index) => (
                       <div key={`${product.name}-${index}`} className="flex items-center justify-between gap-4 rounded-xl border border-gray-100 dark:border-gray-700 p-3">
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{product.name}</p>
