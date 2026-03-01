@@ -403,6 +403,44 @@ class POSService {
   }
 
   /**
+   * Fetch all products for an outlet using paginated API calls.
+   */
+  async getAllProducts(
+    outletId: string,
+    options: {
+      activeOnly?: boolean;
+      search?: string;
+      category?: string;
+    } = {}
+  ): Promise<POSProduct[]> {
+    const pageSize = 100;
+    let page = 1;
+    let items: POSProduct[] = [];
+
+    while (page <= 200) {
+      const response = await this.getProducts(outletId, {
+        page,
+        size: pageSize,
+        activeOnly: options.activeOnly,
+        search: options.search,
+        category: options.category,
+      });
+
+      const pageItems = response?.items || [];
+      items = items.concat(pageItems);
+
+      const total = response?.total || 0;
+      if (pageItems.length < pageSize || (total > 0 && items.length >= total)) {
+        break;
+      }
+
+      page += 1;
+    }
+
+    return items;
+  }
+
+  /**
    * Search products locally (Optimized for instant search)
    */
   async searchLocalProducts(outletId: string, query: string): Promise<POSProduct[]> {

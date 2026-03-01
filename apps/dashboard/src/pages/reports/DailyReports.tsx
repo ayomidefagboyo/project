@@ -16,7 +16,7 @@ import {
 import { Button } from '@/components/ui/Button';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { useOutlet } from '@/contexts/OutletContext';
-import { eodService } from '@/lib/services';
+import { eodService } from '@/lib/eodServiceNew';
 import type { EnhancedDailyReport } from '@/types';
 
 const getTodayValue = (): string => {

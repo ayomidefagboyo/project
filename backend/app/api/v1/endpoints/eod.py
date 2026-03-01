@@ -156,6 +156,7 @@ async def create_eod_report(
 async def get_eod_reports(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
+    outlet_id: Optional[str] = Query(None, description="Outlet ID"),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
@@ -163,7 +164,8 @@ async def get_eod_reports(
 ):
     """Get EOD reports"""
     try:
-        outlet_id = current_user.get('outlet_id')
+        if not outlet_id:
+            outlet_id = current_user.get('outlet_id')
         if not outlet_id:
             raise HTTPException(status_code=400, detail="No outlet specified")
 

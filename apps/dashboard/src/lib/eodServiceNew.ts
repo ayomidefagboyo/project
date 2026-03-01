@@ -179,13 +179,15 @@ class EODService {
     size: number = 20,
     dateFrom?: string,
     dateTo?: string,
-    status?: string
+    status?: string,
+    outletId?: string
   ): Promise<EODListResponse> {
     try {
       const params: any = { page, size };
       if (dateFrom) params.date_from = dateFrom;
       if (dateTo) params.date_to = dateTo;
       if (status) params.status = status;
+      if (outletId) params.outlet_id = outletId;
 
       const response = await apiClient.get('/eod/reports', params);
       
@@ -208,6 +210,38 @@ class EODService {
         total: 0,
         page,
         size
+      };
+    }
+  }
+
+  async getReports(outletId: string): Promise<{ data: EnhancedDailyReport[] | null; error: string | null }> {
+    try {
+      const pageSize = 100;
+      let page = 1;
+      let reports: EnhancedDailyReport[] = [];
+
+      while (page <= 200) {
+        const response = await this.listEODReports(page, pageSize, undefined, undefined, undefined, outletId);
+        if (response.error) {
+          return { data: null, error: response.error };
+        }
+
+        const pageItems = response.data || [];
+        reports = reports.concat(pageItems);
+
+        if (pageItems.length < pageSize || (response.total > 0 && reports.length >= response.total)) {
+          break;
+        }
+
+        page += 1;
+      }
+
+      return { data: reports, error: null };
+    } catch (error) {
+      console.error('Get EOD reports error:', error);
+      return {
+        data: null,
+        error: error instanceof Error ? error.message : 'Failed to load EOD reports',
       };
     }
   }
@@ -454,7 +488,6 @@ export type {
   EODStatsResponse, 
   EODSearchRequest 
 };
-
 
 
 
